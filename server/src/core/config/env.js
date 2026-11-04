@@ -21,6 +21,12 @@ const envSchema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   COOKIE_SECURE: z.enum(['true', 'false']).default('false'),
   COOKIE_SAME_SITE: z.enum(['strict', 'lax', 'none']).default('strict'),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().default('SE Admissions <noreply@se-admissions.local>'),
+  SMTP_SECURE: z.enum(['true', 'false']).default('false'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -42,6 +48,7 @@ export const config = Object.freeze({
   APP_ORIGIN: new URL(value.APP_ORIGIN).origin,
   DB_SSL: value.DB_SSL === 'true',
   COOKIE_SECURE: value.COOKIE_SECURE === 'true',
+  SMTP_SECURE: value.SMTP_SECURE === 'true',
   JWT_SECRET_BYTES: Buffer.from(value.JWT_SECRET, 'base64url'),
   REFRESH_TOKEN_TTL_MS: value.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
 });

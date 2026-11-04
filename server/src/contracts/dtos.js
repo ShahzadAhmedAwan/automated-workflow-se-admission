@@ -34,4 +34,12 @@ export const eventDtos = Object.freeze({
     r2Key: z.string().trim().min(1).max(1024),
     fileMime: z.enum(['image/jpeg', 'image/png', 'application/pdf']),
   }).strict(),
+  USER_WELCOME_EMAIL: z.object({
+    userId: z.string().uuid(),
+    email: z.string().email(),
+    displayName: z.string().trim().min(1),
+    role: z.string().min(1),
+    initialPassword: z.string().min(1),
+    loginUrl: z.string().url().optional(),
+  }).strict(),
 });

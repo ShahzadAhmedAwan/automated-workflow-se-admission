@@ -13,6 +13,7 @@ export const pool = mysql.createPool({
   enableKeepAlive: true,
   decimalNumbers: true,
   charset: 'utf8mb4',
+  timezone: 'Z',
   ...(config.DB_SSL ? { ssl: { rejectUnauthorized: true } } : {}),
 });
 

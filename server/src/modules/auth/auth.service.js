@@ -5,6 +5,18 @@ import { AppError } from '../../core/errors/app-error.js';
 import { logAudit } from '../../core/audit/audit-logger.js';
 import { createOpaqueToken, createAccessToken, digestToken } from '../../core/security/tokens.js';
 import { hashPassword, verifyPassword } from '../../core/security/password.js';
+import { dispatchJob, registerJobHandler } from '../../core/queue/outboxBus.js';
+import { EVENT_TYPES } from '../../contracts/event-types.js';
+import { sendUserWelcomeEmail } from '../../core/mail/mailer.js';
+
+// Register background outbox handler for welcome emails
+try {
+  registerJobHandler(EVENT_TYPES.USER_WELCOME_EMAIL, async (payload) => {
+    await sendUserWelcomeEmail(payload);
+  });
+} catch {
+  // Handler already registered in current process
+}
 
 const unauthorized = () => new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
 const dummyPasswordHash = hashPassword('InvalidAccountPassword8K');
@@ -56,7 +68,7 @@ async function sessionResponse(user, session) {
     accessToken,
     tokenType: 'Bearer',
     expiresIn: config.ACCESS_TOKEN_TTL_SECONDS,
-    user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role, permissions },
+    user: { id: user.id, email: user.email, displayName: user.display_name ?? user.displayName, role: user.role, permissions },
     ...session,
   };
 }
@@ -172,7 +184,7 @@ export async function revokeRefreshSession({ refreshToken, csrfToken, ipAddress 
 
 export async function getCurrentUser(userId, sessionId) {
   const [rows] = await pool.execute(
-    `SELECT u.id, u.email, u.display_name, u.token_version, r.name AS role
+    `SELECT u.id, u.email, u.display_name AS displayName, u.token_version, r.name AS role
        FROM sys_users u JOIN sys_auth_sessions s ON s.user_id = u.id
        JOIN sys_user_roles ur ON ur.user_id = u.id
        JOIN sys_roles r ON r.id = ur.role_id
@@ -181,7 +193,14 @@ export async function getCurrentUser(userId, sessionId) {
   );
   const user = rows[0];
   if (!user) throw new AppError(401, 'AUTHENTICATION_REQUIRED', 'Authentication is required.');
-  return { ...user, permissions: await getPermissions(userId) };
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+    permissions: await getPermissions(userId),
+    token_version: user.token_version,
+  };
 }
 
 export async function changePassword(userId, currentPassword, newPassword, ipAddress) {
@@ -231,6 +250,22 @@ export async function createUser(input, actorId, ipAddress) {
     );
     await connection.execute('INSERT INTO sys_user_roles (user_id, role_id) VALUES (?, ?)', [id, roles[0].id]);
     await logAudit({ connection, actorId, action: 'USER_CREATED', entityTable: 'sys_users', entityId: id, after: { email: input.email, role: input.role }, ipAddress });
+
+    // Enqueue transactional welcome email with assigned role and initial password
+    await dispatchJob({
+      connection,
+      queueName: 'email',
+      jobType: EVENT_TYPES.USER_WELCOME_EMAIL,
+      payload: {
+        userId: id,
+        email: input.email,
+        displayName: input.displayName,
+        role: input.role,
+        initialPassword: input.password,
+        loginUrl: config.APP_ORIGIN,
+      },
+    });
+
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -279,7 +314,7 @@ export async function updateUser(userId, changes, actorId, ipAddress) {
   try {
     await connection.beginTransaction();
     const [rows] = await connection.execute(
-      `SELECT u.id, u.email, u.is_active, r.name AS role
+      `SELECT u.id, u.email, u.display_name AS displayName, u.is_active, r.name AS role
          FROM sys_users u JOIN sys_user_roles ur ON ur.user_id = u.id
          JOIN sys_roles r ON r.id = ur.role_id WHERE u.id = ? FOR UPDATE`, [userId],
     );
@@ -287,7 +322,9 @@ export async function updateUser(userId, changes, actorId, ipAddress) {
     if (!before) throw new AppError(404, 'USER_NOT_FOUND', 'The user was not found.');
     const nextRole = changes.role ?? before.role;
     const nextActive = changes.isActive ?? Boolean(before.is_active);
-    if (before.role === 'SUPER_ADMIN' && (nextRole !== 'SUPER_ADMIN' || !nextActive)) {
+
+    // Only active super admins count toward the last-super-admin guard
+    if (before.is_active && before.role === 'SUPER_ADMIN' && (nextRole !== 'SUPER_ADMIN' || !nextActive)) {
       await connection.execute("SELECT id FROM sys_roles WHERE name = 'SUPER_ADMIN' FOR UPDATE");
       const [activeAdmins] = await connection.execute(
         `SELECT u.id FROM sys_users u
@@ -310,7 +347,7 @@ export async function updateUser(userId, changes, actorId, ipAddress) {
         'UPDATE sys_auth_sessions SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP(3)) WHERE user_id = ?', [userId],
       );
     }
-    after = { id: userId, email: before.email, role: nextRole, isActive: nextActive };
+    after = { id: userId, email: before.email, displayName: before.displayName, role: nextRole, isActive: nextActive };
     await logAudit({ connection, actorId, action: 'USER_UPDATED', entityTable: 'sys_users', entityId: userId, before, after, ipAddress });
     await connection.commit();
   } catch (error) {

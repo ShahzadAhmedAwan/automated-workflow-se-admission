@@ -3,6 +3,7 @@ import { AppError } from '../../core/errors/app-error.js';
 import { config } from '../../core/config/env.js';
 import { changePassword, createUser, getCurrentUser, listRoles, listUsers, login, revokeRefreshSession, rotateRefreshSession, updateUser } from './auth.service.js';
 import { CSRF_COOKIE, REFRESH_COOKIE } from './auth.constants.js';
+import { userIdSchema } from './auth.schemas.js';
 
 const cookieOptions = {
   httpOnly: true,
@@ -76,6 +77,7 @@ export async function changePasswordHandler(req, res) {
   const result = await changePassword(
     req.auth.userId, req.validatedBody.currentPassword, req.validatedBody.newPassword, req.ip,
   );
+  clearSessionCookies(res);
   res.json(result);
 }
 
@@ -90,7 +92,9 @@ export async function listUsersHandler(req, res) {
     throw new AppError(400, 'INVALID_QUERY', 'limit must be an integer from 1 to 100.');
   }
   const cursor = req.query.cursor ? String(req.query.cursor) : null;
-  if (cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) throw new AppError(400, 'INVALID_QUERY', 'cursor must be a user UUID.');
+  if (cursor && !userIdSchema.safeParse(cursor).success) {
+    throw new AppError(400, 'INVALID_QUERY', 'cursor must be a valid user UUID.');
+  }
   const users = await listUsers({ limit: limitValue, cursor });
   res.json({ users, nextCursor: users.length === limitValue ? users.at(-1).id : null });
 }

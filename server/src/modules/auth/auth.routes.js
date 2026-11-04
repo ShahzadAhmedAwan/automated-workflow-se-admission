@@ -12,6 +12,7 @@ router.use((_req, res, next) => {
   res.setHeader('Pragma', 'no-cache');
   next();
 });
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
@@ -19,11 +20,13 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again later.' } },
 });
+
 const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many requests. Try again later.' } },
 });
 
 function validateBody(schema) {
@@ -44,9 +47,18 @@ router.post('/change-password', authenticate, validateBody(changePasswordSchema)
 router.get('/users', authenticate, requirePermission(PERMISSIONS.USERS_MANAGE), listUsersHandler);
 router.get('/roles', authenticate, requirePermission(PERMISSIONS.USERS_MANAGE), listRolesHandler);
 router.post('/users', authenticate, requirePermission(PERMISSIONS.USERS_MANAGE), validateBody(createUserSchema), createUserHandler);
-router.patch('/users/:userId', authenticate, (req, _res, next) => {
-  if (!userIdSchema.safeParse(req.params.userId).success) return next(new AppError(400, 'INVALID_USER_ID', 'The user ID must be a UUID.'));
-  next();
-}, requirePermission(PERMISSIONS.USERS_MANAGE), validateBody(updateUserSchema), updateUserHandler);
+router.patch(
+  '/users/:userId',
+  authenticate,
+  requirePermission(PERMISSIONS.USERS_MANAGE),
+  (req, _res, next) => {
+    if (!userIdSchema.safeParse(req.params.userId).success) {
+      return next(new AppError(400, 'INVALID_USER_ID', 'The user ID must be a UUID.'));
+    }
+    next();
+  },
+  validateBody(updateUserSchema),
+  updateUserHandler,
+);
 
 export { router as authRoutes };

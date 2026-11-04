@@ -46,6 +46,14 @@ test('HTTP routes start, reject anonymous access, and enforce CSRF before touchi
     assert.equal(anonymous.status, 401);
     assert.equal((await anonymous.json()).error.code, 'AUTHENTICATION_REQUIRED');
 
+    const anonymousPatch = await fetch(`${baseUrl}/api/v1/auth/users/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ isActive: false }),
+    });
+    assert.equal(anonymousPatch.status, 401);
+    assert.equal((await anonymousPatch.json()).error.code, 'AUTHENTICATION_REQUIRED');
+
     const missingCsrf = await fetch(`${baseUrl}/api/v1/auth/refresh`, { method: 'POST' });
     assert.equal(missingCsrf.status, 403);
     assert.equal((await missingCsrf.json()).error.code, 'CSRF_VALIDATION_FAILED');

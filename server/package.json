@@ -1,0 +1,28 @@
+{
+  "name": "@se-admissions/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "db:setup": "node scripts/setup-database.js",
+    "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
+    "test": "node test/run.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jose": "^6.0.0",
+    "mysql2": "^3.14.0",
+    "node-cron": "^4.6.0",
+    "zod": "^4.0.0"
+  }
+}

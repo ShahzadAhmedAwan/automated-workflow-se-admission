@@ -1,0 +1,20 @@
+{
+  "name": "se-admissions-automation",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.19"
+  },
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev --workspace @se-admissions/client",
+    "dev:server": "npm run dev --workspace @se-admissions/server",
+    "build:client": "npm run build --workspace @se-admissions/client",
+    "db:setup": "npm run db:setup --workspace @se-admissions/server",
+    "auth:bootstrap-admin": "npm run auth:bootstrap-admin --workspace @se-admissions/server",
+    "test:auth": "npm run test --workspace @se-admissions/server"
+  }
+}

@@ -11,19 +11,28 @@
     "start": "node src/server.js",
     "db:setup": "node scripts/setup-database.js",
     "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
-    "test": "node test/run.js"
+    "test": "node test/run.js",
+    "whatsapp:import-auth": "node scripts/import-existing-whatsapp-auth.js",
+    "whatsapp:live": "node scripts/run_live_whatsapp.js",
+    "lead:reset": "node scripts/reset-lead.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "csv-parse": "^7.0.3",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "jose": "^6.0.0",
+    "multer": "^2.5.0",
     "mysql2": "^3.14.0",
     "node-cron": "^4.6.0",
     "nodemailer": "^10.3.1",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
     "zod": "^4.0.0"
   }
 }

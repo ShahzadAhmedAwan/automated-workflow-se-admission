@@ -41,7 +41,8 @@ export async function refreshSession() {
 export async function apiRequest(path, options = {}, authenticated = false) {
   const execute = () => {
     const headers = new Headers(options.headers ?? {});
-    if (options.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    if (options.body && !isFormData && !headers.has('content-type')) headers.set('content-type', 'application/json');
     if (authenticated && accessToken) headers.set('authorization', `Bearer ${accessToken}`);
     return fetch(`${API}${path}`, { ...options, headers, credentials: 'include' });
   };

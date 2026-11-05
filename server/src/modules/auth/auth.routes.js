@@ -32,7 +32,10 @@ const refreshLimiter = rateLimit({
 function validateBody(schema) {
   return (req, _res, next) => {
     const result = schema.safeParse(req.body);
-    if (!result.success) return next(new AppError(400, 'VALIDATION_ERROR', 'The request body is invalid.'));
+    if (!result.success) {
+      const detail = result.error.issues?.[0]?.message || 'The request body is invalid.';
+      return next(new AppError(400, 'VALIDATION_ERROR', detail));
+    }
     req.validatedBody = result.data;
     next();
   };

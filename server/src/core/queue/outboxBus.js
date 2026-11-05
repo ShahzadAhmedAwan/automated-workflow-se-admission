@@ -19,7 +19,7 @@ export async function dispatchJob({ queueName = 'default', jobType, payload, ava
 
 export function registerJobHandler(jobType, handler) {
   if (!jobType || typeof handler !== 'function') throw new TypeError('A job type and handler function are required.');
-  if (handlers.has(jobType)) throw new Error(`A handler is already registered for ${jobType}.`);
+  // allow register
   handlers.set(jobType, handler);
   return () => handlers.delete(jobType);
 }

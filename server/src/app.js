@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { config } from './core/config/env.js';
 import { authRoutes } from './modules/auth/index.js';
+import { marketingRoutes } from './modules/marketing/index.js';
 import { errorHandler, notFoundHandler } from './core/http/error-handler.js';
 import { pool } from './core/db/pool.js';
 
@@ -24,6 +25,7 @@ export function createApp() {
     } catch (error) { next(error); }
   });
   app.use(`${config.API_BASE_PATH}/auth`, authRoutes);
+  app.use(`${config.API_BASE_PATH}/marketing`, marketingRoutes);
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

@@ -16,7 +16,7 @@ export function clearSentEmails() {
 export function getTransporter() {
   if (transporter) return transporter;
 
-  if (config.SMTP_HOST) {
+  if (process.env.NODE_ENV !== 'test' && config.SMTP_HOST) {
     transporter = nodemailer.createTransport({
       host: config.SMTP_HOST,
       port: config.SMTP_PORT,

@@ -1,7 +1,15 @@
 import { createApp } from './app.js';
 import { config } from './core/config/env.js';
 import { closePool } from './core/db/pool.js';
-import { startOutboxWorker } from './core/queue/outboxBus.js';
+import { startOutboxWorker, registerJobHandler } from './core/queue/outboxBus.js';
+import { EVENT_TYPES } from './contracts/event-types.js';
+import { sendUserWelcomeEmail } from './core/mail/mailer.js';
+
+// Register background handlers for the Outbox worker
+registerJobHandler(EVENT_TYPES.USER_WELCOME_EMAIL, async (payload) => {
+  await sendUserWelcomeEmail(payload);
+  console.info(`[Email Worker] Delivered welcome email to ${payload.email}`);
+});
 
 const app = createApp();
 const stopOutboxWorker = startOutboxWorker();

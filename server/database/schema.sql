@@ -160,3 +160,57 @@ INSERT IGNORE INTO sys_role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM sys_roles r JOIN sys_permissions p ON p.name IN (
   'audit.read', 'merit.read', 'candidates.read'
 ) WHERE r.name = 'AUDITOR';
+
+
+-- ============================================================================
+-- MODULE 2: Marketing & Lead Intake Slice
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS mkt_campaigns (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(150) NOT NULL,
+  description VARCHAR(500) NULL,
+  status ENUM('DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED') NOT NULL DEFAULT 'DRAFT',
+  total_leads INT UNSIGNED NOT NULL DEFAULT 0,
+  sent_count INT UNSIGNED NOT NULL DEFAULT 0,
+  responded_count INT UNSIGNED NOT NULL DEFAULT 0,
+  eligible_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_by CHAR(36) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mkt_campaigns_status (status, created_at),
+  KEY ix_mkt_campaigns_creator (created_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mkt_leads (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  campaign_id BIGINT UNSIGNED NULL,
+  full_name VARCHAR(200) NOT NULL,
+  phone_raw VARCHAR(40) NOT NULL,
+  phone_normalized VARCHAR(20) NOT NULL,
+  city VARCHAR(120) NULL,
+  prior_degree VARCHAR(80) NULL,
+  fsc_marks INT UNSIGNED NULL,
+  has_maths BOOLEAN NULL,
+  eligibility_status ENUM('PENDING', 'ELIGIBLE', 'INELIGIBLE') NOT NULL DEFAULT 'PENDING',
+  ineligibility_reason VARCHAR(100) NULL,
+  conversation_state ENUM(
+    'IDLE',
+    'GREETING_SENT',
+    'AWAITING_INTEREST',
+    'AWAITING_MARKS',
+    'AWAITING_MATHS',
+    'QUALIFIED',
+    'NOT_INTERESTED'
+  ) NOT NULL DEFAULT 'IDLE',
+  chat_history JSON NULL,
+  last_interaction_at TIMESTAMP(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mkt_leads_campaign (campaign_id, eligibility_status),
+  KEY ix_mkt_leads_phone (phone_normalized),
+  KEY ix_mkt_leads_state (conversation_state),
+  CONSTRAINT fk_mkt_leads_campaign FOREIGN KEY (campaign_id) REFERENCES mkt_campaigns(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

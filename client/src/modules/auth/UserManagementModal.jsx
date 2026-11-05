@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { userManagementApi } from './userManagementApi.js';
 import { IconClose, IconPlus, IconRefresh, IconCheck } from '../../core/icons/Icons.jsx';
+import { Button } from '../../core/ui/primitives.jsx';
 
 // Four system roles defined in Module 1 implementation plan
 const SYSTEM_ROLES = [
@@ -8,25 +9,25 @@ const SYSTEM_ROLES = [
     name: 'SUPER_ADMIN',
     label: 'Super Admin',
     badge: 'bg-purple-50 text-purple-700 border-purple-200',
-    description: 'Full system access, staff management, and locked merit snapshot control.',
+    description: 'Full access, including staff accounts.',
   },
   {
     name: 'ADMISSION_OFFICER',
     label: 'Admission Officer',
     badge: 'bg-blue-50 text-blue-700 border-blue-200',
-    description: 'Manages marketing outreach campaigns, intake policies, and merit calculations.',
+    description: 'Manages campaigns and admissions settings.',
   },
   {
     name: 'VERIFIER',
     label: 'Document Verifier',
     badge: 'bg-amber-50 text-amber-800 border-amber-200',
-    description: 'Reviews candidate marksheet documents, OCR extractions, and reissues intake tokens.',
+    description: 'Reviews applicant documents and marks.',
   },
   {
     name: 'AUDITOR',
     label: 'Auditor',
     badge: 'bg-slate-100 text-slate-700 border-slate-200',
-    description: 'Read-only access to immutable audit history, merit lists, and candidate files.',
+    description: 'Can view records and reports but cannot make changes.',
   },
 ];
 
@@ -62,7 +63,7 @@ export function UserManagementModal({ isOpen, onClose }) {
         // Merge descriptions with our defined roles
         const merged = SYSTEM_ROLES.map((sr) => {
           const apiMatch = rList.find((r) => r.name === sr.name);
-          return apiMatch ? { ...sr, description: apiMatch.description || sr.description } : sr;
+          return apiMatch ? { ...sr, description: sr.description } : sr;
         });
         setRoles(merged);
       }
@@ -87,13 +88,13 @@ export function UserManagementModal({ isOpen, onClose }) {
         role: selectedRole,
       });
 
-      setSuccess(`Account provisioned successfully for ${displayName} as ${selectedRole.replaceAll('_', ' ')}. Welcome email dispatched.`);
+      setSuccess(`Staff account created for ${displayName}.`);
       setEmail('');
       setDisplayName('');
       setPassword('');
       await loadData();
     } catch (err) {
-      setError(err.message || 'Failed to provision staff account.');
+      setError(err.message || 'Could not create staff account.');
     } finally {
       setSubmitting(false);
     }
@@ -115,25 +116,27 @@ export function UserManagementModal({ isOpen, onClose }) {
   const currentRoleInfo = roles.find((r) => r.name === selectedRole) || roles[0];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white border border-slate-200 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-2 backdrop-blur-sm sm:p-4">
+      <div className="flex max-h-[min(92vh,900px)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200 bg-slate-50/75">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/80 px-4 py-4 sm:px-6 sm:py-5">
           <div>
-            <span className="text-xs font-semibold tracking-wider text-blue-700 uppercase">Super Admin Access</span>
-            <h2 className="text-lg font-bold text-slate-900 mt-0.5">Staff & Role-Based Access Control (RBAC)</h2>
+            <span className="text-xs font-semibold tracking-wider text-blue-700 uppercase">Staff management</span>
+            <h2 className="mt-1 text-base font-bold text-slate-900 sm:text-lg">Staff accounts</h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-200 transition cursor-pointer"
+            aria-label="Close staff management"
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-200 hover:text-slate-700"
           >
             <IconClose className="w-5 h-5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto bg-slate-50/30">
+        <div className="flex-1 space-y-5 overflow-y-auto bg-slate-50/40 p-3 sm:space-y-6 sm:p-6">
           {error && (
             <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
               {error}
@@ -149,12 +152,12 @@ export function UserManagementModal({ isOpen, onClose }) {
 
           {/* Form: Provision New User */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-              <IconPlus className="w-4 h-4 text-blue-600" /> Provision New Staff Account
+            <h3 className="text-xs font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <IconPlus className="w-4 h-4 text-blue-600" /> Add a staff member
             </h3>
             <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Staff Full Name</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Name</label>
                 <input
                   type="text"
                   required
@@ -166,7 +169,7 @@ export function UserManagementModal({ isOpen, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Official Email Address</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Work email</label>
                 <input
                   type="email"
                   required
@@ -178,22 +181,22 @@ export function UserManagementModal({ isOpen, onClose }) {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Temporary Password</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Temporary password</label>
                 <input
                   type="password"
                   required
-                  placeholder="Min 12 chars, 1 uppercase, 1 lowercase, 1 digit"
+                  placeholder="Create a temporary password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-lg bg-white border border-slate-300 text-slate-900 placeholder-slate-400 text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none"
                 />
                 <span className="text-[11px] text-slate-400 mt-1 block">
-                  Password policy: Minimum 12 characters, including at least one uppercase, one lowercase, and one number.
+                  Use 12+ characters with an uppercase letter, lowercase letter, and number.
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Assigned System Role</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Role</label>
                 <select
                   value={selectedRole}
                   onChange={(e) => setSelectedRole(e.target.value)}
@@ -201,7 +204,7 @@ export function UserManagementModal({ isOpen, onClose }) {
                 >
                   {roles.map((r) => (
                     <option key={r.name} value={r.name}>
-                      {r.name.replaceAll('_', ' ')} — {r.name === 'SUPER_ADMIN' ? 'Full System Authority' : r.name === 'ADMISSION_OFFICER' ? 'Campaigns & Policies' : r.name === 'VERIFIER' ? 'Document Verification' : 'Read-Only Audit'}
+                      {r.label}
                     </option>
                   ))}
                 </select>
@@ -209,19 +212,19 @@ export function UserManagementModal({ isOpen, onClose }) {
 
               {/* Role Scope Description Callout */}
               <div className="md:col-span-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 flex items-start gap-2.5">
-                <span className="font-bold text-slate-800 shrink-0">Role Permissions:</span>
+                <span className="font-bold text-slate-800 shrink-0">Access:</span>
                 <span>{currentRoleInfo?.description}</span>
               </div>
 
               <div className="md:col-span-2 flex justify-end pt-1">
-                <button
+                <Button
                   type="submit"
                   disabled={submitting}
-                  className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition shadow-xs disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                  className="min-h-10 px-5"
                 >
-                  <IconPlus className="w-4 h-4" />
-                  <span>{submitting ? 'Provisioning...' : 'Provision Staff Member'}</span>
-                </button>
+                  <IconPlus className="size-4" />
+                  {submitting ? 'Creating…' : 'Create staff account'}
+                </Button>
               </div>
             </form>
           </div>
@@ -229,19 +232,19 @@ export function UserManagementModal({ isOpen, onClose }) {
           {/* User Directory Table */}
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
             <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              <h3 className="text-xs font-bold text-slate-800">
                 Staff Members ({users.length})
               </h3>
               <button
                 onClick={loadData}
                 className="text-xs text-slate-600 hover:text-blue-600 flex items-center gap-1.5 transition font-medium cursor-pointer"
               >
-                <IconRefresh className="w-3.5 h-3.5" /> Reload Directory
+                <IconRefresh className="w-3.5 h-3.5" /> Refresh list
               </button>
             </div>
 
             {loading ? (
-              <div className="p-8 text-center text-slate-500 text-sm">Loading staff directory...</div>
+              <div className="p-8 text-center text-slate-500 text-sm">Loading staff…</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-700">
@@ -264,7 +267,7 @@ export function UserManagementModal({ isOpen, onClose }) {
                           </td>
                           <td className="px-5 py-3.5">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-semibold border ${roleMeta?.badge || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                              {u.role.replaceAll('_', ' ')}
+                              {roleMeta?.label || u.role.replaceAll('_', ' ')}
                             </span>
                           </td>
                           <td className="px-5 py-3.5">
@@ -292,10 +295,11 @@ export function UserManagementModal({ isOpen, onClose }) {
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+        <div className="flex justify-end border-t border-slate-200 bg-slate-50 px-4 py-3 sm:px-6 sm:py-4">
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-medium transition cursor-pointer"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
           >
             Close
           </button>

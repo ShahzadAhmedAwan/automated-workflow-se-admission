@@ -5,6 +5,7 @@ import { changePasswordHandler, createUserHandler, listRolesHandler, listUsersHa
 import { changePasswordSchema, createUserSchema, loginSchema, updateUserSchema, userIdSchema } from './auth.schemas.js';
 import { PERMISSIONS } from './auth.constants.js';
 import { AppError } from '../../core/errors/app-error.js';
+import { config } from '../../core/config/env.js';
 
 const router = Router();
 router.use((_req, res, next) => {
@@ -15,7 +16,7 @@ router.use((_req, res, next) => {
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: config.NODE_ENV === 'development' ? 60 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'RATE_LIMITED', message: 'Too many sign-in attempts. Try again later.' } },

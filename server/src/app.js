@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { randomUUID } from 'node:crypto';
 import { config } from './core/config/env.js';
 import { authRoutes } from './modules/auth/index.js';
 import { marketingRoutes } from './modules/marketing/index.js';
@@ -11,6 +12,11 @@ import { pool } from './core/db/pool.js';
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    req.requestId = randomUUID();
+    res.setHeader('X-Request-ID', req.requestId);
+    next();
+  });
   if (config.TRUST_PROXY_HOPS > 0) app.set('trust proxy', config.TRUST_PROXY_HOPS);
   app.use(helmet());
   app.use(cors({ origin: config.APP_ORIGIN, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'] }));

@@ -29,6 +29,7 @@ export async function claimJobs({ batchSize = 5, lockOwner = randomUUID(), stale
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    // Lock the rows through the status update; omit SKIP LOCKED for MariaDB compatibility.
     const [rows] = await connection.query(
       `SELECT id, queue_name, job_type, payload, attempts
          FROM outbox_jobs
@@ -36,7 +37,7 @@ export async function claimJobs({ batchSize = 5, lockOwner = randomUUID(), stale
            OR (status = 'PROCESSING' AND locked_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL ? SECOND)))
           AND job_type IN (${jobTypes.map(() => '?').join(', ')})
         ORDER BY available_at, id
-        LIMIT ? FOR UPDATE SKIP LOCKED`,
+        LIMIT ? FOR UPDATE`,
       [staleAfterSeconds, ...jobTypes, batchSize],
     );
     for (const row of rows) {

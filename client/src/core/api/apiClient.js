@@ -2,6 +2,16 @@ const API = '/api/v1';
 let accessToken = null;
 let refreshPromise = null;
 
+export class ApiError extends Error {
+  constructor(message, { code = 'API_ERROR', status = 0, requestId = null } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.status = status;
+    this.requestId = requestId;
+  }
+}
+
 export function setAccessToken(token) {
   accessToken = token;
 }
@@ -14,7 +24,29 @@ function readCsrfCookie() {
 
 async function decodeResponse(response) {
   if (response.status === 204) return null;
-  return response.json().catch(() => ({}));
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+  if (!contentType.includes('application/json')) {
+    const message = import.meta.env.DEV
+      ? `The API returned an unexpected response (HTTP ${response.status}). Make sure npm run dev:server is running.`
+      : 'The sign-in service returned an invalid response. Try again later.';
+    return {
+      error: { code: 'INVALID_API_RESPONSE', message },
+      requestId: response.headers.get('x-request-id'),
+    };
+  }
+  try {
+    return await response.json();
+  } catch {
+    return {
+      error: { code: 'INVALID_API_RESPONSE', message: 'The API returned invalid JSON. Check the server terminal.' },
+      requestId: response.headers.get('x-request-id'),
+    };
+  }
+}
+
+function apiUnavailableError() {
+  const hint = import.meta.env.DEV ? ' Start the API with npm run dev:server, then try again.' : ' Try again later.';
+  return new ApiError(`The sign-in service cannot be reached.${hint}`, { code: 'API_UNAVAILABLE' });
 }
 
 export async function refreshSession() {
@@ -22,11 +54,17 @@ export async function refreshSession() {
   const csrf = readCsrfCookie();
   if (!csrf) { accessToken = null; return null; }
   refreshPromise = (async () => {
-    const response = await fetch(`${API}/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'x-csrf-token': csrf },
-    });
+    let response;
+    try {
+      response = await fetch(`${API}/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'x-csrf-token': csrf },
+      });
+    } catch {
+      accessToken = null;
+      return null;
+    }
     const body = await decodeResponse(response);
     if (!response.ok) { accessToken = null; return null; }
     accessToken = body.accessToken;
@@ -47,12 +85,23 @@ export async function apiRequest(path, options = {}, authenticated = false) {
     return fetch(`${API}${path}`, { ...options, headers, credentials: 'include' });
   };
 
-  let response = await execute();
+  let response;
+  try {
+    response = await execute();
+  } catch {
+    throw apiUnavailableError();
+  }
   if (authenticated && response.status === 401 && path !== '/auth/refresh') {
     const refreshed = await refreshSession();
     if (refreshed) response = await execute();
   }
   const body = await decodeResponse(response);
-  if (!response.ok) throw new Error(body?.error?.message ?? 'The request could not be completed.');
+  if (!response.ok) {
+    throw new ApiError(body?.error?.message ?? `The request failed (HTTP ${response.status}).`, {
+      code: body?.error?.code ?? 'REQUEST_FAILED',
+      status: response.status,
+      requestId: body?.requestId ?? response.headers.get('x-request-id'),
+    });
+  }
   return body;
 }

@@ -64,6 +64,15 @@ marketingRoutes.post(
   CampaignController.triggerOutreach
 );
 
+// Broadcast outreach to numbers file
+marketingRoutes.post(
+  '/broadcast',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  upload.single('file'),
+  CampaignController.broadcastNumbers
+);
+
 // Incoming WhatsApp webhook (simulated or connected from Baileys)
 marketingRoutes.post(
   '/webhook/incoming-message',

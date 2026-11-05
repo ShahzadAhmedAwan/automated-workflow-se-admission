@@ -109,7 +109,7 @@ async function startWhatsAppBot() {
           messageBody: rawText,
         }, pool);
 
-        console.log(`🤖 Lead State: [${turnResult.state}] | Reply: "${turnResult.reply}"`);
+        console.log(`🤖 Lead State: [${turnResult.state}] | Eligible For: [${turnResult.eligibleFor || 'N/A'}] | Reply: "${turnResult.reply}"`);
 
         // Send reply directly back to applicant
         await sock.sendMessage(jid, { text: turnResult.reply });

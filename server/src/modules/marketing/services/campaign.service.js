@@ -1,8 +1,10 @@
+import fs from 'node:fs';
 import { pool } from '../../../core/db/pool.js';
 import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
 import { CAMPAIGN_STATUS, CONVERSATION_STATE } from '../marketing.constants.js';
 import { AppError } from '../../../core/errors/app-error.js';
+import { normalizePhoneNumber } from './csv-parser.service.js';
 
 export class CampaignService {
   /**
@@ -182,7 +184,7 @@ export class CampaignService {
       );
 
       const defaultGreeting = (name) =>
-        `Assalam-o-Alaikum ${name}! Are you interested in Software Engineering admissions for Fall 2026? (Reply Yes/No)`;
+        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK). Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, or fee structure? (Reply *Yes* to apply, or ask any question!)`;
 
       let scheduledCount = 0;
 
@@ -262,6 +264,151 @@ export class CampaignService {
   }
 
   /**
+   * Broadcast automated outreach text to a list of phone numbers from a text file or buffer
+   */
+  static async broadcastToNumbersFile(fileContentOrPath, options = {}, db = pool) {
+    const {
+      jitterMinSeconds = 12,
+      jitterMaxSeconds = 28,
+      allowedStartHour = 9,
+      allowedEndHour = 20,
+      customMessage = null,
+      campaignId = null,
+      now = new Date(),
+    } = options;
+
+    let textContent = '';
+    if (typeof fileContentOrPath === 'string') {
+      if (fs.existsSync(fileContentOrPath)) {
+        textContent = fs.readFileSync(fileContentOrPath, 'utf8');
+      } else {
+        textContent = fileContentOrPath;
+      }
+    } else if (Buffer.isBuffer(fileContentOrPath)) {
+      textContent = fileContentOrPath.toString('utf8');
+    }
+
+    const lines = textContent.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+    const parsedEntries = [];
+    for (const line of lines) {
+      const parts = line.split(',').map((p) => p.trim());
+      const rawPhone = parts[0];
+      const fullName = parts[1] || 'Prospective Applicant';
+      const city = parts[2] || null;
+
+      const phoneNormalized = normalizePhoneNumber(rawPhone);
+      if (phoneNormalized) {
+        parsedEntries.push({ phoneRaw: rawPhone, phoneNormalized, fullName, city });
+      }
+    }
+
+    if (!parsedEntries.length) {
+      return { totalRead: lines.length, scheduledCount: 0, invalidCount: lines.length, message: 'No valid phone numbers found.' };
+    }
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const defaultBroadcastMessage = (name) =>
+        `Assalam-o-Alaikum ${name !== 'Prospective Applicant' ? name : ''}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
+        `Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, fee structure, or courses?\n\n` +
+        `• Reply *Yes* to apply\n` +
+        `• Or ask any questions you have!`;
+
+      let currentScheduleTime = new Date(now);
+      currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
+
+      let scheduledCount = 0;
+
+      for (const entry of parsedEntries) {
+        // Check if lead already exists
+        const [existing] = await connection.query(
+          `SELECT id, conversation_state, full_name FROM mkt_leads WHERE phone_normalized = ? LIMIT 1 FOR UPDATE`,
+          [entry.phoneNormalized]
+        );
+
+        let leadId;
+        const targetName = (existing[0]?.full_name && existing[0].full_name !== 'Prospective Applicant')
+          ? existing[0].full_name
+          : entry.fullName;
+
+        if (existing.length) {
+          leadId = existing[0].id;
+        } else {
+          const [ins] = await connection.execute(
+            `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, city, conversation_state)
+             VALUES (?, ?, ?, ?, ?, 'IDLE')`,
+            [campaignId, entry.fullName, entry.phoneRaw, entry.phoneNormalized, entry.city]
+          );
+          leadId = ins.insertId;
+        }
+
+        // Random anti-ban jitter
+        const jitterSeconds =
+          Math.floor(Math.random() * (jitterMaxSeconds - jitterMinSeconds + 1)) + jitterMinSeconds;
+        currentScheduleTime = new Date(currentScheduleTime.getTime() + jitterSeconds * 1000);
+        currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
+
+        const messageText = customMessage
+          ? customMessage.replace(/{name}/gi, targetName)
+          : defaultBroadcastMessage(targetName);
+
+        // Dispatch outbound job
+        await dispatchJob({
+          queueName: 'whatsapp_outreach',
+          jobType: EVENT_TYPES.WHATSAPP_MESSAGE,
+          payload: {
+            recipientPhone: entry.phoneNormalized,
+            messageType: 'CAMPAIGN',
+            messageText,
+            metadata: {
+              campaignId,
+              leadId,
+              leadName: targetName,
+            },
+          },
+          availableAt: currentScheduleTime,
+          connection,
+        });
+
+        // Set lead state to GREETING_SENT
+        const historyEntry = [
+          {
+            direction: 'OUTBOUND',
+            text: messageText,
+            timestamp: currentScheduleTime.toISOString(),
+          },
+        ];
+
+        await connection.execute(
+          `UPDATE mkt_leads
+           SET conversation_state = 'GREETING_SENT',
+               chat_history = ?,
+               last_interaction_at = ?
+           WHERE id = ?`,
+          [JSON.stringify(historyEntry), currentScheduleTime, leadId]
+        );
+
+        scheduledCount++;
+      }
+
+      await connection.commit();
+      return {
+        totalRead: lines.length,
+        scheduledCount,
+        invalidCount: lines.length - parsedEntries.length,
+      };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
    * Adjusts a Date object forward to the next valid daylight window (e.g. 09:00 - 20:00)
    */
   static adjustToDaylight(date, startHour = 9, endHour = 20) {
@@ -269,10 +416,8 @@ export class CampaignService {
     const hour = d.getHours();
 
     if (hour < startHour) {
-      // Set to startHour:00:00 today
       d.setHours(startHour, 0, 0, 0);
     } else if (hour >= endHour) {
-      // Move to tomorrow at startHour:00:00
       d.setDate(d.getDate() + 1);
       d.setHours(startHour, 0, 0, 0);
     }

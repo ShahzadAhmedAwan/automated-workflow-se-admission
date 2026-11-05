@@ -74,6 +74,29 @@ export class CampaignController {
     }
   }
 
+  static async broadcastNumbers(req, res, next) {
+    try {
+      let fileContent = '';
+      if (req.file && req.file.buffer) {
+        fileContent = req.file.buffer;
+      } else if (req.body?.content) {
+        fileContent = req.body.content;
+      } else if (Array.isArray(req.body?.numbers)) {
+        fileContent = req.body.numbers.join('\n');
+      } else {
+        return res.status(400).json({ error: 'Provide a file upload or text content with phone numbers.' });
+      }
+
+      const result = await CampaignService.broadcastToNumbersFile(fileContent, {
+        customMessage: req.body?.customMessage || null,
+        campaignId: req.body?.campaignId ? Number(req.body.campaignId) : null,
+      });
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   /**
    * Webhook or mock entry point for incoming WhatsApp messages
    */

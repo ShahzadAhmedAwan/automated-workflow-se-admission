@@ -1,0 +1,7 @@
+# Broadcast Phone Numbers List
+# Format: Phone Number, Optional Full Name, Optional City
+03001234567, Ahmad Raza, Muzaffarabad
+03217654321, Fatima Zahra, Rawalpindi
+03335558899, Usama Malik, Islamabad
+03451122334, Zainab Bibi, Mirpur
+03129988776, Bilal Tariq, Kotli

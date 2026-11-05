@@ -1,0 +1,117 @@
+# OFFICIAL ADMISSIONS KNOWLEDGE BASE
+# Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK) & Excellence Institute
+
+================================================================================
+INSTITUTION NAME: University of Azad Jammu & Kashmir (UAJK)
+CAMPUS: Main Campus – Muzaffarabad (Chehla Campus)
+FACULTY: Faculty of Engineering & Technology
+DEPARTMENT: Department of Software Engineering
+WEBSITE: https://uajk.edu.pk/
+DEPARTMENT HELPLINE / PHONE: +92-5822-960510
+DEPARTMENT EMAIL: se@uajk.edu.pk
+GENERAL UAJK PHONE: +92-5822-960418 | registrar@uajk.edu.pk
+DEPARTMENT COORDINATOR: Engr. Dr. Muhammad Zaman Fakhar (Assistant Professor / Coordinator)
+ENTRY TEST HELP DESK (Chehla Campus): 0300-6253998 / 0333-5750711
+
+================================================================================
+PROGRAMS OFFERED, CODES & ACCREDITATION:
+
+1. B.Sc. Software Engineering (Program Code: SE)
+- Accreditation: Pakistan Engineering Council (PEC) accredited.
+- Seats: 40–42 seats as per PEC-approved intake and University rules.
+- Eligibility Criteria:
+  * Minimum 60% marks in F.Sc. / HSSC (Pre-Engineering / ICS with Mathematics, Physics, Computer / DAE Computer or equivalent qualification with Mathematics certified by IBCC).
+  * No 3rd division in entire academic career.
+- Pre-Medical Policy for SE:
+  * Maximum 40% of the intake may be filled by F.Sc. Pre-Medical candidates if they fulfill all merit criteria and PEC policy requirements.
+  * Under general eligibility, Pre-Medical students are eligible for SET or CET without restriction, and can compete for SE under the PEC 40% quota if they have >= 60% marks.
+- Mandatory Requirements: University Entrance Test (Entry Test) + Departmental Interview.
+- Semester Tuition Fee: ~PKR 60,130 per semester.
+
+2. B.Sc. Software Engineering Technology (Program Code: SET)
+- Accreditation: National Technology Council (NTC) accredited.
+- Seats: 45 seats as per NTC-approved intake and University rules.
+- Eligibility Criteria:
+  * Minimum 50% marks in F.Sc. / HSSC (Pre-Engineering / Pre-Medical / ICS with Mathematics, Physics, Computer / DAE Computer or equivalent qualification certified by IBCC).
+- Pre-Medical Policy for SET:
+  * F.Sc. Pre-Medical students with at least 50% marks are eligible under NTC policy, subject to passing the admission test and taking an additional non-credit / deficiency Mathematics course of F.Sc. level in the 1st semester.
+- Mandatory Requirements: University Entrance Test (Entry Test) + Departmental Interview.
+- Semester Tuition Fee: ~PKR 60,130 per semester.
+
+3. B.Sc. Computer Engineering Technology (Program Code: CET)
+- Accreditation: National Technology Council (NTC) accredited.
+- Eligibility Criteria:
+  * Minimum 50% marks in F.Sc. / HSSC (Pre-Engineering / Pre-Medical / ICS with Mathematics, Physics, Computer / DAE Computer / DAE Electrical / DAE Electronics or equivalent qualification certified by IBCC).
+- Pre-Medical Policy for CET:
+  * Same as SET: F.Sc. Pre-Medical students with at least 50% marks are eligible under NTC policy, subject to passing the admission test and taking an additional non-credit / deficiency Mathematics course in the 1st semester.
+- Mandatory Requirements: University Entrance Test (Entry Test) + Departmental Interview.
+- Semester Tuition Fee: ~PKR 59,130 per semester.
+
+4. MS Software Engineering (Postgraduate)
+- Duration: 2-year program (4 semesters).
+- Eligibility: 16 years of education in relevant field with minimum 50% marks or 2.0 CGPA + GAT/UGAT (50%).
+- Semester Tuition Fee: ~PKR 57,590 per semester.
+
+================================================================================
+OTHER UAJK PROGRAMS (FACULTY OF SCIENCE & OTHERS):
+- BS Computer Science (BSCS), BS Artificial Intelligence (BSAI), BS Cyber Security:
+  * Offered at King Abdullah Campus (Chatter Klass) under Faculty of Science.
+  * Requires 50% marks in HSSC (Pre-Medical, Pre-Engineering, ICS, or equivalent with Math).
+  * Note: The Department of Software Engineering WhatsApp admissions bot handles admissions for Chehla / Main Campus (SE, SET, CET).
+- BS Electrical Engineering: Main Campus (Muzaffarabad), requires 60% in F.Sc. (Pre-Eng/ICS/DAE) + Entry Test + Interview.
+- Doctor of Physical Therapy (DPT): Main Campus, Pre-Medical with 60% marks + Entry Test (50%).
+- LLB: Main Campus, HSSC 2nd Division + HEC LAT (50%).
+- BS Business / Social Sciences: Main Campus, HSSC 2nd Division + Entry Test.
+
+================================================================================
+FEES STRUCTURE & APPLICATION CHARGES:
+- Application Form / Processing Fee: PKR 3,000 via online challan payable at any HBL branch (or hard copy from Directorate of Students' Affairs - DSA office).
+- Additional program fee: PKR 1,000 per extra program applied for.
+- Entry Test Fee: PKR 1,000 (plus PKR 200 per additional program test).
+- Semester Tuition Fees:
+  * B.Sc. Software Engineering (SE): ~PKR 60,130 per semester.
+  * B.Sc. Software Engineering Technology (SET): ~PKR 60,130 per semester.
+  * B.Sc. Computer Engineering Technology (CET): ~PKR 59,130 per semester.
+  * MS Software Engineering: ~PKR 57,590 per semester.
+- Note on Fees: UAJK tuition and fee rates are subject to a typical ~10% annual revision as per university policy.
+
+================================================================================
+REQUIRED DOCUMENTS CHECKLIST:
+- Attested copies of all educational certificates and degrees (Matric & F.Sc./ICS/DAE certificates and DMCs).
+- Character certificate issued by the college or institute last attended.
+- NOC / Migration certificate: Mandatory if F.Sc. was completed from any board other than BISE Mirpur AJ&K. (Students from BISE Mirpur do not need an NOC).
+- Copy of Domicile & State Subject Certificate.
+- Copy of applicant's CNIC or Form-B.
+- Copy of Father's / Guardian's CNIC.
+- Four (4) recent passport-size photographs.
+- Original Documents Policy: Original documents must be brought for physical verification during the interview. Original CNIC/Form-B + admit card are strictly required at the Entry Test examination hall. Public sector employees require a study leave certificate or departmental NOC.
+
+================================================================================
+CAMPUS FACILITIES, HOSTELS & LABS:
+- Department Labs: Dedicated Computer Labs, Hardware Lab, FYP / Project Lab, AI Lab, and digital library access with high-speed internet.
+- Hostels: Available subject to university rules and merit/availability.
+  * Chehla Campus (Main Campus, Muzaffarabad): 1 male hostel and 2 female hostels.
+  * King Abdullah Campus (Chatter Klass): 6 hostels.
+  * Monthly hostel accommodation fee: ~PKR 8,000 per month (including basic meals and utilities).
+- Library: Central library with 10,000+ books, research journals, and HEC digital library access.
+- Sports & Extracurricular: Sports grounds (cricket, football, badminton, basketball), cafeteria, mosque/prayer room, student societies.
+
+================================================================================
+ADMISSION PROCESS & STEPS:
+1. Online Registration: Apply online via the official portal https://uajk.edu.pk/ or submit hardcopy at DSA office.
+2. Fee Challan: Deposit application and test fee at any Habib Bank Limited (HBL) branch.
+3. Entrance Test: Download admit card and appear for the university entrance test at Chehla Campus.
+4. Departmental Interview: Bring original documents for verification.
+5. Merit List: Provisional and final merit lists published on the university website and department notice board.
+6. Fee Submission & Enrollment: Pay semester admission fee upon selection to secure admission.
+
+================================================================================
+GENERAL / EXCELLENCE INSTITUTE INFO (SECONDARY REFERENCE):
+- Institution Name: Excellence Institute of Higher Education
+- BS Programs: PKR 45,000 per semester
+- MBA: PKR 65,000 per semester
+- MBBS: PKR 1,20,000 per semester
+- BBA: PKR 40,000 per semester
+- Scholarships: Merit Scholarship (top students get up to 50% fee discount), Need-based, Sports.
+- Contact: admissions@excellence-institute.edu.pk | Phone: 0300-1234567 / 041-1234567
+- Deadlines: Submission Dec 31, Entrance Test Jan 15, Merit List Jan 22, Classes Feb 3.

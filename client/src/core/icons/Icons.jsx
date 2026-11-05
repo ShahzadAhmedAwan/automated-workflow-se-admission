@@ -101,3 +101,20 @@ export function IconClose({ className = "w-4 h-4" }) {
     </svg>
   );
 }
+
+export function IconMenu({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+export function IconShield({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.25c0 4.32 3.02 8.37 7.5 9.75 4.48-1.38 7.5-5.43 7.5-9.75V6L12 3Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}

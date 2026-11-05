@@ -70,6 +70,7 @@ The broad database grant above is for local development only. In production, use
 - Authorization is deny-by-default and permission-based. The four seeded roles are `SUPER_ADMIN`, `ADMISSION_OFFICER`, `VERIFIER`, and `AUDITOR`.
 - Seeded grants keep the role boundaries clear: `SUPER_ADMIN` receives all registered permissions; `ADMISSION_OFFICER` manages campaigns, merit policies/runs, and relevant read views; `VERIFIER` reviews documents and reissues tokens; `AUDITOR` receives read-only audit, merit, and candidate access.
 - Auth routes: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, and `POST /api/v1/auth/change-password`; user/role management is under `/api/v1/auth/users` and `/api/v1/auth/roles` and requires `users.manage`.
+- Recovery: if you still control the server but have lost the super-admin password, temporarily set `ADMIN_RESET_EMAIL` and `ADMIN_RESET_PASSWORD`, then run `npm run auth:reset-admin`. It only resets an existing active `SUPER_ADMIN`, revokes their sessions, and writes an audit event. Remove both environment values afterward; never place reset credentials in `.env` or source control.
 - Public intake tokens are a separate capability and do not grant an authenticated staff role.
 
 ## Operational notes

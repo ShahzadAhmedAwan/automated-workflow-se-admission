@@ -11,6 +11,7 @@
     "start": "node src/server.js",
     "db:setup": "node scripts/setup-database.js",
     "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
+    "auth:reset-admin": "node scripts/reset-super-admin-password.js",
     "test": "node test/run.js",
     "whatsapp:import-auth": "node scripts/import-existing-whatsapp-auth.js",
     "whatsapp:live": "node scripts/run_live_whatsapp.js",

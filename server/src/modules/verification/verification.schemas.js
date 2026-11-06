@@ -22,12 +22,26 @@ export const manualReviewActionSchema = z.object({
   studentId: z.coerce.number().int().positive(),
   documentId: z.coerce.number().int().positive().optional(),
   action: z.enum(['APPROVE', 'REJECT_AND_REISSUE', 'MARK_DISCREPANCY', 'OVERRIDE_MARKS']),
+  reviewMethod: z.enum(['STAFF_PORTAL', 'STAFF_GAZETTE', 'STAFF_DOCUMENT']).optional(),
   fscObtainedMarks: z.coerce.number().int().min(0).max(1200).optional(),
   fscTotalMarks: z.coerce.number().int().min(100).max(1200).default(1100).optional(),
   matricObtainedMarks: z.coerce.number().int().min(0).max(1200).optional(),
   matricTotalMarks: z.coerce.number().int().min(100).max(1200).default(1100).optional(),
   discrepancyReason: z.string().trim().max(500).optional(),
   notes: z.string().trim().max(1000).optional(),
+}).superRefine((value, context) => {
+  if (['APPROVE', 'OVERRIDE_MARKS'].includes(value.action) && !value.reviewMethod) {
+    context.addIssue({ code: 'custom', path: ['reviewMethod'], message: 'Select how the result was verified.' });
+  }
+  if (['APPROVE', 'OVERRIDE_MARKS'].includes(value.action) && !value.notes?.trim()) {
+    context.addIssue({ code: 'custom', path: ['notes'], message: 'Add a short verification note.' });
+  }
+  if (value.action === 'MARK_DISCREPANCY' && !value.discrepancyReason?.trim()) {
+    context.addIssue({ code: 'custom', path: ['discrepancyReason'], message: 'Enter the discrepancy reason.' });
+  }
+  if (value.action === 'REJECT_AND_REISSUE' && !value.notes?.trim()) {
+    context.addIssue({ code: 'custom', path: ['notes'], message: 'Enter the reason for reissue.' });
+  }
 });
 
 export const discrepancyRowSchema = z.object({

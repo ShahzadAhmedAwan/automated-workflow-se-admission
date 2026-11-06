@@ -23,7 +23,7 @@ export class IntakeController {
     try {
       const { token } = tokenParamSchema.parse(req.params);
       const payload = submitDocumentsSchema.parse(req.body || {});
-      const files = req.files || [];
+      const files = Object.values(req.files || {}).flat();
 
       const result = await AdmissionIntakeService.submitDocuments({
         rawToken: token,

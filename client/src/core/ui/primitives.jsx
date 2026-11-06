@@ -26,6 +26,60 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
   );
 }
 
+export function SectionTabs({ tabs, value, onChange, label }) {
+  return (
+    <nav className="flex gap-7 overflow-x-auto border-b border-slate-200" role="tablist" aria-label={label}>
+      {tabs.map((tab) => {
+        const active = value === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(tab.id)}
+            className={`min-h-12 shrink-0 border-b-2 px-1 text-[13px] transition-colors ${active ? 'border-blue-600 font-semibold text-blue-800' : 'border-transparent font-medium text-slate-500 hover:text-slate-800'}`}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+export function MetricStrip({ items, label }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_2px_8px_rgba(20,30,50,0.035)]" aria-label={label}>
+      <div className="grid grid-cols-1 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-3.5 sm:min-h-[76px] sm:px-6">
+            <span className="text-xs font-medium text-slate-600">{item.label}</span>
+            <strong className={`text-[23px] font-semibold leading-none tracking-[-.035em] tabular-nums ${item.tone === 'blue' ? 'text-blue-700' : 'text-slate-900'}`}>
+              {item.value}
+            </strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function WorkspacePanel({ title, description, actions, children, className = '' }) {
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_2px_8px_rgba(20,30,50,0.04)] ${className}`}>
+      <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+        <div className="min-w-0">
+          <h2 className="m-0 text-[15px] font-semibold tracking-[-.01em] text-slate-900">{title}</h2>
+          {description && <p className="mb-0 mt-1 text-xs text-slate-500">{description}</p>}
+        </div>
+        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
 export function StatCard({ label, value, detail, icon: Icon, tone = 'blue' }) {
   const iconTone = tone === 'teal'
     ? 'border-teal-100 bg-teal-50 text-teal-700 group-hover:bg-teal-100'

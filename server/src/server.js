@@ -13,9 +13,14 @@ registerJobHandler(EVENT_TYPES.USER_WELCOME_EMAIL, async (payload) => {
 });
 
 // Module 3 OCR Processing Worker
-registerJobHandler(EVENT_TYPES.PROCESS_OCR_DOCUMENT, async (payload) => {
-  await AdmissionIntakeService.processOcrDocumentJob(payload);
-  console.info(`[OCR Worker] Processed document #${payload.documentId} for student #${payload.studentId}`);
+registerJobHandler(EVENT_TYPES.PROCESS_OCR_DOCUMENT, async (payload, metadata) => {
+  try {
+    await AdmissionIntakeService.processOcrDocumentJob(payload);
+    console.info(`[OCR Worker] Processed document #${payload.documentId} for student #${payload.studentId}`);
+  } catch (error) {
+    if (metadata.attempts >= 4) await AdmissionIntakeService.markOcrJobFailed({ ...payload, reason: error.message });
+    throw error;
+  }
 });
 
 // Module 3 Google Drive Archive Worker

@@ -41,6 +41,7 @@ export const STORAGE_STATE = Object.freeze({
 
 export const VERIFICATION_PERMISSIONS = Object.freeze({
   DOCUMENTS_REVIEW: 'verification.documents.review',
+  SOURCES_MANAGE: 'verification.sources.manage',
   TOKENS_REISSUE: 'verification.tokens.reissue',
   CANDIDATES_READ: 'candidates.read',
 });

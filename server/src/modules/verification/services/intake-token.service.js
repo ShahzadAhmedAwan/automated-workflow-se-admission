@@ -32,20 +32,11 @@ export class IntakeTokenService {
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
-    let result;
-    try {
-      [result] = await connection.execute(
-        `INSERT INTO adm_intake_tokens (student_id, token_hash, raw_token, allowed_doc_types, attempt_count, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [studentId, tokenHash, rawToken, JSON.stringify(allowedDocTypes), attemptCount, expiresAt]
-      );
-    } catch {
-      [result] = await connection.execute(
-        `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt]
-      );
-    }
+    const [result] = await connection.execute(
+      `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt]
+    );
 
     return {
       tokenId: result.insertId,
@@ -63,38 +54,25 @@ export class IntakeTokenService {
    * @param {string} rawToken
    * @param {any} [connection=pool]
    */
-  static async validateToken(rawToken, connection = pool) {
+  static async validateToken(rawToken, connection = pool, { lock = false } = {}) {
     if (!rawToken || typeof rawToken !== 'string') {
       throw new AppError(400, 'INVALID_TOKEN_FORMAT', 'Upload token is malformed.');
     }
 
-    const cleanToken = decodeURIComponent(rawToken.trim());
+    let cleanToken;
+    try { cleanToken = decodeURIComponent(rawToken.trim()); }
+    catch { throw new AppError(400, 'INVALID_TOKEN_FORMAT', 'Upload token is malformed.'); }
     const tokenHash = crypto.createHash('sha256').update(cleanToken).digest('hex');
 
-    let rows;
-    try {
-      const [queried] = await connection.execute(
-        `SELECT t.id AS token_id, t.student_id, t.allowed_doc_types, t.attempt_count,
-                t.is_revoked, t.used_at, t.expires_at,
-                s.application_no, s.full_name, s.phone_normalized, s.overall_status
-           FROM adm_intake_tokens t
-           JOIN adm_students s ON s.id = t.student_id
-          WHERE t.token_hash = ? OR t.raw_token = ?`,
-        [tokenHash, cleanToken]
-      );
-      rows = queried;
-    } catch {
-      const [queried] = await connection.execute(
-        `SELECT t.id AS token_id, t.student_id, t.allowed_doc_types, t.attempt_count,
-                t.is_revoked, t.used_at, t.expires_at,
-                s.application_no, s.full_name, s.phone_normalized, s.overall_status
-           FROM adm_intake_tokens t
-           JOIN adm_students s ON s.id = t.student_id
-          WHERE t.token_hash = ?`,
-        [tokenHash]
-      );
-      rows = queried;
-    }
+    const [rows] = await connection.execute(
+      `SELECT t.id AS token_id, t.student_id, t.allowed_doc_types, t.attempt_count,
+              t.is_revoked, t.used_at, t.expires_at,
+              s.application_no, s.full_name, s.phone_normalized, s.overall_status
+         FROM adm_intake_tokens t
+         JOIN adm_students s ON s.id = t.student_id
+        WHERE t.token_hash = ?${lock ? ' FOR UPDATE' : ''}`,
+      [tokenHash]
+    );
 
     if (!rows.length) {
       throw new AppError(404, 'TOKEN_NOT_FOUND', 'This document upload link is invalid or does not exist.');
@@ -149,9 +127,13 @@ export class IntakeTokenService {
    * Mark token as used inside an active transaction
    */
   static async markTokenUsed(tokenId, connection) {
-    await connection.execute(
-      `UPDATE adm_intake_tokens SET used_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
+    const [result] = await connection.execute(
+      `UPDATE adm_intake_tokens SET used_at = CURRENT_TIMESTAMP(3)
+        WHERE id = ? AND used_at IS NULL AND is_revoked = FALSE AND expires_at > CURRENT_TIMESTAMP(3)`,
       [tokenId]
     );
+    if (result.affectedRows !== 1) {
+      throw new AppError(409, 'TOKEN_ALREADY_USED', 'This upload link has already been used or expired. Request a new link.');
+    }
   }
 }

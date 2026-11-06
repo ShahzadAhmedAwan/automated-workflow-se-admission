@@ -110,11 +110,37 @@ export function IconMenu({ className = "w-5 h-5" }) {
   );
 }
 
+export function IconSidebarToggle({ className = "w-4 h-4", collapsed = true }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} />
+    </svg>
+  );
+}
+
 export function IconShield({ className = "w-5 h-5" }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.25c0 4.32 3.02 8.37 7.5 9.75 4.48-1.38 7.5-5.43 7.5-9.75V6L12 3Z" />
       <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
+export function IconEye({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12s3.5-6 9.75-6 9.75 6 9.75 6-3.5 6-9.75 6-9.75-6-9.75-6Z" />
+      <circle cx="12" cy="12" r="2.75" />
+    </svg>
+  );
+}
+
+export function IconEyeOff({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m3 3 18 18M10.6 6.2A10.9 10.9 0 0 1 12 6c6.25 0 9.75 6 9.75 6a17.5 17.5 0 0 1-2.6 3.1M6.2 6.2C3.65 7.8 2.25 12 2.25 12s3.5 6 9.75 6c1.25 0 2.35-.27 3.33-.69" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
     </svg>
   );
 }

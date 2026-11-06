@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { importPKCS8, SignJWT } from 'jose';
 import { STORAGE_PROVIDER, STORAGE_STATE } from '../../verification.constants.js';
 
 // Environment variables for Cloudflare R2
@@ -12,6 +13,8 @@ const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || '';
 
 // Local fallback directory for zero-dependency dev/test environments
 const LOCAL_STORAGE_DIR = path.resolve(process.cwd(), 'data', 'uploads');
+let cachedDriveAccessToken = null;
+let driveAccessTokenExpiresAt = 0;
 
 export class StorageService {
   /**
@@ -37,9 +40,11 @@ export class StorageService {
       throw new TypeError('File buffer is required.');
     }
 
-    const timestamp = Date.now();
-    const cleanExt = path.extname(originalFilename || '') || (mimeType === 'application/pdf' ? '.pdf' : '.jpg');
-    const storageKey = `uploads/student_${studentId}/${docType.toLowerCase()}_${timestamp}${cleanExt}`;
+    const extension = { 'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png' }[mimeType];
+    if (!extension || !/^[A-Z0-9_]{2,40}$/.test(docType) || !/^\d+$/.test(String(studentId))) {
+      throw new TypeError('Unsupported document storage metadata.');
+    }
+    const storageKey = `uploads/student_${studentId}/${docType.toLowerCase()}_${crypto.randomUUID()}${extension}`;
 
     if (this.isR2Configured()) {
       await this._uploadToR2(storageKey, buffer, mimeType);
@@ -51,6 +56,8 @@ export class StorageService {
       };
     }
 
+    if (process.env.NODE_ENV === 'production') throw new Error('Document storage is not configured: provide Cloudflare R2 credentials before accepting uploads.');
+
     // Local disk fallback for development/testing
     await this._uploadToLocal(storageKey, buffer);
     return {
@@ -59,6 +66,20 @@ export class StorageService {
       fileMime: mimeType,
       fileSize: buffer.length,
     };
+  }
+
+  static async uploadBoardGazette(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.subarray(0, 5).toString('ascii') !== '%PDF-') {
+      throw new TypeError('The gazette must be a valid PDF file.');
+    }
+    const storageKey = `uploads/board-gazettes/${crypto.randomUUID()}.pdf`;
+    if (this.isR2Configured()) {
+      await this._uploadToR2(storageKey, buffer, 'application/pdf');
+      return { storageProvider: STORAGE_PROVIDER.R2, storageKey, fileSize: buffer.length };
+    }
+    if (process.env.NODE_ENV === 'production') throw new Error('Board gazette storage is not configured. Configure Cloudflare R2.');
+    await this._uploadToLocal(storageKey, buffer);
+    return { storageProvider: STORAGE_PROVIDER.LOCAL_MOCK, storageKey, fileSize: buffer.length };
   }
 
   /**
@@ -72,12 +93,31 @@ export class StorageService {
     if (storageProvider === STORAGE_PROVIDER.R2 && this.isR2Configured()) {
       return this._fetchFromR2(storageKey);
     }
+    if (storageProvider === STORAGE_PROVIDER.R2 && process.env.NODE_ENV === 'production') {
+      throw new Error('Cloudflare R2 is not configured for document retrieval.');
+    }
 
-    const localPath = path.join(LOCAL_STORAGE_DIR, storageKey);
+    const localPath = this._resolveLocalPath(storageKey);
     if (!fs.existsSync(localPath)) {
       throw new Error(`File not found at storage key: ${storageKey}`);
     }
     return fs.promises.readFile(localPath);
+  }
+
+  static async getArchivedFileBuffer(gdriveFileId) {
+    if (!/^[A-Za-z0-9_-]{10,255}$/.test(String(gdriveFileId || ''))) throw new Error('Invalid archived document reference.');
+    const email = process.env.GDRIVE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = process.env.GDRIVE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    if (!email || !privateKey) throw new Error('Google Drive archive access is not configured.');
+    const accessToken = await this._getDriveAccessToken(email, privateKey);
+    const url = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(gdriveFileId)}`);
+    url.searchParams.set('alt', 'media');
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`Google Drive document retrieval failed (${response.status}).`);
+    return Buffer.from(await response.arrayBuffer());
   }
 
   /**
@@ -87,29 +127,86 @@ export class StorageService {
     if (storageProvider === STORAGE_PROVIDER.R2 && this.isR2Configured()) {
       return this._deleteFromR2(storageKey);
     }
-    const localPath = path.join(LOCAL_STORAGE_DIR, storageKey);
-    if (fs.existsSync(localPath)) {
-      await fs.promises.unlink(localPath).catch(() => {});
+    if (storageProvider === STORAGE_PROVIDER.R2 && process.env.NODE_ENV === 'production') {
+      throw new Error('Cloudflare R2 is not configured for document deletion.');
     }
+    const localPath = this._resolveLocalPath(storageKey);
+    try { await fs.promises.unlink(localPath); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+
+  static _resolveLocalPath(storageKey) {
+    if (typeof storageKey !== 'string' || path.isAbsolute(storageKey)) throw new Error('Invalid storage key.');
+    const base = path.resolve(LOCAL_STORAGE_DIR);
+    const target = path.resolve(base, storageKey);
+    if (target !== base && !target.startsWith(`${base}${path.sep}`)) throw new Error('Invalid storage key.');
+    return target;
   }
 
   /**
    * Migrate verified document from R2 to Google Drive archive
-   * In local/test mode without live Google credentials, records a mock GDrive file ID.
+   * Archive a verified document. Missing Drive configuration fails closed and preserves the source.
    */
-  static async migrateToGoogleDrive({ storageKey, filename, mimeType, studentCnic }) {
-    // If live GDrive API credentials exist, stream file to Google Drive:
-    const gdriveFolderId = process.env.GDRIVE_ARCHIVE_FOLDER_ID || 'mock_folder_se_verified';
-    const mockGdriveFileId = `gdrive_file_${crypto.randomUUID()}`;
+  static async migrateToGoogleDrive({ storageKey, filename, mimeType, storageProvider }) {
+    const email = process.env.GDRIVE_SERVICE_ACCOUNT_EMAIL;
+    const privateKey = process.env.GDRIVE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const folderId = process.env.GDRIVE_ARCHIVE_FOLDER_ID;
+    if (!email || !privateKey || !folderId) {
+      throw new Error('Google Drive archive is not configured. Set GDRIVE_SERVICE_ACCOUNT_EMAIL, GDRIVE_PRIVATE_KEY, and GDRIVE_ARCHIVE_FOLDER_ID. The source remains in active storage.');
+    }
+    const accessToken = await this._getDriveAccessToken(email, privateKey);
+    const sourceKeyHash = crypto.createHash('sha256').update(storageKey).digest('hex');
+    const search = new URL('https://www.googleapis.com/drive/v3/files');
+    search.searchParams.set('q', `appProperties has { key='sourceKeyHash' and value='${sourceKeyHash}' } and trashed=false`);
+    search.searchParams.set('fields', 'files(id,parents)');
+    const existingResponse = await fetch(search, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) });
+    if (!existingResponse.ok) throw new Error(`Google Drive archive lookup failed (${existingResponse.status}).`);
+    const existing = await existingResponse.json();
+    if (existing.files?.[0]?.id) {
+      return { gdriveFileId: existing.files[0].id, gdriveFolderId: existing.files[0].parents?.[0] || folderId, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
+    }
+    const bytes = await this.getFileBuffer(storageKey, storageProvider);
+    const boundary = `se-admissions-${crypto.randomUUID()}`;
+    const safeName = path.basename(filename || 'admissions-document').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 180);
+    const metadata = { name: safeName, parents: [folderId], appProperties: { sourceKeyHash } };
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+      bytes,
+      Buffer.from(`\r\n--${boundary}--`),
+    ]);
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,parents', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!response.ok) throw new Error(`Google Drive archive upload failed (${response.status}).`);
+    const archived = await response.json();
+    if (!archived.id) throw new Error('Google Drive did not confirm the archived file.');
+    return { gdriveFileId: archived.id, gdriveFolderId: archived.parents?.[0] || folderId, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
+  }
 
-    // Once successfully saved to GDrive, purge from R2 / local storage to protect Inodes and bucket quota
-    await this.deleteFile(storageKey);
-
-    return {
-      gdriveFileId: mockGdriveFileId,
-      gdriveFolderId,
-      storageState: STORAGE_STATE.ARCHIVED_GDRIVE,
-    };
+  static async _getDriveAccessToken(email, privateKey) {
+    if (cachedDriveAccessToken && driveAccessTokenExpiresAt > Date.now() + 60_000) return cachedDriveAccessToken;
+    const now = Math.floor(Date.now() / 1000);
+    const key = await importPKCS8(privateKey, 'RS256');
+    const assertion = await new SignJWT({ scope: 'https://www.googleapis.com/auth/drive.file' })
+      .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+      .setIssuer(email)
+      .setAudience('https://oauth2.googleapis.com/token')
+      .setIssuedAt(now)
+      .setExpirationTime(now + 3600)
+      .sign(key);
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.access_token) throw new Error(`Google Drive authorization failed (${response.status}).`);
+    cachedDriveAccessToken = result.access_token;
+    driveAccessTokenExpiresAt = Date.now() + Number(result.expires_in || 3600) * 1000;
+    return cachedDriveAccessToken;
   }
 
   // =========================================================================
@@ -117,7 +214,7 @@ export class StorageService {
   // =========================================================================
 
   static async _uploadToLocal(storageKey, buffer) {
-    const fullPath = path.join(LOCAL_STORAGE_DIR, storageKey);
+    const fullPath = this._resolveLocalPath(storageKey);
     await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.promises.writeFile(fullPath, buffer);
   }
@@ -216,7 +313,7 @@ export class StorageService {
     const signingKey = this._getSignatureKey(R2_SECRET_ACCESS_KEY, dateStamp, region, service);
     const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
 
-    await fetch(url, {
+    const response = await fetch(url, {
       method: 'DELETE',
       headers: {
         'Host': host,
@@ -224,7 +321,10 @@ export class StorageService {
         'x-amz-content-sha256': emptyHash,
         'Authorization': `AWS4-HMAC-SHA256 Credential=${R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
       },
-    }).catch(() => {});
+    });
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Cloudflare R2 DELETE failed with status ${response.status}`);
+    }
   }
 
   static _getSignatureKey(key, dateStamp, regionName, serviceName) {

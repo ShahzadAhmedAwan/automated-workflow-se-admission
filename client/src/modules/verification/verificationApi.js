@@ -1,4 +1,4 @@
-import { apiRequest } from '../../core/api/apiClient.js';
+import { apiRequest, apiRequestFile } from '../../core/api/apiClient.js';
 
 export const verificationApi = {
   /**
@@ -92,5 +92,28 @@ export const verificationApi = {
       body: JSON.stringify(payload),
     }, true);
     return res.data;
+  },
+
+  async listBoardSources() {
+    const res = await apiRequest('/verification/board-sources', { method: 'GET' }, true);
+    return res.data;
+  },
+
+  async saveBoardSource(formData) {
+    const res = await apiRequest('/verification/board-sources', { method: 'POST', body: formData }, true);
+    return res.data;
+  },
+
+  async deactivateBoardSource(sourceId) {
+    const res = await apiRequest(`/verification/board-sources/${sourceId}`, { method: 'DELETE' }, true);
+    return res.data;
+  },
+
+  async downloadBoardGazette(sourceId) {
+    return apiRequestFile(`/verification/board-sources/${sourceId}/gazette`);
+  },
+
+  async downloadStudentDocument(studentId, documentId) {
+    return apiRequestFile(`/verification/students/${studentId}/documents/${documentId}/file`);
   },
 };

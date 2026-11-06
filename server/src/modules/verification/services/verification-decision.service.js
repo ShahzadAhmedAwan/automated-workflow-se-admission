@@ -35,7 +35,7 @@ export class VerificationDecisionService {
               s.overall_status, s.discrepancy_notes,
               d.token_id, t.attempt_count
          FROM adm_students s
-         JOIN adm_student_documents d ON d.id = ?
+         JOIN adm_student_documents d ON d.id = ? AND d.student_id = s.id
     LEFT JOIN adm_intake_tokens t ON t.id = d.token_id
         WHERE s.id = ?`,
       [documentId, studentId]
@@ -47,8 +47,8 @@ export class VerificationDecisionService {
 
     const student = students[0];
     const attemptCount = student.attempt_count || 1;
-    const ocrMarks = extractedOcr.obtainedMarks || 0;
-    const isPass = extractedOcr.isPass ?? true;
+    const ocrMarks = extractedOcr?.obtainedMarks;
+    const isPass = extractedOcr?.isPass;
 
     let targetClaimedMarks = 0;
     if (docType === 'FSC_MARKSHEET') {
@@ -59,8 +59,22 @@ export class VerificationDecisionService {
 
     // Determine if OCR matches applicant-stated marks
     // (If student didn't claim marks initially, we accept the OCR marks as truth)
-    const marksMatch = !targetClaimedMarks || targetClaimedMarks === ocrMarks;
-    const portalMatched = portalVerification?.isVerified ?? true; // if portal unsupported/unavailable, defaults true
+    const marksMatch = Number.isFinite(ocrMarks) && Number.isFinite(extractedOcr?.totalMarks) && extractedOcr.totalMarks > 0 && ocrMarks >= 0 && ocrMarks <= extractedOcr.totalMarks &&
+      (!targetClaimedMarks || targetClaimedMarks === ocrMarks);
+    const normalizeName = (value) => String(value || '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+    const ocrName = normalizeName(extractedOcr?.candidateName);
+    const portalName = normalizeName(portalVerification?.candidateName);
+    const applicantName = normalizeName(student.full_name);
+    const identityMatched = Boolean(ocrName && portalName && applicantName && ocrName === portalName && ocrName === applicantName);
+    const portalMatched = portalVerification?.isVerified === true && !portalVerification.isMock && Number(portalVerification.boardMarks) === ocrMarks && identityMatched;
+
+    if (extractedOcr?.isMock || extractedOcr?.source === 'MOCK') {
+      return this._handleManualReviewEscalation({ documentId, student, discrepancyReason: 'Simulated OCR data cannot be used for a candidate decision.', connection });
+    }
+    if (isPass === null || !Number.isFinite(ocrMarks) || !Number.isFinite(extractedOcr?.totalMarks) || !extractedOcr?.candidateName || !portalVerification || !Number.isFinite(Number(portalVerification.boardMarks)) || !portalVerification.candidateName) {
+      const missing = !portalVerification ? 'official board result is unavailable' : 'required marksheet or identity data is incomplete';
+      return this._handleManualReviewEscalation({ documentId, student, discrepancyReason: `Verification requires staff review: ${missing}.`, connection });
+    }
 
     // Check Condition A: Verified Match
     if (marksMatch && portalMatched && isPass) {
@@ -74,9 +88,11 @@ export class VerificationDecisionService {
     }
 
     // Check Condition B or C: Discrepancy
-    const discrepancyReason = !isPass
+    const discrepancyReason = isPass === false
       ? 'Candidate marked FAIL on marksheet.'
-      : `Marksheet shows ${ocrMarks} marks, but applicant declared ${targetClaimedMarks} marks.`;
+      : !portalMatched
+        ? `Official board result does not confirm the ${ocrMarks} marks shown on the uploaded marksheet.`
+        : `Marksheet shows ${ocrMarks} marks, but applicant declared ${targetClaimedMarks} marks.`;
 
     if (attemptCount < TOKEN_CONFIG.MAX_ATTEMPTS) {
       // Condition B: Attempt 1 or 2 -> issue new token and send automated alert
@@ -107,9 +123,13 @@ export class VerificationDecisionService {
     await connection.execute(
       `UPDATE adm_student_documents
           SET verification_status = ?,
-              verified_at = CURRENT_TIMESTAMP(3)
-        WHERE id = ?`,
-      [DOCUMENT_VERIFICATION_STATUS.MATCHED, documentId]
+              verified_at = CURRENT_TIMESTAMP(3),
+              reviewed_at = CURRENT_TIMESTAMP(3),
+              reviewed_by = NULL,
+              review_method = 'AUTOMATED',
+              review_notes = NULL
+        WHERE id = ? AND student_id = ?`,
+      [DOCUMENT_VERIFICATION_STATUS.MATCHED, documentId, student.id]
     );
 
     // If marksheet, backfill verified marks into adm_students
@@ -140,16 +160,28 @@ export class VerificationDecisionService {
     let finalStatus = student.overall_status;
     if (unmatched.length === 0) {
       finalStatus = STUDENT_OVERALL_STATUS.VERIFIED;
+      const [manualReviews] = await connection.execute(
+        `SELECT reviewed_by FROM adm_student_documents
+          WHERE student_id = ? AND reviewed_by IS NOT NULL
+          ORDER BY reviewed_at DESC, id DESC LIMIT 1`,
+        [student.id]
+      );
       await connection.execute(
-        `UPDATE adm_students SET overall_status = ? WHERE id = ?`,
-        [STUDENT_OVERALL_STATUS.VERIFIED, student.id]
+        `UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`,
+        [STUDENT_OVERALL_STATUS.VERIFIED, manualReviews[0]?.reviewed_by || null, student.id]
+      );
+    } else {
+      finalStatus = STUDENT_OVERALL_STATUS.UNDER_REVIEW;
+      await connection.execute(
+        `UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`,
+        [finalStatus, student.id]
       );
     }
 
     // Enqueue MIGRATE_GDRIVE outbox job to archive file and keep Cloudflare R2 / Inodes clean
     const [docRow] = await connection.execute(
-      `SELECT storage_key, original_filename, file_mime FROM adm_student_documents WHERE id = ?`,
-      [documentId]
+      `SELECT storage_key, original_filename, file_mime FROM adm_student_documents WHERE id = ? AND student_id = ?`,
+      [documentId, student.id]
     );
 
     if (docRow.length) {
@@ -181,8 +213,8 @@ export class VerificationDecisionService {
     await connection.execute(
       `UPDATE adm_student_documents
           SET verification_status = ?
-        WHERE id = ?`,
-      [DOCUMENT_VERIFICATION_STATUS.DISCREPANCY, documentId]
+        WHERE id = ? AND student_id = ?`,
+      [DOCUMENT_VERIFICATION_STATUS.DISCREPANCY, documentId, student.id]
     );
 
     // Invalidate existing token
@@ -204,6 +236,8 @@ export class VerificationDecisionService {
     await connection.execute(
       `UPDATE adm_students
           SET overall_status = ?,
+              verified_at = NULL,
+              verified_by = NULL,
               discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Attempt ', ?, ' Discrepancy]: ', ?)
         WHERE id = ?`,
       [STUDENT_OVERALL_STATUS.DOCS_REQUESTED, attemptCount, discrepancyReason, student.id]
@@ -249,13 +283,15 @@ ${uploadUrl}
     await connection.execute(
       `UPDATE adm_student_documents
           SET verification_status = ?
-        WHERE id = ?`,
-      [DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW, documentId]
+        WHERE id = ? AND student_id = ?`,
+      [DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW, documentId, student.id]
     );
 
     await connection.execute(
       `UPDATE adm_students
           SET overall_status = ?,
+              verified_at = NULL,
+              verified_by = NULL,
               discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Escalated to Manual Review]: ', ?)
         WHERE id = ?`,
       [STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, discrepancyReason, student.id]

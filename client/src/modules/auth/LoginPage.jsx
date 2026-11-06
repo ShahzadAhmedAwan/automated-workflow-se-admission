@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useAuth } from './AuthProvider.jsx';
 import { Button } from '../../core/ui/primitives.jsx';
-import { IconShield } from '../../core/icons/Icons.jsx';
+import { IconEye, IconEyeOff, IconShield } from '../../core/icons/Icons.jsx';
 
-export function LoginPage() {
+export function LoginPage({ sessionExpired = false }) {
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -20,29 +21,33 @@ export function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen bg-white md:grid-cols-[.92fr_1.08fr]">
-      <section className="relative flex min-h-[300px] flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-800 via-blue-900 to-blue-950 px-7 py-6 text-white sm:px-10 md:min-h-screen md:px-14 md:py-10 xl:px-20" aria-label="Admissions workspace">
-        <span className="pointer-events-none absolute -bottom-40 -right-40 size-[440px] rounded-full border border-white/10 shadow-[0_0_0_44px_rgba(255,255,255,0.03),0_0_0_94px_rgba(255,255,255,0.025)]" />
-        <div className="relative z-10 flex items-center gap-3 text-[13px] font-bold">
-          <img src="/department-logo.png" alt="Department of Software Engineering" className="size-10 rounded-xl bg-white p-1 object-contain" />
-          SE Admissions
-        </div>
-        <div className="relative z-10 my-8 max-w-xl md:my-auto md:py-12">
-          <span className="text-[10px] font-bold tracking-[.15em] text-blue-200">STAFF WORKSPACE</span>
-          <h1 className="mb-4 mt-4 text-4xl font-bold leading-[1.06] tracking-tight sm:text-5xl xl:text-6xl">Admissions work,<br />in clear view.</h1>
-          <p className="max-w-sm text-xs leading-7 text-blue-100 sm:text-sm">A secure workspace for applicant outreach, document verification, and admissions operations.</p>
-          <div className="mt-7 flex items-center gap-2 text-[10px] text-blue-100 sm:text-[11px]"><IconShield className="size-4 text-blue-200" />Protected access for authorized staff</div>
-        </div>
-        <div className="relative z-10 hidden text-[9px] font-semibold tracking-[.14em] text-blue-200 sm:block">DEPARTMENT OF SOFTWARE ENGINEERING</div>
-      </section>
+    <main className="relative isolate grid min-h-screen place-items-center overflow-hidden bg-[#dceafa] px-4 py-6 sm:px-6 sm:py-8">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-[0.82]"
+        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1592930954854-7d00c87d0cf4?auto=format&fit=crop&w=1600&q=45')" }}
+      />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-blue-950/50" />
+      <section className="relative w-full max-w-[440px] rounded-2xl border border-white/80 bg-white px-6 py-7 shadow-[0_24px_80px_rgba(20,48,82,0.24)] sm:rounded-[22px] sm:px-9 sm:py-8" aria-label="Staff sign in">
+        <header className="mb-6 flex flex-col items-center text-center">
+          <img src="/department-logo.png" alt="Department of Software Engineering logo" className="mb-2 size-12 object-contain" />
+          <p className="mb-0 text-sm font-bold tracking-tight text-slate-900">SE Admissions</p>
+          <p className="mb-0 mt-1 text-[10px] font-semibold uppercase tracking-[.13em] text-blue-700">Staff workspace</p>
+        </header>
 
-      <section className="grid place-items-center px-6 py-10 sm:px-10 md:px-12 xl:px-20">
-        <form className="flex w-full max-w-[410px] flex-col" onSubmit={submit}>
-          <span className="text-[10px] font-bold tracking-[.15em] text-blue-700">WELCOME BACK</span>
-          <h2 className="mb-2 mt-2.5 text-[26px] font-bold tracking-tight text-blue-950 sm:text-[29px]">Sign in to your account</h2>
-          <p className="mb-5 text-xs leading-relaxed text-slate-500">Use the staff credentials provided by your administrator.</p>
+        <div className="mb-7 text-center">
+          <h1 className="mb-0 text-[24px] font-bold leading-tight tracking-[-.03em] text-slate-900 sm:text-[26px]">Welcome back</h1>
+          <p className="mb-0 mt-1.5 text-[13px] leading-5 text-slate-500">Sign in to continue to the admissions workspace.</p>
+        </div>
 
-          <label htmlFor="email" className="mb-2 mt-3 text-[11px] font-semibold text-slate-700">Work email</label>
+        {sessionExpired && (
+          <p className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-3.5 py-3 text-[13px] leading-5 text-blue-900" role="status">
+            Your session expired. Sign in again to continue.
+          </p>
+        )}
+
+        <form className="flex flex-col" onSubmit={submit}>
+          <label htmlFor="email" className="mb-1.5 text-xs font-semibold text-slate-700">Work email</label>
           <input
             id="email"
             type="email"
@@ -51,33 +56,45 @@ export function LoginPage() {
             maxLength={254}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+            placeholder="Enter your work email"
+            className="h-11 rounded-lg border border-slate-200 bg-[#f7faff] px-3.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
           />
 
-          <label htmlFor="password" className="mb-2 mt-4 text-[11px] font-semibold text-slate-700">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            maxLength={128}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-          />
-
-          {error && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-[11px] text-rose-800" role="alert">{error}</div>}
-          <Button type="submit" disabled={busy} className="mt-6 min-h-11 w-full justify-between px-4 text-xs">
-            {busy ? 'Signing in…' : 'Sign in securely'}
-            <span aria-hidden="true" className="text-base font-normal">→</span>
-          </Button>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-[9px] text-slate-400">
-            <IconShield className="size-3.5 text-blue-600" />
-            <span className="font-semibold text-slate-600">Protected staff access</span>
-            <span className="size-1 rounded-full bg-slate-300" />
-            Sessions are securely managed
+          <label htmlFor="password" className="mb-1.5 mt-4 text-xs font-semibold text-slate-700">Password</label>
+          <div className="relative">
+            <input
+              id="password"
+              type={showPassword ? 'text' : 'password'}
+              autoComplete="current-password"
+              required
+              maxLength={128}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Enter your password"
+              className="h-11 w-full rounded-lg border border-slate-200 bg-[#f7faff] px-3.5 pr-12 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((visible) => !visible)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              aria-pressed={showPassword}
+              aria-controls="password"
+              className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-lg text-slate-500 transition hover:text-blue-700 focus-visible:outline-blue-600"
+            >
+              {showPassword ? <IconEyeOff className="size-[18px]" /> : <IconEye className="size-[18px]" />}
+            </button>
           </div>
+
+          {error && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3.5 py-3 text-[13px] leading-5 text-rose-800" role="alert">{error}</div>}
+          <Button type="submit" disabled={busy} className="mt-5 min-h-11 w-full rounded-lg px-4 text-[13px] font-semibold">
+            {busy ? 'Signing in…' : 'Sign in'}
+          </Button>
         </form>
+
+        <div className="mt-5 flex items-center justify-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-500">
+          <IconShield className="size-4 shrink-0 text-blue-600" />
+          <span>Protected access for authorized staff</span>
+        </div>
       </section>
     </main>
   );

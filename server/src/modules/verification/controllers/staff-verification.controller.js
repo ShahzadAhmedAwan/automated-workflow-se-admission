@@ -10,8 +10,75 @@ import {
 } from '../verification.schemas.js';
 import { AppError } from '../../../core/errors/app-error.js';
 import { config } from '../../../core/config/env.js';
+import { BoardSourceService } from '../services/board-source.service.js';
+import { StorageService } from '../services/storage/storage.service.js';
 
 export class StaffVerificationController {
+  static async listBoardSources(_req, res, next) {
+    try { res.json({ status: 'success', data: await BoardSourceService.list() }); }
+    catch (err) { next(err); }
+  }
+
+  static async saveBoardSource(req, res, next) {
+    try {
+      const result = await BoardSourceService.save({ ...req.body, file: req.file, actorId: req.auth.userId });
+      res.status(201).json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  static async deactivateBoardSource(req, res, next) {
+    try {
+      const result = await BoardSourceService.deactivate(Number(req.params.sourceId), req.auth.userId);
+      res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  static async downloadBoardGazette(req, res, next) {
+    try {
+      const sourceId = Number(req.params.sourceId);
+      const [rows] = await pool.execute(
+        `SELECT gazette_filename, storage_provider, storage_key FROM adm_board_sources
+          WHERE id = ? AND is_active = TRUE AND source_type = 'GAZETTE'`,
+        [sourceId]
+      );
+      if (!rows.length || !rows[0].storage_key) throw new AppError(404, 'GAZETTE_NOT_FOUND', 'The gazette is no longer available.');
+      const buffer = await StorageService.getFileBuffer(rows[0].storage_key, rows[0].storage_provider);
+      const filename = String(rows[0].gazette_filename || 'board-gazette.pdf').replace(/["\\\r\n]/g, '_');
+      res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, 'Cache-Control': 'private, no-store' });
+      res.send(buffer);
+    } catch (err) { next(err); }
+  }
+
+  static async viewStudentDocument(req, res, next) {
+    try {
+      const studentId = Number(req.params.studentId);
+      const documentId = Number(req.params.documentId);
+      if (!Number.isSafeInteger(studentId) || studentId < 1 || !Number.isSafeInteger(documentId) || documentId < 1) {
+        throw new AppError(400, 'INVALID_DOCUMENT_REFERENCE', 'The document reference is invalid.');
+      }
+      const [rows] = await pool.execute(
+        `SELECT original_filename, file_mime, storage_provider, storage_key, storage_state, gdrive_file_id
+           FROM adm_student_documents WHERE id = ? AND student_id = ?`,
+        [documentId, studentId]
+      );
+      if (!rows.length || rows[0].storage_state === 'DELETED') {
+        throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'This candidate document is no longer available.');
+      }
+      const document = rows[0];
+      const buffer = document.storage_state === 'ARCHIVED_GDRIVE'
+        ? await StorageService.getArchivedFileBuffer(document.gdrive_file_id)
+        : await StorageService.getFileBuffer(document.storage_key, document.storage_provider);
+      const filename = String(document.original_filename || 'candidate-document').replace(/["\\\r\n]/g, '_');
+      res.set({
+        'Content-Type': document.file_mime,
+        'Content-Disposition': `inline; filename="${filename}"`,
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.send(buffer);
+    } catch (err) { next(err); }
+  }
+
   /**
    * List candidates in manual review queue or with discrepancies
    */

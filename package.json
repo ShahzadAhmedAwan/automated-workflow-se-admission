@@ -16,6 +16,7 @@
     "db:setup": "npm run db:setup --workspace @se-admissions/server",
     "auth:bootstrap-admin": "npm run auth:bootstrap-admin --workspace @se-admissions/server",
     "auth:reset-admin": "npm run auth:reset-admin --workspace @se-admissions/server",
-    "test:auth": "npm run test --workspace @se-admissions/server"
+    "test:auth": "npm run test --workspace @se-admissions/server",
+    "test:verification": "npm run test:verification --workspace @se-admissions/server"
   }
 }

@@ -29,7 +29,7 @@ export class BoardRegistryService {
     }
 
     // If running in test or offline mock mode
-    if (process.env.USE_MOCK_BOARD === '1' || process.env.NODE_ENV === 'test') {
+    if (process.env.NODE_ENV !== 'production' && (process.env.USE_MOCK_BOARD === '1' || process.env.NODE_ENV === 'test')) {
       return this._mockVerify({ rollNumber, candidateName });
     }
 
@@ -81,13 +81,13 @@ export class BoardRegistryService {
         data = JSON.parse(htmlOrJson);
       } catch {
         // Simple regex extraction if returned HTML table
-        const marksMatch = htmlOrJson.match(/Total Marks[^<]*<td[^>]*>(\d+)<\/td>/i);
+        const marksMatch = htmlOrJson.match(/(?:Marks Obtained|Obtained Marks)[^<]*<td[^>]*>(\d+)<\/td>/i);
         const nameMatch = htmlOrJson.match(/Name[^<]*<td[^>]*>([^<]+)<\/td>/i);
         if (marksMatch) data.obtainedMarks = Number(marksMatch[1]);
         if (nameMatch) data.name = nameMatch[1].trim();
       }
 
-      const obtained = data.obtainedMarks || data.total_marks || data.marks;
+      const obtained = data.obtainedMarks ?? data.obtained_marks ?? data.marks_obtained;
       if (obtained) {
         return {
           isVerified: true,
@@ -159,6 +159,7 @@ export class BoardRegistryService {
     // Default valid mock
     return {
       isVerified: true,
+      isMock: true,
       status: 'PORTAL_MATCHED',
       boardMarks: 940,
       candidateName: candidateName || 'Muhammad Usman',

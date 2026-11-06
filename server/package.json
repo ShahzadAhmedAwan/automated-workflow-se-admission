@@ -13,6 +13,7 @@
     "auth:bootstrap-admin": "node scripts/bootstrap-admin.js",
     "auth:reset-admin": "node scripts/reset-super-admin-password.js",
     "test": "node test/run.js",
+    "test:verification": "node --test test/verification.test.js test/verification.integration.test.js",
     "whatsapp:import-auth": "node scripts/import-existing-whatsapp-auth.js",
     "whatsapp:live": "node scripts/run_live_whatsapp.js",
     "broadcast": "node scripts/broadcast-numbers.js",

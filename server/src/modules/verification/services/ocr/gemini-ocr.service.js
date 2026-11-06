@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { OCR_CONFIG } from '../../verification.constants.js';
 
 let lastCallTimestamp = 0;
@@ -31,10 +29,10 @@ export class GeminiOcrService {
   static async extractDocumentData({ fileBuffer, mimeType, docType, studentContext = {} }) {
     const apiKey = process.env.GEMINI_API_KEY || '';
 
-    // If no API key is provided or mock mode is requested or in test environment
-    if (!apiKey || process.env.USE_MOCK_OCR === '1' || process.env.NODE_ENV === 'test') {
+    if (process.env.USE_MOCK_OCR === '1' && process.env.NODE_ENV !== 'production') {
       return this._extractWithMock({ docType, studentContext });
     }
+    if (!apiKey) throw new Error('OCR is not configured: set GEMINI_API_KEY before processing documents.');
 
     try {
       // Apply sequential rate-limit guard
@@ -111,11 +109,11 @@ Expected JSON Schema:
         raw: result,
         extracted: this._normalizeExtractedData(parsedData),
         model: OCR_CONFIG.MODEL_NAME,
+        source: 'GEMINI',
+        isMock: false,
       };
     } catch (networkOrApiError) {
-      // In offline development or sandbox where internet is unreachable, fallback gracefully to mock OCR
-      console.warn(`[Gemini OCR] Live API call failed (${networkOrApiError.message}). Falling back to mock OCR.`);
-      return this._extractWithMock({ docType, studentContext });
+      throw new Error(`Live OCR failed: ${networkOrApiError.message}`, { cause: networkOrApiError });
     }
   }
 
@@ -125,17 +123,7 @@ Expected JSON Schema:
   static async _extractWithMock({ docType, studentContext = {} }) {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    // Resolve fixture relative to this file's location
-    const currentDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
-    const fixturePath = path.resolve(currentDir, '..', '..', 'mocks', 'mockOcrResponse.json');
-    let fixtureData = {};
-    if (fs.existsSync(fixturePath)) {
-      try {
-        fixtureData = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
-      } catch {}
-    }
-
-    const base = fixtureData[docType] || {
+    const base = {
       candidate_name: studentContext.fullName || 'Muhammad Usman',
       father_name: studentContext.fatherName || 'Tariq Mahmood',
       roll_number: studentContext.fscRollNo || '542198',
@@ -150,10 +138,15 @@ Expected JSON Schema:
       raw: { mock: true, timestamp: new Date().toISOString() },
       extracted: this._normalizeExtractedData(base),
       model: 'mock-ocr-engine',
+      source: 'MOCK',
+      isMock: true,
     };
   }
 
   static _normalizeExtractedData(data) {
+    const numberOrNull = (value) => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+    const obtainedMarks = numberOrNull(data.obtained_marks ?? data.obtainedMarks);
+    const totalMarks = numberOrNull(data.total_marks ?? data.totalMarks);
     return {
       candidateName: (data.candidate_name || data.candidateName || '').trim(),
       fatherName: (data.father_name || data.fatherName || '').trim(),
@@ -161,10 +154,10 @@ Expected JSON Schema:
       registrationNumber: String(data.registration_number || data.registrationNumber || '').trim(),
       boardName: (data.board_name || data.boardName || '').toUpperCase().trim(),
       examYear: Number(data.exam_year || data.examYear) || null,
-      totalMarks: Number(data.total_marks || data.totalMarks) || 1100,
-      obtainedMarks: Number(data.obtained_marks || data.obtainedMarks) || 0,
-      percentage: Number(data.percentage) || (data.obtained_marks ? Number(((data.obtained_marks / (data.total_marks || 1100)) * 100).toFixed(2)) : null),
-      isPass: Boolean(data.is_pass ?? data.isPass ?? true),
+      totalMarks,
+      obtainedMarks,
+      percentage: numberOrNull(data.percentage) ?? (obtainedMarks !== null && totalMarks ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null),
+      isPass: typeof (data.is_pass ?? data.isPass) === 'boolean' ? (data.is_pass ?? data.isPass) : null,
       cnic: data.cnic ? String(data.cnic).replace(/\D/g, '') : null,
       subjects: Array.isArray(data.subjects) ? data.subjects : [],
     };

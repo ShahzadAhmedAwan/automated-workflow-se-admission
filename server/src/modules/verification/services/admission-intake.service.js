@@ -3,6 +3,7 @@ import { IntakeTokenService } from './intake-token.service.js';
 import { StorageService } from './storage/storage.service.js';
 import { GeminiOcrService } from './ocr/gemini-ocr.service.js';
 import { BoardRegistryService } from './scrapers/board-registry.service.js';
+import { BoardSourceService } from './board-source.service.js';
 import { VerificationDecisionService } from './verification-decision.service.js';
 import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
@@ -112,11 +113,14 @@ ${uploadUrl}
     }
 
     const connection = await db.getConnection();
+    const uploadedObjects = [];
+    let committed = false;
+    let commitAttempted = false;
     try {
       await connection.beginTransaction();
 
       // 1. Atomically lock and validate token
-      const tokenInfo = await IntakeTokenService.validateToken(rawToken, connection);
+      const tokenInfo = await IntakeTokenService.validateToken(rawToken, connection, { lock: true });
       const studentId = tokenInfo.studentId;
       const tokenId = tokenInfo.tokenId;
       const allowedDocTypes = new Set(tokenInfo.allowedDocTypes);
@@ -126,11 +130,16 @@ ${uploadUrl}
       // 2. Upload each file and record in adm_student_documents
       for (const file of files) {
         // Doc type passed via fieldname or custom metadata
-        const docType = (file.fieldname || '').toUpperCase();
-        if (!allowedDocTypes.has(docType) && allowedDocTypes.size > 0 && !allowedDocTypes.has(DOCUMENT_TYPES.OTHER)) {
-          // If fieldname isn't an allowed doc, fallback to first unfulfilled allowed doc
-          continue;
+        const docType = file.fieldname;
+        if (!Object.values(DOCUMENT_TYPES).includes(docType) || (!allowedDocTypes.has(docType) && !allowedDocTypes.has(DOCUMENT_TYPES.OTHER))) {
+          throw new AppError(400, 'INVALID_DOCUMENT_TYPES', `The upload link does not allow ${docType || 'this document type'}.`);
         }
+        const signatures = {
+          'image/jpeg': file.buffer?.[0] === 0xff && file.buffer?.[1] === 0xd8 && file.buffer?.[2] === 0xff,
+          'image/png': file.buffer?.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+          'application/pdf': file.buffer?.subarray(0, 5).toString('ascii') === '%PDF-',
+        };
+        if (!signatures[file.mimetype]) throw new AppError(400, 'INVALID_FILE_CONTENT', `${docType} is not a valid ${file.mimetype} file.`);
 
         const uploadResult = await StorageService.uploadFile({
           buffer: file.buffer,
@@ -139,6 +148,7 @@ ${uploadUrl}
           studentId,
           docType: docType || DOCUMENT_TYPES.OTHER,
         });
+        uploadedObjects.push(uploadResult);
 
         const [docInsert] = await connection.execute(
           `INSERT INTO adm_student_documents (
@@ -149,7 +159,7 @@ ${uploadUrl}
             studentId,
             tokenId,
             docType || DOCUMENT_TYPES.OTHER,
-            file.originalname,
+            String(file.originalname || 'document').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 240),
             file.mimetype,
             file.size,
             uploadResult.storageProvider,
@@ -193,7 +203,9 @@ ${uploadUrl}
         [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]
       );
 
+      commitAttempted = true;
       await connection.commit();
+      committed = true;
 
       return {
         message: 'Documents successfully submitted for verification.',
@@ -201,7 +213,11 @@ ${uploadUrl}
         studentId,
       };
     } catch (err) {
-      await connection.rollback();
+      if (!committed) await connection.rollback();
+      if (!commitAttempted) {
+        await Promise.allSettled(uploadedObjects.map((file) => StorageService.deleteFile(file.storageKey, file.storageProvider)))
+          .then((results) => results.filter((result) => result.status === 'rejected').forEach((result) => console.error('Upload cleanup failed:', result.reason?.message)));
+      }
       throw err;
     } finally {
       connection.release();
@@ -211,23 +227,25 @@ ${uploadUrl}
   /**
    * Outbox worker job handler for PROCESS_OCR_DOCUMENT
    */
-  static async processOcrDocumentJob({ documentId, studentId, docType, r2Key, fileMime }, db = pool) {
+  static async processOcrDocumentJob({ documentId, studentId }, db = pool) {
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
 
       // Check document still exists
       const [docRows] = await connection.execute(
-        `SELECT d.id, d.storage_provider, d.storage_key, s.full_name, s.fsc_obtained_marks
+        `SELECT d.id, d.doc_type, d.file_mime, d.storage_provider, d.storage_key, d.verification_status, s.full_name, s.fsc_obtained_marks
            FROM adm_student_documents d
            JOIN adm_students s ON s.id = d.student_id
-          WHERE d.id = ? FOR UPDATE`,
-        [documentId]
+          WHERE d.id = ? AND d.student_id = ?
+            AND d.verification_status = ?
+          FOR UPDATE`,
+        [documentId, studentId, DOCUMENT_VERIFICATION_STATUS.PENDING]
       );
 
       if (!docRows.length) {
         await connection.commit();
-        return;
+        return { status: 'SKIPPED', reason: 'DOCUMENT_ALREADY_REVIEWED_OR_NOT_FOUND' };
       }
 
       const docRow = docRows[0];
@@ -239,13 +257,13 @@ ${uploadUrl}
       );
 
       // Read buffer from storage
-      const buffer = await StorageService.getFileBuffer(r2Key, docRow.storage_provider);
+      const buffer = await StorageService.getFileBuffer(docRow.storage_key, docRow.storage_provider);
 
       // Execute throttled Gemini Flash OCR
       const ocrResult = await GeminiOcrService.extractDocumentData({
         fileBuffer: buffer,
-        mimeType: fileMime,
-        docType,
+        mimeType: docRow.file_mime,
+        docType: docRow.doc_type,
         studentContext: {
           fullName: docRow.full_name,
           fscMarks: docRow.fsc_obtained_marks,
@@ -254,12 +272,23 @@ ${uploadUrl}
 
       // Query board portal if marksheet and roll number extracted
       let portalResult = null;
-      if (ocrResult.extracted?.rollNumber && (docType === DOCUMENT_TYPES.FSC_MARKSHEET || docType === DOCUMENT_TYPES.MATRIC_MARKSHEET)) {
-        portalResult = await BoardRegistryService.verifyCandidate({
-          boardName: ocrResult.extracted.boardName,
-          rollNumber: ocrResult.extracted.rollNumber,
-          candidateName: ocrResult.extracted.candidateName,
-        });
+      if (ocrResult.extracted?.rollNumber && (docRow.doc_type === DOCUMENT_TYPES.FSC_MARKSHEET || docRow.doc_type === DOCUMENT_TYPES.MATRIC_MARKSHEET)) {
+        const configuredSource = await BoardSourceService.findForBoard(ocrResult.extracted.boardName, ocrResult.extracted.examYear);
+        portalResult = configuredSource
+          ? {
+              isVerified: false,
+              status: 'MANUAL_SOURCE_AVAILABLE',
+              sourceType: configuredSource.source_type,
+              boardSourceId: configuredSource.id,
+              sourceUrl: configuredSource.result_url || null,
+              gazetteFilename: configuredSource.gazette_filename || null,
+            }
+          : await BoardRegistryService.verifyCandidate({
+              boardName: ocrResult.extracted.boardName,
+              rollNumber: ocrResult.extracted.rollNumber,
+              examYear: ocrResult.extracted.examYear,
+              candidateName: ocrResult.extracted.candidateName,
+            });
       }
 
       // Save raw OCR and portal responses
@@ -268,12 +297,14 @@ ${uploadUrl}
             SET ocr_raw_response = ?,
                 extracted_data = ?,
                 portal_verification_data = ?
-          WHERE id = ?`,
+          WHERE id = ? AND student_id = ? AND verification_status = ?`,
         [
-          JSON.stringify(ocrResult.raw),
-          JSON.stringify(ocrResult.extracted),
+          JSON.stringify({ source: ocrResult.source, isMock: ocrResult.isMock, response: ocrResult.raw }),
+          JSON.stringify({ ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock }),
           portalResult ? JSON.stringify(portalResult) : null,
           documentId,
+          studentId,
+          DOCUMENT_VERIFICATION_STATUS.OCR_PROCESSING,
         ]
       );
 
@@ -281,8 +312,8 @@ ${uploadUrl}
       const decision = await VerificationDecisionService.evaluateDocumentVerification({
         documentId,
         studentId,
-        docType,
-        extractedOcr: ocrResult.extracted,
+        docType: docRow.doc_type,
+        extractedOcr: { ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock },
         portalVerification: portalResult,
         connection,
       });
@@ -297,31 +328,65 @@ ${uploadUrl}
     }
   }
 
+  static async markOcrJobFailed({ documentId, studentId, reason }, db = pool) {
+    await db.execute(
+      `UPDATE adm_student_documents SET verification_status = ?,
+              extracted_data = JSON_OBJECT('processingError', ?)
+        WHERE id = ? AND student_id = ? AND verification_status = ?`,
+      [DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW, String(reason || 'OCR processing failed').slice(0, 500), documentId, studentId, DOCUMENT_VERIFICATION_STATUS.OCR_PROCESSING]
+    );
+    await db.execute(
+      `UPDATE adm_students SET overall_status = ?,
+              discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[OCR processing failed]: document requires staff review.')
+        WHERE id = ? AND overall_status = ?`,
+      [STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, studentId, STUDENT_OVERALL_STATUS.UNDER_REVIEW]
+    );
+  }
+
   /**
    * Outbox worker job handler for MIGRATE_GDRIVE
    */
-  static async migrateGDriveJob({ documentId, studentId, studentCnic, filename, r2Key, fileMime }, db = pool) {
+  static async migrateGDriveJob({ documentId, studentId, filename, r2Key, fileMime }, db = pool) {
+    const [documents] = await db.execute(
+      `SELECT storage_provider, storage_key, gdrive_file_id, verification_status
+         FROM adm_student_documents WHERE id = ? AND student_id = ?`,
+      [documentId, studentId]
+    );
+    if (!documents.length) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document to archive was not found.');
+    const document = documents[0];
+    if (![DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED].includes(document.verification_status)) {
+      throw new AppError(409, 'DOCUMENT_NOT_VERIFIED', 'Only verified documents can be archived.');
+    }
+    if (document.gdrive_file_id) {
+      await StorageService.deleteFile(document.storage_key || r2Key, document.storage_provider);
+      return { gdriveFileId: document.gdrive_file_id, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
+    }
     const migration = await StorageService.migrateToGoogleDrive({
-      storageKey: r2Key,
+      storageKey: document.storage_key || r2Key,
       filename,
       mimeType: fileMime,
-      studentCnic,
+      storageProvider: document.storage_provider,
     });
 
-    await db.execute(
-      `UPDATE adm_student_documents
-          SET gdrive_file_id = ?,
-              storage_state = ?
-        WHERE id = ?`,
-      [migration.gdriveFileId, migration.storageState, documentId]
-    );
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [updated] = await connection.execute(
+        `UPDATE adm_student_documents SET gdrive_file_id = ?, storage_state = ?
+          WHERE id = ? AND student_id = ? AND gdrive_file_id IS NULL
+            AND verification_status IN (?, ?)`,
+        [migration.gdriveFileId, migration.storageState, documentId, studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+      );
+      if (updated.affectedRows !== 1) throw new AppError(409, 'ARCHIVE_STATE_CHANGED', 'Document state changed during archive.');
+      await connection.execute(`UPDATE adm_students SET gdrive_folder_id = COALESCE(gdrive_folder_id, ?) WHERE id = ?`, [migration.gdriveFolderId, studentId]);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally { connection.release(); }
 
-    await db.execute(
-      `UPDATE adm_students
-          SET gdrive_folder_id = COALESCE(gdrive_folder_id, ?)
-        WHERE id = ?`,
-      [migration.gdriveFolderId, studentId]
-    );
+    // Purge only after Drive confirms the file and the archive ID is durable in MySQL.
+    await StorageService.deleteFile(document.storage_key || r2Key, document.storage_provider);
 
     return migration;
   }
@@ -330,6 +395,15 @@ ${uploadUrl}
    * Staff query: List candidates needing review or with discrepancies
    */
   static async listManualReviewQueue({ limit = 50, offset = 0, status }, db = pool) {
+    const allowedStatuses = [
+      STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
+      STUDENT_OVERALL_STATUS.UNDER_REVIEW,
+      STUDENT_OVERALL_STATUS.DOCS_REQUESTED,
+      STUDENT_OVERALL_STATUS.VERIFIED,
+    ];
+    if (status && !allowedStatuses.includes(status)) {
+      throw new AppError(400, 'INVALID_QUEUE_STATUS', 'Choose a valid verification queue status.');
+    }
     const whereClauses = [];
     const params = [];
 
@@ -346,27 +420,11 @@ ${uploadUrl}
     }
 
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-    const safeOffset = Math.max(0, Number(offset) || 0);
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 25)));
+    const safeOffset = Math.max(0, Math.min(1_000_000, Math.trunc(Number(offset) || 0)));
 
-    let rows = [];
-    try {
-      const [queried] = await db.query(
-        `SELECT s.id AS student_id, s.application_no, s.cnic, s.full_name, s.father_name,
-                s.phone_normalized, s.fsc_obtained_marks, s.fsc_total_marks,
-                s.matric_obtained_marks, s.matric_total_marks,
-                s.overall_status, s.discrepancy_notes, s.created_at, s.updated_at,
-                (SELECT COUNT(*) FROM adm_student_documents d WHERE d.student_id = s.id) AS document_count,
-                (SELECT t.raw_token FROM adm_intake_tokens t WHERE t.student_id = s.id AND t.used_at IS NULL AND t.is_revoked = FALSE AND t.expires_at > CURRENT_TIMESTAMP(3) ORDER BY t.id DESC LIMIT 1) AS active_token
-           FROM adm_students s
-          ${whereSql}
-          ORDER BY s.updated_at DESC
-          LIMIT ${safeLimit} OFFSET ${safeOffset}`,
-        params
-      );
-      rows = queried;
-    } catch {
-      const [queried] = await db.query(
+    const [[rows], [countRows], [summaryRows]] = await Promise.all([
+      db.query(
         `SELECT s.id AS student_id, s.application_no, s.cnic, s.full_name, s.father_name,
                 s.phone_normalized, s.fsc_obtained_marks, s.fsc_total_marks,
                 s.matric_obtained_marks, s.matric_total_marks,
@@ -377,11 +435,16 @@ ${uploadUrl}
           ORDER BY s.updated_at DESC
           LIMIT ${safeLimit} OFFSET ${safeOffset}`,
         params
-      );
-      rows = queried;
-    }
+      ),
+      db.query(`SELECT COUNT(*) AS total FROM adm_students s ${whereSql}`, params),
+      db.query(
+        `SELECT overall_status, COUNT(*) AS total FROM adm_students
+          WHERE overall_status IN (?, ?, ?, ?) GROUP BY overall_status`,
+        allowedStatuses
+      ),
+    ]);
 
-    return rows.map((r) => ({
+    const items = rows.map((r) => ({
       studentId: r.student_id,
       applicationNo: r.application_no,
       cnic: r.cnic,
@@ -395,10 +458,18 @@ ${uploadUrl}
       overallStatus: r.overall_status,
       discrepancyNotes: r.discrepancy_notes,
       documentCount: Number(r.document_count),
-      activeToken: r.active_token || null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));
+    const summary = Object.fromEntries(allowedStatuses.map((value) => [value, 0]));
+    for (const row of summaryRows) summary[row.overall_status] = Number(row.total);
+    return {
+      items,
+      total: Number(countRows[0]?.total || 0),
+      limit: safeLimit,
+      offset: safeOffset,
+      summary,
+    };
   }
 
   /**
@@ -429,12 +500,13 @@ ${uploadUrl}
    */
   static async getStudentReviewDossier(studentId, db = pool) {
     const [students] = await db.execute(
-      `SELECT id, application_no, cnic, full_name, father_name, phone_normalized, email,
+      `SELECT s.id, s.application_no, s.cnic, s.full_name, s.father_name, s.phone_normalized, s.email,
               fsc_roll_no, fsc_obtained_marks, fsc_total_marks,
               matric_obtained_marks, matric_total_marks,
-              overall_status, discrepancy_notes, gdrive_folder_id, created_at, updated_at
-         FROM adm_students
-        WHERE id = ?`,
+              s.overall_status, s.discrepancy_notes, s.gdrive_folder_id, s.verified_at,
+              s.verified_by, verifier.display_name AS verified_by_name, s.created_at, s.updated_at
+         FROM adm_students s LEFT JOIN sys_users verifier ON verifier.id = s.verified_by
+        WHERE s.id = ?`,
       [studentId]
     );
 
@@ -443,13 +515,14 @@ ${uploadUrl}
     }
 
     const [documents] = await db.execute(
-      `SELECT id AS document_id, doc_type, original_filename, file_mime, file_size,
+      `SELECT d.id AS document_id, d.doc_type, d.original_filename, d.file_mime, d.file_size,
               storage_provider, storage_key, gdrive_file_id, storage_state,
               ocr_raw_response, extracted_data, portal_verification_data,
-              verification_status, verified_at, created_at
-         FROM adm_student_documents
-        WHERE student_id = ?
-        ORDER BY id ASC`,
+              d.verification_status, d.verified_at, d.reviewed_at, d.review_method, d.review_notes,
+              d.reviewed_by, reviewer.display_name AS reviewed_by_name, d.created_at
+         FROM adm_student_documents d LEFT JOIN sys_users reviewer ON reviewer.id = d.reviewed_by
+        WHERE d.student_id = ?
+        ORDER BY d.id ASC`,
       [studentId]
     );
 
@@ -463,10 +536,24 @@ ${uploadUrl}
 
     return {
       student: students[0],
-      documents: documents.map((d) => ({
-        ...d,
-        extractedData: typeof d.extracted_data === 'string' ? JSON.parse(d.extracted_data) : d.extracted_data,
-        portalVerificationData: typeof d.portal_verification_data === 'string' ? JSON.parse(d.portal_verification_data) : d.portal_verification_data,
+      documents: await Promise.all(documents.map(async (d) => {
+        const extractedData = typeof d.extracted_data === 'string' ? JSON.parse(d.extracted_data) : d.extracted_data;
+        const configuredSource = extractedData?.boardName
+          ? await BoardSourceService.findForBoard(extractedData.boardName, extractedData.examYear)
+          : null;
+        return {
+          ...d,
+          extractedData,
+          portalVerificationData: typeof d.portal_verification_data === 'string' ? JSON.parse(d.portal_verification_data) : d.portal_verification_data,
+          boardSource: configuredSource ? {
+            id: configuredSource.id,
+            boardName: configuredSource.board_name,
+            academicYear: configuredSource.academic_year,
+            sourceType: configuredSource.source_type,
+            resultUrl: configuredSource.result_url,
+            gazetteFilename: configuredSource.gazette_filename,
+          } : null,
+        };
       })),
       tokens: tokens.map((t) => ({
         ...t,
@@ -488,6 +575,7 @@ ${uploadUrl}
     matricTotalMarks,
     discrepancyReason,
     notes,
+    reviewMethod,
     actorId,
     actorType = 'STAFF_USER',
   }, db = pool) {
@@ -496,24 +584,42 @@ ${uploadUrl}
       await connection.beginTransaction();
 
       const [studentRows] = await connection.execute(
-        `SELECT id, overall_status, fsc_obtained_marks, matric_obtained_marks FROM adm_students WHERE id = ? FOR UPDATE`,
+        `SELECT id, cnic, overall_status, fsc_obtained_marks, matric_obtained_marks, phone_normalized, full_name FROM adm_students WHERE id = ? FOR UPDATE`,
         [studentId]
       );
       if (!studentRows.length) throw new AppError(404, 'STUDENT_NOT_FOUND', 'Student not found.');
       const studentBefore = studentRows[0];
+      let targetDocument = null;
+      if (documentId) {
+        const [documentRows] = await connection.execute(
+          `SELECT id, doc_type, verification_status, storage_state, gdrive_file_id, storage_key, original_filename, file_mime
+             FROM adm_student_documents WHERE id = ? AND student_id = ? FOR UPDATE`,
+          [documentId, studentId]
+        );
+        if (!documentRows.length) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'The selected document does not belong to this candidate.');
+        targetDocument = documentRows[0];
+      }
 
       if (action === 'APPROVE') {
-        if (documentId) {
-          await connection.execute(
-            `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
-            [DOCUMENT_VERIFICATION_STATUS.MATCHED, documentId]
-          );
-        }
+        if (!documentId) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose a document before approving verification.');
         await connection.execute(
-          `UPDATE adm_students SET overall_status = ? WHERE id = ?`,
-          [STUDENT_OVERALL_STATUS.VERIFIED, studentId]
+          `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
+                  reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
+            WHERE id = ? AND student_id = ?`,
+          [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod, notes.trim(), documentId, studentId]
         );
+        const [pending] = await connection.execute(`SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`, [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]);
+        if (!pending.length) {
+          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+        } else {
+          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
+        }
+        await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
       } else if (action === 'OVERRIDE_MARKS') {
+        if (!documentId) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose the document whose marks are being overridden.');
+        if (![DOCUMENT_TYPES.FSC_MARKSHEET, DOCUMENT_TYPES.MATRIC_MARKSHEET].includes(targetDocument.doc_type) || (fscObtainedMarks === undefined && matricObtainedMarks === undefined)) {
+          throw new AppError(400, 'MARKS_REQUIRED', 'Choose a marksheet and provide at least one verified marks value.');
+        }
         await connection.execute(
           `UPDATE adm_students
               SET fsc_obtained_marks = COALESCE(?, fsc_obtained_marks),
@@ -527,34 +633,50 @@ ${uploadUrl}
             fscTotalMarks ?? 1100,
             matricObtainedMarks ?? null,
             matricTotalMarks ?? 1100,
-            STUDENT_OVERALL_STATUS.VERIFIED,
+            STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
             studentId,
           ]
         );
-        if (documentId) {
-          await connection.execute(
-            `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3) WHERE id = ?`,
-            [DOCUMENT_VERIFICATION_STATUS.MATCHED, documentId]
-          );
-        }
-      } else if (action === 'REJECT_AND_REISSUE') {
-        if (documentId) {
-          await connection.execute(
-            `UPDATE adm_student_documents SET verification_status = ? WHERE id = ?`,
-            [DOCUMENT_VERIFICATION_STATUS.REJECTED, documentId]
-          );
-        }
         await connection.execute(
-          `UPDATE adm_students SET overall_status = ?, discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Manual Reissue]: ', ?) WHERE id = ?`,
+          `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
+                  reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
+            WHERE id = ? AND student_id = ?`,
+          [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod, notes.trim(), documentId, studentId]
+        );
+        const [pending] = await connection.execute(`SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`, [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]);
+        if (!pending.length) {
+          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+        } else {
+          await connection.execute(`UPDATE adm_students SET verified_at = NULL, verified_by = NULL WHERE id = ?`, [studentId]);
+        }
+        await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
+      } else if (action === 'MARK_DISCREPANCY') {
+        if (!targetDocument) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose a document to mark as discrepant.');
+        if (!discrepancyReason?.trim()) throw new AppError(400, 'DISCREPANCY_REASON_REQUIRED', 'Enter the reason for the discrepancy.');
+        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.DISCREPANCY, actorId, reviewMethod || 'STAFF_DOCUMENT', discrepancyReason.trim(), documentId, studentId]);
+        await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL, discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Staff discrepancy]: ', ?) WHERE id = ?`, [STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, discrepancyReason.trim(), studentId]);
+      } else if (action === 'REJECT_AND_REISSUE') {
+        if (!targetDocument) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose the document that needs to be uploaded again.');
+        if (!studentBefore.phone_normalized) throw new AppError(400, 'PHONE_REQUIRED', 'Add a valid phone number before reissuing an upload link.');
+        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.REJECTED, actorId, reviewMethod || 'STAFF_DOCUMENT', notes.trim(), documentId, studentId]);
+        await connection.execute(
+          `UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL, discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Manual Reissue]: ', ?) WHERE id = ?`,
           [STUDENT_OVERALL_STATUS.DOCS_REQUESTED, notes || 'Staff requested re-upload', studentId]
         );
-        // Mint fresh token
-        await IntakeTokenService.generateToken({
+        await connection.execute(`UPDATE adm_intake_tokens SET is_revoked = TRUE WHERE student_id = ? AND used_at IS NULL AND is_revoked = FALSE`, [studentId]);
+        const token = await IntakeTokenService.generateToken({
           studentId,
-          allowedDocTypes: [DOCUMENT_TYPES.FSC_MARKSHEET],
+          allowedDocTypes: [targetDocument.doc_type],
           expiresInHours: 48,
           connection,
         });
+        const uploadUrl = `${config.APP_ORIGIN}/upload/${token.rawToken}`;
+        await dispatchJob({ queueName: 'whatsapp_outreach', jobType: EVENT_TYPES.WHATSAPP_MESSAGE, payload: {
+          recipientPhone: studentBefore.phone_normalized,
+          messageType: 'TRANSACTIONAL',
+          messageText: `Admissions document update for ${studentBefore.full_name}: ${notes || 'Please upload a replacement document.'}\n${uploadUrl}\nThis link expires in 48 hours.`,
+          metadata: { module: 'MODULE_3_VERIFICATION', studentId, tokenId: token.tokenId },
+        }, connection });
       }
 
       await logAudit({
@@ -564,18 +686,38 @@ ${uploadUrl}
         action: `MANUAL_REVIEW_${action}`,
         entityTable: 'adm_students',
         entityId: String(studentId),
-        payloadBefore: studentBefore,
-        payloadAfter: { action, fscObtainedMarks, matricObtainedMarks, notes },
+        before: studentBefore,
+        after: { action, documentId, fscObtainedMarks, matricObtainedMarks, reviewMethod, notes, actorId },
         connection,
       });
 
+      const [studentAfter] = await connection.execute(`SELECT overall_status, verified_at, verified_by FROM adm_students WHERE id = ?`, [studentId]);
       await connection.commit();
-      return { success: true, action, studentId };
+      return { success: true, action, studentId, ...studentAfter[0] };
     } catch (err) {
       await connection.rollback();
       throw err;
     } finally {
       connection.release();
     }
+  }
+
+  static async _queueManualArchive({ targetDocument, studentId, studentCnic, connection }) {
+    if (!targetDocument || !targetDocument.storage_key || targetDocument.gdrive_file_id
+      || [STORAGE_STATE.ARCHIVED_GDRIVE, STORAGE_STATE.DELETED].includes(targetDocument.storage_state)) return;
+    if ([DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED].includes(targetDocument.verification_status)) return;
+    await dispatchJob({
+      queueName: 'storage_migration',
+      jobType: EVENT_TYPES.MIGRATE_GDRIVE,
+      payload: {
+        documentId: targetDocument.id,
+        studentId,
+        studentCnic: studentCnic || '0000000000000',
+        filename: targetDocument.original_filename,
+        r2Key: targetDocument.storage_key,
+        fileMime: targetDocument.file_mime,
+      },
+      connection,
+    });
   }
 }

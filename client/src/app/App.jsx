@@ -3,6 +3,7 @@ import { useAuth } from '../modules/auth/AuthProvider.jsx';
 import { LoginPage } from '../modules/auth/LoginPage.jsx';
 import { UserManagementModal } from '../modules/auth/UserManagementModal.jsx';
 import { MarketingModuleView } from '../modules/marketing/MarketingModuleView.jsx';
+import { VerificationModuleView } from '../modules/verification/VerificationModuleView.jsx';
 import { Button } from '../core/ui/primitives.jsx';
 import {
   IconDashboard,
@@ -146,12 +147,14 @@ export function App() {
 
           {currentNav === 'verification' && (
             <div>
-              <div className="mb-6"><p className="mb-1 text-xs font-semibold text-blue-700">Admissions workspace</p><h1 className="m-0 text-[26px] font-bold tracking-tight text-slate-900">Document verification</h1></div>
-              <section className="rounded-lg border border-slate-200 bg-white px-6 py-12 text-center shadow-[0_2px_8px_rgba(20,30,50,0.04)]">
-                <span className="mx-auto grid size-10 place-items-center rounded-full bg-blue-50 text-blue-700"><IconDocumentCheck className="size-5" /></span>
-                <h2 className="mb-0 mt-4 text-sm font-semibold text-slate-800">Verification workspace</h2>
-                <p className="mb-0 mt-1.5 text-xs text-slate-500">Document review will be available here.</p>
+              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="mb-1 text-xs font-semibold text-blue-700">Admissions workspace</p>
+                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Document verification</h1>
+                </div>
+                <p className="mb-1 text-xs font-medium text-slate-500">Intake & Discrepancy Management</p>
               </section>
+              <VerificationModuleView />
             </div>
           )}
         </main>

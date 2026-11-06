@@ -63,6 +63,18 @@ try {
   } catch (mErr) {
     console.warn('Migration note:', mErr.message);
   }
+
+  // Idempotent migration for adm_intake_tokens
+  try {
+    const [tokenCols] = await connection.query(`SHOW COLUMNS FROM adm_intake_tokens`);
+    const colNames = tokenCols.map((c) => c.Field.toLowerCase());
+    if (!colNames.includes('raw_token')) {
+      await connection.query(`ALTER TABLE adm_intake_tokens ADD COLUMN raw_token VARCHAR(128) NULL AFTER token_hash`);
+      console.info('Added raw_token column to adm_intake_tokens');
+    }
+  } catch (tErr) {
+    // If table doesn't exist yet, it was created by schema.sql
+  }
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

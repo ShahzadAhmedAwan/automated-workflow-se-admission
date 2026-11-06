@@ -1,0 +1,57 @@
+export const DOCUMENT_TYPES = Object.freeze({
+  MATRIC_MARKSHEET: 'MATRIC_MARKSHEET',
+  FSC_MARKSHEET: 'FSC_MARKSHEET',
+  CNIC_FRONT: 'CNIC_FRONT',
+  CNIC_BACK: 'CNIC_BACK',
+  DOMICILE: 'DOMICILE',
+  EQUIVALENCE_CERTIFICATE: 'EQUIVALENCE_CERTIFICATE',
+  OTHER: 'OTHER',
+});
+
+export const DOCUMENT_VERIFICATION_STATUS = Object.freeze({
+  PENDING: 'PENDING',
+  OCR_PROCESSING: 'OCR_PROCESSING',
+  MATCHED: 'MATCHED',
+  DISCREPANCY: 'DISCREPANCY',
+  PORTAL_VERIFIED: 'PORTAL_VERIFIED',
+  MANUAL_REVIEW: 'MANUAL_REVIEW',
+  REJECTED: 'REJECTED',
+});
+
+export const STUDENT_OVERALL_STATUS = Object.freeze({
+  PENDING: 'PENDING',
+  DOCS_REQUESTED: 'DOCS_REQUESTED',
+  UNDER_REVIEW: 'UNDER_REVIEW',
+  VERIFIED: 'VERIFIED',
+  REJECTED: 'REJECTED',
+  NEEDS_MANUAL_REVIEW: 'NEEDS_MANUAL_REVIEW',
+});
+
+export const STORAGE_PROVIDER = Object.freeze({
+  R2: 'R2',
+  LOCAL_MOCK: 'LOCAL_MOCK',
+  GDRIVE: 'GDRIVE',
+});
+
+export const STORAGE_STATE = Object.freeze({
+  ACTIVE_R2: 'ACTIVE_R2',
+  ARCHIVED_GDRIVE: 'ARCHIVED_GDRIVE',
+  DELETED: 'DELETED',
+});
+
+export const VERIFICATION_PERMISSIONS = Object.freeze({
+  DOCUMENTS_REVIEW: 'verification.documents.review',
+  TOKENS_REISSUE: 'verification.tokens.reissue',
+  CANDIDATES_READ: 'candidates.read',
+});
+
+export const TOKEN_CONFIG = Object.freeze({
+  EXPIRATION_HOURS: 48,
+  MAX_ATTEMPTS: 3,
+  BYTES: 32,
+});
+
+export const OCR_CONFIG = Object.freeze({
+  THROTTLE_MS: 4500, // Mandated 4.5s sequential throttle for 15 RPM Free Tier compliance
+  MODEL_NAME: 'gemini-2.5-flash',
+});

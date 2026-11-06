@@ -1,0 +1,37 @@
+{
+  "FSC_MARKSHEET": {
+    "candidate_name": "Muhammad Usman",
+    "father_name": "Tariq Mahmood",
+    "roll_number": "542198",
+    "registration_number": "22-FSC-9821",
+    "board_name": "FBISE ISLAMABAD",
+    "exam_year": 2025,
+    "total_marks": 1100,
+    "obtained_marks": 940,
+    "percentage": 85.45,
+    "is_pass": true,
+    "subjects": [
+      { "subject": "Mathematics", "total": 200, "obtained": 182 },
+      { "subject": "Physics", "total": 200, "obtained": 174 },
+      { "subject": "Chemistry", "total": 200, "obtained": 168 }
+    ]
+  },
+  "MATRIC_MARKSHEET": {
+    "candidate_name": "Muhammad Usman",
+    "father_name": "Tariq Mahmood",
+    "roll_number": "104928",
+    "registration_number": "20-SSC-1142",
+    "board_name": "BISE RAWALPINDI",
+    "exam_year": 2023,
+    "total_marks": 1100,
+    "obtained_marks": 980,
+    "percentage": 89.09,
+    "is_pass": true
+  },
+  "CNIC_FRONT": {
+    "candidate_name": "Muhammad Usman",
+    "father_name": "Tariq Mahmood",
+    "cnic": "37405-1234567-1",
+    "date_of_birth": "2006-08-14"
+  }
+}

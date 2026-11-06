@@ -94,10 +94,20 @@ async function startWhatsAppBot() {
 
       if (!rawText.trim()) continue;
 
-      const senderPhone = normalizePhoneNumber(jid.split('@')[0]);
+      let senderPhone = null;
+      // If jid is an @lid (modern WhatsApp Multi-Device privacy ID), extract phone from remoteJidAlt / participant
+      if (jid.endsWith('@lid')) {
+        const alt = msg.key.remoteJidAlt || msg.key.participantAlt || msg.key.participant;
+        if (alt && (alt.endsWith('@s.whatsapp.net') || alt.includes('@s.whatsapp.net'))) {
+          senderPhone = normalizePhoneNumber(alt.split('@')[0]);
+        }
+      }
+      if (!senderPhone) {
+        senderPhone = normalizePhoneNumber(jid.split('@')[0]);
+      }
       if (!senderPhone) continue;
 
-      console.log(`\n📩 Incoming from +${senderPhone}: "${rawText}"`);
+      console.log(`\n📩 Incoming from +${senderPhone} [JID: ${jid}]: "${rawText}"`);
 
       try {
         // Send presence (typing...)
@@ -138,25 +148,49 @@ function startOutboxPollingLoop() {
 
       for (const job of jobs) {
         const { recipientPhone, messageText } = job.payload;
-        const jid = `${recipientPhone}@s.whatsapp.net`;
+        
+        // Handle both standard phone numbers and modern WhatsApp LIDs
+        let jid = `${recipientPhone}@s.whatsapp.net`;
+        if (recipientPhone.length >= 14 && !recipientPhone.startsWith('92')) {
+          jid = `${recipientPhone}@lid`;
+        }
 
-        console.log(`\n📤 Dispatching scheduled outreach to +${recipientPhone}...`);
+        console.log(`\n📤 Dispatching scheduled outreach to ${jid}...`);
 
-        // Simulate typing for 2 seconds
-        await sock.sendPresenceUpdate('composing', jid);
-        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          // Simulate typing for 2 seconds
+          await sock.sendPresenceUpdate('composing', jid);
+          await new Promise((r) => setTimeout(r, 2000));
 
-        await sock.sendMessage(jid, { text: messageText });
-        await sock.sendPresenceUpdate('paused', jid);
+          await sock.sendMessage(jid, { text: messageText });
+          await sock.sendPresenceUpdate('paused', jid);
 
-        console.log(`✅ Message delivered to +${recipientPhone}`);
+          console.log(`✅ Message delivered to ${jid}`);
 
-        // Mark job completed
-        await pool.execute(
-          `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL
-           WHERE id = ?`,
-          [job.id]
-        );
+          // Mark job completed
+          await pool.execute(
+            `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL, last_error = NULL
+             WHERE id = ?`,
+            [job.id]
+          );
+        } catch (deliveryErr) {
+          console.error(`❌ Delivery failed for ${jid}:`, deliveryErr.message);
+          // If sending to @s.whatsapp.net failed for a 15-digit number, retry with @lid
+          if (!jid.endsWith('@lid') && recipientPhone.length >= 14) {
+            try {
+              const lidJid = `${recipientPhone}@lid`;
+              await sock.sendMessage(lidJid, { text: messageText });
+              console.log(`✅ Message delivered via fallback to ${lidJid}`);
+              await pool.execute(
+                `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL, last_error = NULL
+                 WHERE id = ?`,
+                [job.id]
+              );
+              continue;
+            } catch {}
+          }
+          throw deliveryErr;
+        }
       }
     } catch (err) {
       // Outbox poll tick silent error catch
@@ -164,4 +198,7 @@ function startOutboxPollingLoop() {
   }, 5000);
 }
 
-startWhatsAppBot().catch(console.error);
+startWhatsAppBot().catch((err) => {
+  console.error('Fatal Baileys crash:', err);
+  process.exit(1);
+});

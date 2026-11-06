@@ -10,3 +10,5 @@ npm-debug.log*
 
 # Reference folder
 whatsapp-bot/
+data/uploads/
+server/data/uploads/

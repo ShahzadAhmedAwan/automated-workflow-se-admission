@@ -17,7 +17,8 @@
     "whatsapp:import-auth": "node scripts/import-existing-whatsapp-auth.js",
     "whatsapp:live": "node scripts/run_live_whatsapp.js",
     "broadcast": "node scripts/broadcast-numbers.js",
-    "lead:reset": "node scripts/reset-lead.js"
+    "lead:reset": "node scripts/reset-lead.js",
+    "verification:reset": "node scripts/reset-verification.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",

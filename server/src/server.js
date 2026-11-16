@@ -1,10 +1,11 @@
+import cron from 'node-cron';
 import { createApp } from './app.js';
 import { config } from './core/config/env.js';
 import { closePool } from './core/db/pool.js';
 import { startOutboxWorker, registerJobHandler } from './core/queue/outboxBus.js';
 import { EVENT_TYPES } from './contracts/event-types.js';
 import { sendUserWelcomeEmail } from './core/mail/mailer.js';
-import { AdmissionIntakeService } from './modules/verification/index.js';
+import { AdmissionIntakeService, ExpirationReminderService } from './modules/verification/index.js';
 
 // Register background handlers for the Outbox worker
 registerJobHandler(EVENT_TYPES.USER_WELCOME_EMAIL, async (payload) => {
@@ -35,6 +36,18 @@ registerJobHandler(EVENT_TYPES.LEAD_QUALIFIED, async (payload) => {
   console.info(`[Admissions Worker] Created candidate from qualified lead #${payload.leadId}`);
 });
 
+// Module 3 Intake Token Expiration Reminder Worker (Runs every 15 minutes)
+const reminderCron = cron.schedule('*/15 * * * *', async () => {
+  try {
+    const result = await ExpirationReminderService.processExpiringTokens({ windowHours: 12 });
+    if (result.reminded > 0) {
+      console.info(`[Intake Reminder Cron] Dispatched ${result.reminded} WhatsApp expiration reminder(s) for impending deadlines.`);
+    }
+  } catch (error) {
+    console.error('[Intake Reminder Cron] Scheduled check failed:', error);
+  }
+});
+
 const app = createApp();
 const stopOutboxWorker = startOutboxWorker();
 const server = app.listen(config.PORT, () => {
@@ -46,6 +59,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.info(`${signal} received; shutting down gracefully.`);
+  if (reminderCron) reminderCron.stop();
   server.close(async (error) => {
     await stopOutboxWorker();
     try { await closePool(); } catch (closeError) { console.error('Database pool shutdown failed:', closeError); }

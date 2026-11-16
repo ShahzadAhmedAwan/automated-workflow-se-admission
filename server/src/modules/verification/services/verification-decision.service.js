@@ -8,6 +8,7 @@ import {
   TOKEN_CONFIG,
 } from '../verification.constants.js';
 import { config } from '../../../core/config/env.js';
+import { IdentityMatcherService } from './identity-matcher.service.js';
 
 export class VerificationDecisionService {
   /**
@@ -61,11 +62,13 @@ export class VerificationDecisionService {
     // (If student didn't claim marks initially, we accept the OCR marks as truth)
     const marksMatch = Number.isFinite(ocrMarks) && Number.isFinite(extractedOcr?.totalMarks) && extractedOcr.totalMarks > 0 && ocrMarks >= 0 && ocrMarks <= extractedOcr.totalMarks &&
       (!targetClaimedMarks || targetClaimedMarks === ocrMarks);
-    const normalizeName = (value) => String(value || '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
-    const ocrName = normalizeName(extractedOcr?.candidateName);
-    const portalName = normalizeName(portalVerification?.candidateName);
-    const applicantName = normalizeName(student.full_name);
-    const identityMatched = Boolean(ocrName && portalName && applicantName && ocrName === portalName && ocrName === applicantName);
+    const matchOcrPortal = extractedOcr?.candidateName && portalVerification?.candidateName
+      ? IdentityMatcherService.compareNames(extractedOcr.candidateName, portalVerification.candidateName).isMatch
+      : false;
+    const matchOcrStudent = extractedOcr?.candidateName && student.full_name
+      ? IdentityMatcherService.compareNames(extractedOcr.candidateName, student.full_name).isMatch
+      : false;
+    const identityMatched = matchOcrPortal && matchOcrStudent;
     const portalMatched = portalVerification?.isVerified === true && !portalVerification.isMock && Number(portalVerification.boardMarks) === ocrMarks && identityMatched;
 
     if (extractedOcr?.isMock || extractedOcr?.source === 'MOCK') {

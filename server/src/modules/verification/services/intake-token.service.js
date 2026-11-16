@@ -32,11 +32,26 @@ export class IntakeTokenService {
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
-    const [result] = await connection.execute(
-      `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt]
-    );
+    let result;
+    try {
+      const [res] = await connection.execute(
+        `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at, raw_token)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt, rawToken]
+      );
+      result = res;
+    } catch (err) {
+      if (err.code === 'ER_BAD_FIELD_ERROR') {
+        const [res] = await connection.execute(
+          `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt]
+        );
+        result = res;
+      } else {
+        throw err;
+      }
+    }
 
     return {
       tokenId: result.insertId,

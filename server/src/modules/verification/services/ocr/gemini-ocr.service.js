@@ -39,18 +39,33 @@ export class GeminiOcrService {
       await this._throttle();
 
       const base64Data = fileBuffer.toString('base64');
-      const prompt = `
-You are an expert OCR parser for Pakistani Educational Board Marksheets and Identity documents.
-Extract structured data from this document image/PDF into valid, pure JSON without any markdown code block formatting.
+      const isCnic = docType === 'CNIC_FRONT' || docType === 'CNIC_BACK';
+      const prompt = isCnic ? `
+You are an expert OCR parser for Pakistani National Identity Cards (CNIC / Smart Card / B-Form).
+Extract structured identity information strictly as legible from this document image into valid JSON without any markdown or code blocks.
 Document type: ${docType}
 
 Expected JSON Schema:
 {
-  "candidate_name": "string",
+  "candidate_name": "Full Name in English",
+  "father_name": "Father Name or Husband Name in English",
+  "cnic": "13-digit CNIC number without dashes or spaces, e.g. 8220312345671",
+  "dob": "Date of birth if visible, e.g. YYYY-MM-DD or DD.MM.YYYY",
+  "gender": "M or F if visible",
+  "expiry_date": "Card expiry date if visible"
+}
+` : `
+You are an expert OCR parser for Pakistani Educational Board Marksheets and Certificates.
+Extract structured academic result data strictly as legible from this document image/PDF into valid, pure JSON without any markdown code block formatting.
+Document type: ${docType}
+
+Expected JSON Schema:
+{
+  "candidate_name": "string (Candidate / Student Name exactly as written on marksheet)",
   "father_name": "string or null",
-  "roll_number": "string or null",
+  "roll_number": "string or null (Roll Number)",
   "registration_number": "string or null",
-  "board_name": "string (e.g. FBISE, BISE LAHORE, BISE AJK)",
+  "board_name": "string (e.g. BISE MIRPUR, BISE LAHORE, FBISE, BISE RAWALPINDI, etc. Identify the exact board name shown on the header)",
   "exam_year": 2024,
   "total_marks": 1100,
   "obtained_marks": 940,
@@ -58,7 +73,7 @@ Expected JSON Schema:
   "is_pass": true,
   "cnic": "string or null",
   "subjects": [
-    { "subject": "Mathematics", "total": 200, "obtained": 180 }
+    { "subject": "string", "total": 100, "obtained": 85 }
   ]
 }
 `;
@@ -159,6 +174,9 @@ Expected JSON Schema:
       percentage: numberOrNull(data.percentage) ?? (obtainedMarks !== null && totalMarks ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null),
       isPass: typeof (data.is_pass ?? data.isPass) === 'boolean' ? (data.is_pass ?? data.isPass) : null,
       cnic: data.cnic ? String(data.cnic).replace(/\D/g, '') : null,
+      dob: data.dob ? String(data.dob).trim() : null,
+      gender: data.gender ? String(data.gender).trim() : null,
+      expiryDate: (data.expiry_date || data.expiryDate) ? String(data.expiry_date || data.expiryDate).trim() : null,
       subjects: Array.isArray(data.subjects) ? data.subjects : [],
     };
   }

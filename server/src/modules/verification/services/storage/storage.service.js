@@ -139,6 +139,15 @@ export class StorageService {
     if (typeof storageKey !== 'string' || path.isAbsolute(storageKey)) throw new Error('Invalid storage key.');
     const base = path.resolve(LOCAL_STORAGE_DIR);
     const target = path.resolve(base, storageKey);
+    if (fs.existsSync(target)) return target;
+
+    // Check fallback in server/data/uploads or workspace root data/uploads
+    const altTarget = path.resolve(process.cwd(), 'server', 'data', 'uploads', storageKey);
+    if (fs.existsSync(altTarget)) return altTarget;
+
+    const altTarget2 = path.resolve(process.cwd(), 'data', 'uploads', storageKey);
+    if (fs.existsSync(altTarget2)) return altTarget2;
+
     if (target !== base && !target.startsWith(`${base}${path.sep}`)) throw new Error('Invalid storage key.');
     return target;
   }

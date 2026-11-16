@@ -5,6 +5,9 @@ export { DiscrepancyParserService } from './services/discrepancy-parser.service.
 export { GeminiOcrService } from './services/ocr/gemini-ocr.service.js';
 export { BoardRegistryService } from './services/scrapers/board-registry.service.js';
 export { StorageService } from './services/storage/storage.service.js';
+export { IdentityMatcherService } from './services/identity-matcher.service.js';
+export { ExpirationReminderService } from './services/expiration-reminder.service.js';
+export { GazetteSearchService } from './services/gazette-search.service.js';
 export {
   DOCUMENT_TYPES,
   DOCUMENT_VERIFICATION_STATUS,

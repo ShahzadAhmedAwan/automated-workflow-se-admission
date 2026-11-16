@@ -94,6 +94,17 @@ export const verificationApi = {
     return res.data;
   },
 
+  /**
+   * Staff: One-click Auto Dispatch missing document links in bulk
+   */
+  async autoDispatchMissing(payload = { expiresInHours: 48 }) {
+    const res = await apiRequest(`/verification/tokens/auto-dispatch-missing`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, true);
+    return res.data;
+  },
+
   async listBoardSources() {
     const res = await apiRequest('/verification/board-sources', { method: 'GET' }, true);
     return res.data;
@@ -115,5 +126,15 @@ export const verificationApi = {
 
   async downloadStudentDocument(studentId, documentId) {
     return apiRequestFile(`/verification/students/${studentId}/documents/${documentId}/file`);
+  },
+
+  /**
+   * Staff: Search configured board gazette PDF by candidate roll number
+   */
+  async searchGazette(documentId) {
+    const res = await apiRequest(`/verification/documents/${documentId}/search-gazette`, {
+      method: 'POST',
+    }, true);
+    return res.data;
   },
 };

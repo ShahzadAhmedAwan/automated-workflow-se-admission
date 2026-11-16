@@ -18,7 +18,7 @@ export class BoardSourceService {
 
   static async findForBoard(boardName, academicYear, db = pool) {
     const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, source_type, result_url, gazette_filename
+      `SELECT id, board_name, board_aliases, academic_year, source_type, result_url, gazette_filename, storage_provider, storage_key
          FROM adm_board_sources WHERE is_active = TRUE ORDER BY academic_year DESC`
     );
     const input = normalizeBoard(boardName);

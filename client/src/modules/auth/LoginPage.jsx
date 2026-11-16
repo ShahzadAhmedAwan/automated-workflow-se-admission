@@ -25,7 +25,7 @@ export function LoginPage({ sessionExpired = false }) {
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-cover bg-center opacity-[0.82]"
-        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1592930954854-7d00c87d0cf4?auto=format&fit=crop&w=1600&q=45')" }}
+        style={{ backgroundImage: "url('/login-background.png')" }}
       />
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-blue-950/50" />
       <section className="relative w-full max-w-[440px] rounded-2xl border border-white/80 bg-white px-6 py-7 shadow-[0_24px_80px_rgba(20,48,82,0.24)] sm:rounded-[22px] sm:px-9 sm:py-8" aria-label="Staff sign in">

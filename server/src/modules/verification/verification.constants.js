@@ -8,6 +8,20 @@ export const DOCUMENT_TYPES = Object.freeze({
   OTHER: 'OTHER',
 });
 
+export const MANDATORY_ADMISSION_DOCUMENTS = Object.freeze([
+  DOCUMENT_TYPES.CNIC_FRONT,
+  DOCUMENT_TYPES.FSC_MARKSHEET,
+  DOCUMENT_TYPES.MATRIC_MARKSHEET,
+]);
+
+export const ALL_ADMISSION_DOCUMENT_TYPES = Object.freeze([
+  { id: DOCUMENT_TYPES.CNIC_FRONT, label: 'CNIC Front', mandatory: true },
+  { id: DOCUMENT_TYPES.CNIC_BACK, label: 'CNIC Back', mandatory: false },
+  { id: DOCUMENT_TYPES.FSC_MARKSHEET, label: 'FSc / HSSC Marksheet', mandatory: true },
+  { id: DOCUMENT_TYPES.MATRIC_MARKSHEET, label: 'Matric / SSC Marksheet', mandatory: true },
+  { id: DOCUMENT_TYPES.DOMICILE, label: 'Domicile Certificate', mandatory: false },
+]);
+
 export const DOCUMENT_VERIFICATION_STATUS = Object.freeze({
   PENDING: 'PENDING',
   OCR_PROCESSING: 'OCR_PROCESSING',
@@ -54,5 +68,5 @@ export const TOKEN_CONFIG = Object.freeze({
 
 export const OCR_CONFIG = Object.freeze({
   THROTTLE_MS: 4500, // Mandated 4.5s sequential throttle for 15 RPM Free Tier compliance
-  MODEL_NAME: 'gemini-2.5-flash',
+  MODEL_NAME: 'gemini-3.1-flash-lite',
 });

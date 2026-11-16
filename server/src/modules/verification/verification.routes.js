@@ -141,3 +141,27 @@ verificationRoutes.post(
   requirePermission(VERIFICATION_PERMISSIONS.TOKENS_REISSUE),
   StaffVerificationController.reissueToken
 );
+
+// One-click Bulk Dispatch missing document upload links
+verificationRoutes.post(
+  '/tokens/auto-dispatch-missing',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.TOKENS_REISSUE),
+  StaffVerificationController.autoDispatchMissing
+);
+
+// Scan and dispatch 12-hour expiration reminders for tokens with pending documents
+verificationRoutes.post(
+  '/tokens/check-reminders',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.TOKENS_REISSUE),
+  StaffVerificationController.checkExpirationReminders
+);
+
+// On-demand automatic gazette PDF search by roll number for a marksheet document
+verificationRoutes.post(
+  '/documents/:documentId/search-gazette',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.DOCUMENTS_REVIEW),
+  StaffVerificationController.searchGazette
+);

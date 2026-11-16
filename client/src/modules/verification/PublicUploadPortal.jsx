@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button } from '../../core/ui/primitives.jsx';
-import { IconDocumentCheck, IconShield } from '../../core/icons/Icons.jsx';
+import { IconDocumentCheck, IconShield, IconUploadCloud } from '../../core/icons/Icons.jsx';
 
 const DOC_LABELS = {
   MATRIC_MARKSHEET: 'Matric / SSC Marksheet (Result Card)',
@@ -19,6 +19,8 @@ export function PublicUploadPortal({ token }) {
   const [error, setError] = useState(null);
   const [files, setFiles] = useState({});
   const [remarks, setRemarks] = useState('');
+  const [formError, setFormError] = useState('');
+  const [draggingDocType, setDraggingDocType] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -39,6 +41,7 @@ export function PublicUploadPortal({ token }) {
   }, [token]);
 
   function handleFileChange(docType, file) {
+    setFormError('');
     if (!file) {
       setFiles((prev) => {
         const next = { ...prev };
@@ -49,13 +52,13 @@ export function PublicUploadPortal({ token }) {
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      alert(`File size exceeds 5MB ceiling (${(file.size / (1024 * 1024)).toFixed(1)}MB). Please upload a smaller file.`);
+      setFormError(`“${file.name}” is larger than 5 MB. Please choose a smaller file.`);
       return;
     }
 
     const allowed = ['image/jpeg', 'image/png', 'application/pdf'];
     if (!allowed.includes(file.mimetype || file.type)) {
-      alert('Only JPEG, PNG images and PDF documents are allowed.');
+      setFormError('Choose a JPEG, PNG or PDF file.');
       return;
     }
 
@@ -65,10 +68,16 @@ export function PublicUploadPortal({ token }) {
     }));
   }
 
+  function handleDrop(docType, event) {
+    event.preventDefault();
+    setDraggingDocType(null);
+    handleFileChange(docType, event.dataTransfer.files?.[0] || null);
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (Object.keys(files).length === 0) {
-      alert('Please select at least one document to upload.');
+      setFormError('Choose at least one requested document before submitting.');
       return;
     }
 
@@ -85,7 +94,7 @@ export function PublicUploadPortal({ token }) {
       await verificationApi.submitDocuments(token, formData);
       setSuccess(true);
     } catch (err) {
-      alert(err.message || 'Upload failed. Please try again.');
+      setFormError(err.message || 'Upload failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -93,17 +102,20 @@ export function PublicUploadPortal({ token }) {
 
   if (loading) {
     return (
-      <main className="grid min-h-screen place-content-center justify-items-center gap-3 bg-[#f8fafc] text-slate-500">
-        <span className="size-8 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
-        <p className="text-sm font-medium">Validating secure upload link…</p>
+      <main className="grid min-h-screen place-content-center justify-items-center gap-4 bg-[#f4f7fb] px-4 text-slate-500">
+        <span className="grid size-12 place-items-center rounded-2xl border border-blue-100 bg-white text-blue-700 shadow-sm">
+          <span className="size-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
+        </span>
+        <p className="text-sm font-medium">Validating your secure upload link…</p>
       </main>
     );
   }
 
   if (error) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-4 text-slate-800">
-        <div className="w-full max-w-md rounded-xl border border-rose-200 bg-white p-6 text-center shadow-lg sm:p-8">
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb] p-4 text-slate-800">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-[0_12px_36px_rgba(20,48,82,0.08)] sm:p-8">
+          <img src="/department-logo.png" alt="Department of Software Engineering" className="mx-auto mb-6 size-12 object-contain" />
           <div className="mx-auto grid size-12 place-items-center rounded-full bg-rose-50 text-rose-600">
             <svg className="size-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -121,10 +133,11 @@ export function PublicUploadPortal({ token }) {
 
   if (success) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-4 text-slate-800">
-        <div className="w-full max-w-md rounded-xl border border-emerald-200 bg-white p-6 text-center shadow-lg sm:p-8">
-          <div className="mx-auto grid size-12 place-items-center rounded-full bg-emerald-50 text-emerald-600">
-            <IconDocumentCheck className="size-6" />
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f7fb] p-4 text-slate-800">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-[0_12px_36px_rgba(20,48,82,0.08)] sm:p-8">
+          <img src="/department-logo.png" alt="Department of Software Engineering" className="mx-auto mb-6 size-12 object-contain" />
+          <div className="mx-auto grid size-14 place-items-center rounded-full bg-emerald-50 text-emerald-600">
+            <IconDocumentCheck className="size-7" />
           </div>
           <h1 className="mt-4 text-xl font-bold text-slate-900">Documents Submitted!</h1>
           <p className="mt-2 text-sm text-slate-600">
@@ -145,128 +158,154 @@ export function PublicUploadPortal({ token }) {
   const expiresDate = new Date(tokenData.expiresAt).toLocaleString();
 
   return (
-    <div className="min-h-screen bg-[#f4f7fb] py-8 text-slate-800 sm:py-12">
-      <div className="mx-auto w-full max-w-2xl px-4">
-        {/* Header banner */}
-        <header className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="flex items-center gap-3">
-            <img src="/department-logo.png" alt="Department logo" className="size-12 object-contain" />
+    <main className="min-h-screen bg-[#f4f7fb] px-4 py-6 text-slate-800 sm:px-6 sm:py-10">
+      <div className="mx-auto w-full max-w-xl">
+        <header className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-slate-200/90 bg-white px-4 py-4 shadow-[0_2px_8px_rgba(20,30,50,0.035)] sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <img src="/department-logo.png" alt="Department of Software Engineering" className="size-11 shrink-0 object-contain" />
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-blue-700">Department of Software Engineering</p>
-              <h1 className="text-base font-bold text-slate-900 sm:text-lg">Document Verification Portal</h1>
+              <p className="mb-1 text-[9px] font-bold uppercase tracking-[.12em] text-blue-700 sm:text-[10px]">Department of Software Engineering</p>
+              <h1 className="m-0 text-sm font-bold leading-tight tracking-[-.02em] text-slate-900 sm:text-base">Document Verification Portal</h1>
             </div>
           </div>
-          <span className="hidden items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700 sm:inline-flex">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[10px] font-semibold text-blue-700 sm:px-3 sm:text-[11px]">
             <IconShield className="size-3.5" />
-            Secure Single-Use
+            <span className="sm:hidden">Secure</span>
+            <span className="hidden sm:inline">Secure single-use</span>
           </span>
         </header>
 
-        {/* Applicant Context Card */}
-        <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50/60 p-4 text-xs sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 pb-3">
-            <div>
-              <span className="text-slate-500">Applicant: </span>
-              <strong className="text-slate-900">{tokenData.maskedFullName}</strong>
+        <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_2px_8px_rgba(20,30,50,0.025)] sm:p-5" aria-label="Applicant and link details">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[.09em] text-slate-500">Applicant</p>
+              <p className="m-0 truncate text-sm font-semibold text-slate-900">{tokenData.maskedFullName}</p>
             </div>
-            {tokenData.applicationNo && (
+            {tokenData.applicationNo && <div className="text-right">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[.09em] text-slate-500">Application no.</p>
+              <p className="m-0 font-mono text-xs font-semibold text-slate-900">{tokenData.applicationNo}</p>
+            </div>}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-slate-100 pt-3 text-[11px]">
+            <span className="text-slate-500">Submission attempt <strong className="ml-1 font-semibold text-slate-800">#{tokenData.attemptCount}</strong></span>
+            <span className="text-slate-500">Link expires <strong className="ml-1 font-semibold text-amber-700">{expiresDate}</strong></span>
+          </div>
+        </section>
+
+        <form onSubmit={handleSubmit} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_8px_28px_rgba(20,48,82,0.055)]">
+          <div className="px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700">
+                <IconUploadCloud className="size-[18px]" />
+              </span>
               <div>
-                <span className="text-slate-500">Application #: </span>
-                <strong className="font-mono text-slate-900">{tokenData.applicationNo}</strong>
+                <h2 className="m-0 text-sm font-bold tracking-[-.01em] text-slate-900">Documents to upload</h2>
+                <p className="mb-0 mt-1 text-xs leading-5 text-slate-500">
+                  Upload at least one requested document. Use a clear photo or scan where your name, roll number and marks are readable.
+                </p>
               </div>
-            )}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-medium text-slate-500">
+              <span>JPEG, PNG or PDF</span>
+              <span>Maximum 5 MB per file</span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 text-[11px] text-slate-600">
-            <span>Submission Attempt: <strong>#{tokenData.attemptCount}</strong></span>
-            <span>Link Expires: <strong className="text-amber-700">{expiresDate}</strong></span>
-          </div>
-        </div>
 
-        {/* Form container */}
-        <form onSubmit={handleSubmit} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
-          <h2 className="text-sm font-bold text-slate-900">Required Documents</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Upload clear, high-resolution photos or scanned PDF files (max 5MB each). Ensure student name, roll number, and obtained marks are clearly visible.
-          </p>
-
-          <div className="mt-6 space-y-4">
+          <div className="space-y-3 px-5 pb-5 sm:px-6">
             {allowedDocs.map((docType) => {
               const label = DOC_LABELS[docType] || docType.replace(/_/g, ' ');
               const selectedFile = files[docType];
 
               return (
-                <div key={docType} className="rounded-lg border border-slate-200 p-4 transition-colors hover:border-blue-300">
-                  <div className="flex items-center justify-between gap-3">
-                    <label htmlFor={`file-${docType}`} className="cursor-pointer text-xs font-semibold text-slate-800">
-                      {label}
-                      <span className="ml-1 text-rose-500">*</span>
-                    </label>
-                    {selectedFile && (
-                      <span className="rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-                        Selected
-                      </span>
-                    )}
+                <div key={docType} className="rounded-xl border border-slate-200 p-3.5 transition-colors hover:border-blue-200 sm:p-4">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
+                    <label htmlFor={`file-${docType}`} className="text-xs font-semibold text-slate-800">{label}</label>
+                    {selectedFile && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                      <span className="size-1.5 rounded-full bg-emerald-500" />
+                      Added
+                    </span>}
                   </div>
 
-                  <div className="mt-3">
-                    {selectedFile ? (
-                      <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50/40 px-3 py-2 text-xs">
-                        <span className="truncate font-medium text-slate-700">{selectedFile.name} ({(selectedFile.size / 1024).toFixed(0)} KB)</span>
-                        <button
-                          type="button"
-                          onClick={() => handleFileChange(docType, null)}
-                          className="shrink-0 text-xs font-semibold text-rose-600 hover:text-rose-800"
-                        >
-                          Remove
-                        </button>
+                  {selectedFile ? (
+                    <div className="flex min-h-14 items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-emerald-700">
+                          <IconDocumentCheck className="size-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="m-0 truncate text-xs font-semibold text-slate-800">{selectedFile.name}</p>
+                          <p className="mb-0 mt-0.5 text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(0)} KB · Ready to upload</p>
+                        </div>
                       </div>
-                    ) : (
-                      <label
-                        htmlFor={`file-${docType}`}
-                        className="flex cursor-pointer flex-col items-center justify-center rounded-md border-2 border-dashed border-slate-200 bg-slate-50/60 p-4 text-center transition-colors hover:bg-blue-50/40 hover:border-blue-300"
+                      <button
+                        type="button"
+                        onClick={() => handleFileChange(docType, null)}
+                        className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-white hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                        aria-label={`Remove ${label}`}
                       >
-                        <span className="text-xs font-medium text-blue-700">Click to browse or drag file here</span>
-                        <span className="mt-1 text-[10px] text-slate-400">JPEG, PNG or PDF up to 5MB</span>
-                        <input
-                          id={`file-${docType}`}
-                          type="file"
-                          accept="image/jpeg,image/png,application/pdf"
-                          className="hidden"
-                          onChange={(e) => handleFileChange(docType, e.target.files?.[0] || null)}
-                        />
-                      </label>
-                    )}
-                  </div>
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor={`file-${docType}`}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDraggingDocType(docType);
+                      }}
+                      onDragLeave={(event) => {
+                        if (!event.currentTarget.contains(event.relatedTarget)) setDraggingDocType(null);
+                      }}
+                      onDrop={(event) => handleDrop(docType, event)}
+                      className={`relative flex min-h-[92px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-4 text-center transition-colors focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-offset-2 ${
+                        draggingDocType === docType
+                          ? 'border-blue-400 bg-blue-50'
+                          : 'border-slate-300 bg-slate-50/70 hover:border-blue-300 hover:bg-blue-50/50'
+                      }`}
+                    >
+                      <IconUploadCloud className="mb-1.5 size-5 text-blue-600" />
+                      <span className="text-xs font-semibold text-blue-700">Choose a file <span className="font-normal text-slate-500">or drag it here</span></span>
+                      <input
+                        id={`file-${docType}`}
+                        type="file"
+                        accept="image/jpeg,image/png,application/pdf"
+                        className="absolute inset-0 size-full cursor-pointer opacity-0"
+                        onChange={(event) => handleFileChange(docType, event.target.files?.[0] || null)}
+                      />
+                    </label>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-6">
-            <label htmlFor="remarks" className="block text-xs font-medium text-slate-700">
-              Additional remarks or notes (optional)
-            </label>
+          <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-4 sm:px-6">
+            <label htmlFor="remarks" className="block text-xs font-semibold text-slate-700">Additional notes <span className="font-normal text-slate-400">(optional)</span></label>
             <textarea
               id="remarks"
               rows={2}
               value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              placeholder="e.g. My FSc Part 2 marks are improvement marks."
-              className="mt-1.5 w-full rounded-md border border-slate-200 p-2.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none"
+              onChange={(event) => setRemarks(event.target.value)}
+              placeholder="Add any details that may help with your document review."
+              className="mt-2 w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs leading-5 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
             />
-          </div>
-
-          <div className="mt-6 border-t border-slate-100 pt-4">
-            <Button
-              type="submit"
-              disabled={submitting || Object.keys(files).length === 0}
-              className="w-full text-xs font-semibold"
-            >
-              {submitting ? 'Encrypting & Submitting…' : 'Submit Documents for Verification'}
-            </Button>
+            {formError && <p className="mb-0 mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-800" role="alert">{formError}</p>}
+            <div className="mt-4 flex flex-col gap-3 border-t border-slate-200/80 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="m-0 flex items-center gap-1.5 text-[10px] leading-4 text-slate-500">
+                <IconShield className="size-3.5 shrink-0 text-blue-600" />
+                Your documents are shared securely with admissions.
+              </p>
+              <Button
+                type="submit"
+                disabled={submitting}
+                className="min-h-10 w-full rounded-lg px-5 text-xs font-semibold shadow-sm sm:w-auto"
+              >
+                {submitting ? 'Encrypting & submitting…' : 'Submit for verification'}
+              </Button>
+            </div>
           </div>
         </form>
       </div>
-    </div>
+    </main>
   );
 }

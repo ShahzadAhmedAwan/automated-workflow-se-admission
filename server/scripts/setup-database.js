@@ -42,6 +42,17 @@ try {
       console.info('Added eligible_for column to mkt_leads');
     }
 
+    try {
+      const [admCols] = await connection.query(`SHOW COLUMNS FROM adm_students`);
+      const admColNames = admCols.map((c) => c.Field);
+      if (!admColNames.includes('eligible_for')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN eligible_for VARCHAR(100) NULL AFTER prior_degree`);
+        console.info('Added eligible_for column to adm_students');
+      }
+    } catch {
+      // Table might not exist yet if fresh install
+    }
+
     // Update conversation_state ENUM to support all states
     await connection.query(`
       ALTER TABLE mkt_leads MODIFY COLUMN conversation_state ENUM(

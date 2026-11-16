@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { IntakeTokenService } from '../src/modules/verification/services/intake-token.service.js';
 import { DiscrepancyParserService } from '../src/modules/verification/services/discrepancy-parser.service.js';
 import { StorageService } from '../src/modules/verification/services/storage/storage.service.js';
@@ -9,6 +10,9 @@ import { BoardRegistryService } from '../src/modules/verification/services/scrap
 import { VerificationDecisionService } from '../src/modules/verification/services/verification-decision.service.js';
 import { AdmissionIntakeService } from '../src/modules/verification/services/admission-intake.service.js';
 import { BoardSourceService } from '../src/modules/verification/services/board-source.service.js';
+import { IdentityMatcherService } from '../src/modules/verification/services/identity-matcher.service.js';
+import { ExpirationReminderService } from '../src/modules/verification/services/expiration-reminder.service.js';
+import { GazetteSearchService } from '../src/modules/verification/services/gazette-search.service.js';
 import { manualReviewActionSchema } from '../src/modules/verification/verification.schemas.js';
 import {
   DOCUMENT_TYPES,
@@ -128,6 +132,13 @@ test('AdmissionIntakeService: manual approval attributes reviewer and queues arc
       if (query.includes('FROM adm_student_documents WHERE id = ? AND student_id = ? FOR UPDATE')) {
         return [[{ id: 12, doc_type: DOCUMENT_TYPES.FSC_MARKSHEET, verification_status: DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW,
           storage_state: 'ACTIVE_R2', storage_key: 'uploads/candidate/fsc.pdf', original_filename: 'fsc.pdf', file_mime: 'application/pdf' }]];
+      }
+      if (query.includes('SELECT doc_type FROM adm_student_documents')) {
+        return [[
+          { doc_type: DOCUMENT_TYPES.CNIC_FRONT },
+          { doc_type: DOCUMENT_TYPES.FSC_MARKSHEET },
+          { doc_type: DOCUMENT_TYPES.MATRIC_MARKSHEET },
+        ]];
       }
       if (query.includes('SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN')) return [[]];
       if (query.includes('SELECT overall_status, verified_at, verified_by')) return [[{ overall_status: 'VERIFIED', verified_at: new Date(), verified_by: 'staff-1' }]];
@@ -477,4 +488,378 @@ test('VerificationDecisionService: Condition C (Discrepancy Attempt 3) escalates
 
   const escalationUpdate = executedQueries.find((q) => q.query.includes('UPDATE adm_students') && q.params[0] === 'NEEDS_MANUAL_REVIEW');
   assert.ok(escalationUpdate, 'adm_students was updated to NEEDS_MANUAL_REVIEW');
+});
+
+test('IdentityMatcherService: computes Levenshtein distance and fuzzy name matching with confidence', () => {
+  // Exact match
+  const exact = IdentityMatcherService.compareNames('Sheikh Haseeb Ur Rehman', 'SHEIKH HASEEB UR REHMAN');
+  assert.equal(exact.similarity, 100);
+  assert.equal(exact.isMatch, true);
+
+  // Hyphenation variation
+  const hyphen = IdentityMatcherService.compareNames('Sheikh Haseeb Ur Rehman', 'SHEIKH HASEEB-UR-REHMAN');
+  assert.ok(hyphen.similarity >= 95);
+  assert.equal(hyphen.isMatch, true);
+  assert.ok(hyphen.reason.includes('hyphenation'));
+
+  // Given name subset of legal full name
+  const subset = IdentityMatcherService.compareNames('haseeb', 'Sheikh Haseeb Ur Rehman');
+  assert.ok(subset.similarity >= 85);
+  assert.equal(subset.isMatch, true);
+
+  // Cross check full dossier
+  const cross = IdentityMatcherService.crossCheckStudentIdentity({
+    student: { full_name: 'haseeb', father_name: 'Sheikh Abdul Hafeez' },
+    documents: [
+      { doc_type: 'CNIC_FRONT', extractedData: { candidateName: 'Sheikh Haseeb Ur Rehman', fatherName: 'Sheikh Abdul Hafeez' } },
+      { doc_type: 'FSC_MARKSHEET', extractedData: { candidateName: 'SHEIKH HASEEB UR REHMAN', fatherName: 'SHEIKH ABDUL HAFEEZ' } },
+      { doc_type: 'MATRIC_MARKSHEET', extractedData: { candidateName: 'SHEIKH HASEEB-UR-REHMAN', fatherName: 'SHEIKH ABDUL HAFEEZ' } },
+    ],
+  });
+
+  assert.ok(cross.overallScore >= 95);
+  assert.equal(cross.status, 'CONFIRMED_MATCH');
+  assert.equal(cross.allMatched, true);
+  assert.equal(cross.comparisons.length, 5);
+});
+
+test('ExpirationReminderService: scans expiring tokens and dispatches WhatsApp reminders with pending docs', async () => {
+  const executedUpdates = [];
+  const dispatchedJobs = [];
+  const futureExpiry = new Date(Date.now() + 6 * 3600 * 1000); // 6 hours left
+
+  const mockDb = {
+    async query(query, params) {
+      if (query.includes('FROM adm_intake_tokens t')) {
+        return [[
+          {
+            token_id: 101,
+            student_id: 201,
+            raw_token: 'abc123tokenraw',
+            allowed_doc_types: JSON.stringify(['CNIC_FRONT', 'FSC_MARKSHEET', 'MATRIC_MARKSHEET']),
+            expires_at: futureExpiry,
+            full_name: 'Sheikh Haseeb Ur Rehman',
+            phone_normalized: '923179459856',
+            overall_status: 'UNDER_REVIEW',
+          },
+          {
+            token_id: 102,
+            student_id: 202,
+            raw_token: 'def456tokenraw',
+            allowed_doc_types: JSON.stringify(['CNIC_FRONT']),
+            expires_at: futureExpiry,
+            full_name: 'Ali Khan',
+            phone_normalized: '923001234567',
+            overall_status: 'UNDER_REVIEW',
+          },
+        ]];
+      }
+      if (query.includes('FROM adm_student_documents')) {
+        // Student 201 has CNIC_FRONT verified, FSC & Matric still pending
+        // Student 202 has CNIC_FRONT verified (all required docs verified)
+        return [[
+          { student_id: 201, doc_type: 'CNIC_FRONT', verification_status: 'MATCHED' },
+          { student_id: 202, doc_type: 'CNIC_FRONT', verification_status: 'MATCHED' },
+        ]];
+      }
+      return [[], undefined];
+    },
+    async execute(query, params) {
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        dispatchedJobs.push({ query, params });
+        return [{ insertId: 999 }];
+      }
+      if (query.includes('UPDATE adm_intake_tokens SET reminder_sent_at')) {
+        executedUpdates.push({ query, params });
+        return [{ affectedRows: 1 }];
+      }
+      return [{}];
+    },
+  };
+
+  const result = await ExpirationReminderService.processExpiringTokens({
+    windowHours: 12,
+    db: mockDb,
+  });
+
+  assert.equal(result.scanned, 2);
+  assert.equal(result.reminded, 1); // Only Student 201 needed a reminder
+  assert.equal(result.skipped, 1); // Student 202 already had all docs verified
+  assert.equal(result.reminders.length, 1);
+
+  const reminder = result.reminders[0];
+  assert.equal(reminder.studentId, 201);
+  assert.deepEqual(reminder.pendingDocs, ['FSC_MARKSHEET', 'MATRIC_MARKSHEET']);
+  assert.equal(reminder.hoursLeft, 6);
+
+  // Check dispatched outbox job
+  assert.equal(dispatchedJobs.length, 1);
+  const jobPayload = JSON.parse(dispatchedJobs[0].params[2]);
+  assert.equal(jobPayload.recipientPhone, '923179459856');
+  assert.ok(jobPayload.messageText.includes('Admissions Reminder: Document Submission Deadline'));
+  assert.ok(jobPayload.messageText.includes('expires in 6 hours'));
+  assert.ok(jobPayload.messageText.includes('FSC MARKSHEET, MATRIC MARKSHEET'));
+  assert.ok(jobPayload.messageText.includes('abc123tokenraw'));
+
+  // Both tokens should have reminder_sent_at updated so they are never double-processed
+  assert.equal(executedUpdates.length, 2);
+});
+
+test('GazetteSearchService: extracts text from PDF buffer and automatically searches candidate by roll number', async () => {
+  // Construct a realistic board gazette PDF buffer in memory with FlateDecode compressed streams
+  const gazetteContent = [
+    'BT /F1 12 Tf 72 712 Td (AJK BOARD OF INTERMEDIATE AND SECONDARY EDUCATION MIRPUR) Tj ET',
+    'BT /F1 10 Tf 72 690 Td (ROLL NO) Tj 150 0 Td (CANDIDATE NAME) Tj 350 0 Td (MARKS) Tj 450 0 Td (REMARKS) Tj ET',
+    'BT /F1 10 Tf 72 670 Td (535450) Tj 150 0 Td (MUHAMMAD USMAN) Tj 350 0 Td (680) Tj 450 0 Td (PASS) Tj ET',
+    'BT /F1 10 Tf 72 650 Td (535453) Tj 150 0 Td [(SHEIKH ) 10 (HASEEB) 10 (-UR-REHMAN)] TJ 350 0 Td (740) Tj 450 0 Td (PASS) Tj ET',
+    'BT /F1 10 Tf 72 630 Td (535455) Tj 150 0 Td (BILAL AHMED) Tj 350 0 Td (510) Tj 450 0 Td (PASS) Tj ET',
+  ].join('\n');
+
+  const compressedStream = zlib.deflateSync(Buffer.from(gazetteContent, 'latin1'));
+  const testPdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page /Length ' + compressedStream.length + ' /Filter /FlateDecode >>\nstream\n'),
+    compressedStream,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+
+  // Test 1: extractTextFromPdfBuffer
+  const extractedText = GazetteSearchService.extractTextFromPdfBuffer(testPdf);
+  assert.ok(extractedText.includes('535453'));
+  assert.ok(extractedText.includes('HASEEB'));
+  assert.ok(extractedText.includes('740'));
+
+  // Test 2: searchPdfTextForCandidate
+  const matchResult = GazetteSearchService.searchPdfTextForCandidate({
+    pdfText: extractedText,
+    rollNumber: '535453',
+    candidateName: 'Sheikh Haseeb Ur Rehman',
+  });
+
+  assert.ok(matchResult);
+  assert.equal(matchResult.found, true);
+  assert.equal(matchResult.rollNumber, '535453');
+  assert.equal(matchResult.obtainedMarks, 740);
+  assert.equal(matchResult.totalMarks, 1100);
+  assert.equal(matchResult.isPass, true);
+  assert.equal(matchResult.status, 'PASS');
+  assert.ok(matchResult.rawSnippet.includes('535453'));
+  assert.ok(matchResult.rawSnippet.includes('740'));
+  assert.ok(matchResult.nameMatchScore >= 90);
+
+  // Test 3: searchGazette directly using buffer
+  const directSearchResult = await GazetteSearchService.searchGazette({
+    fileBuffer: testPdf,
+    rollNumber: '535453',
+    candidateName: 'Sheikh Haseeb Ur Rehman',
+    boardName: 'AJK BISE',
+  });
+
+  assert.equal(directSearchResult.found, true);
+  assert.equal(directSearchResult.obtainedMarks, 740);
+
+  // Test 4: Roll number not present in gazette
+  const notFoundResult = await GazetteSearchService.searchGazette({
+    fileBuffer: testPdf,
+    rollNumber: '999999',
+    candidateName: 'Non Existent',
+    boardName: 'AJK BISE',
+  });
+
+  assert.equal(notFoundResult.found, false);
+  assert.ok(notFoundResult.reason.includes('not found'));
+});
+
+test('AdmissionIntakeService.searchGazetteForDocument: performs on-demand gazette search and updates document', async () => {
+  const gazetteContent = 'BT /F1 10 Tf (535453) Tj 150 0 Td (SHEIKH HASEEB-UR-REHMAN) Tj 350 0 Td (740) Tj ( PASS) Tj ET';
+  const compressed = zlib.deflateSync(Buffer.from(gazetteContent, 'latin1'));
+  const gazettePdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\n1 0 obj\n<< /Length ' + compressed.length + ' /Filter /FlateDecode >>\nstream\n'),
+    compressed,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+
+  let updatedDocData = null;
+  const mockDb = {
+    async query(query, params) {
+      if (query.includes('FROM adm_student_documents d')) {
+        return [[
+          {
+            id: 5,
+            student_id: 1,
+            doc_type: 'FSC_MARKSHEET',
+            extracted_data: JSON.stringify({
+              rollNumber: '535453',
+              candidateName: 'Sheikh Haseeb Ur Rehman',
+              boardName: 'AJK BISE',
+              examYear: '2024',
+              obtainedMarks: 740,
+            }),
+            portal_verification_data: null,
+            full_name: 'Sheikh Haseeb Ur Rehman',
+          },
+        ]];
+      }
+      return [[], undefined];
+    },
+    async execute(query, params) {
+      if (query.includes('FROM adm_board_sources')) {
+        return [[
+          {
+            id: 10,
+            board_name: 'AJK BISE Mirpur',
+            board_aliases: JSON.stringify(['AJK BISE', 'Mirpur Board']),
+            academic_year: '2024',
+            source_type: 'GAZETTE',
+            gazette_filename: 'AJKBISE_HSSC_2024.pdf',
+            storage_provider: 'LOCAL_MOCK',
+            storage_key: 'uploads/board-gazettes/ajkbise-mock.pdf',
+          },
+        ]];
+      }
+      if (query.includes('UPDATE adm_student_documents') && query.includes('portal_verification_data')) {
+        updatedDocData = JSON.parse(params[0]);
+        return [{ affectedRows: 1 }];
+      }
+      if (query.includes('INSERT INTO sys_audit_logs')) {
+        return [{ insertId: 55 }];
+      }
+      return [{}];
+    },
+  };
+
+  // Stub StorageService.getFileBuffer for this test
+  const originalGetFileBuffer = StorageService.getFileBuffer;
+  StorageService.getFileBuffer = async () => gazettePdf;
+
+  try {
+    const result = await AdmissionIntakeService.searchGazetteForDocument({
+      documentId: 5,
+      actorId: 'staff-uuid-1234',
+      db: mockDb,
+    });
+
+    assert.equal(result.documentId, 5);
+    assert.equal(result.studentId, 1);
+    assert.equal(result.portalVerification.status, 'GAZETTE_VERIFIED');
+    assert.equal(result.portalVerification.boardMarks, 740);
+    assert.equal(result.portalVerification.isVerified, true);
+    assert.ok(updatedDocData);
+    assert.equal(updatedDocData.status, 'GAZETTE_VERIFIED');
+    assert.equal(updatedDocData.boardMarks, 740);
+  } finally {
+    StorageService.getFileBuffer = originalGetFileBuffer;
+  }
+});
+
+test('AdmissionIntakeService._buildCandidateTimeline: constructs chronologically sorted candidate lifecycle timeline', () => {
+  const student = {
+    id: 1,
+    application_no: 'APP-2026-001',
+    full_name: 'Sheikh Haseeb Ur Rehman',
+    phone_normalized: '923179459856',
+    fsc_obtained_marks: 740,
+    created_at: '2026-11-06T10:00:00.000Z',
+    verified_at: '2026-11-16T18:15:00.000Z',
+    verified_by_name: 'Admissions Officer',
+  };
+
+  const tokens = [
+    {
+      token_id: 10,
+      attempt_count: 1,
+      allowedDocTypes: ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'],
+      created_at: '2026-11-06T10:05:00.000Z',
+      reminder_sent_at: '2026-11-15T22:00:00.000Z',
+      used_at: '2026-11-16T18:00:00.000Z',
+      expires_at: '2026-11-16T22:00:00.000Z',
+    },
+  ];
+
+  const documents = [
+    {
+      document_id: 5,
+      doc_type: 'FSC_MARKSHEET',
+      original_filename: 'fsc-transcript.pdf',
+      file_size: 102400,
+      created_at: '2026-11-16T18:01:00.000Z',
+      extractedData: {
+        candidateName: 'Sheikh Haseeb Ur Rehman',
+        rollNumber: '535453',
+        boardName: 'AJK BISE',
+        obtainedMarks: 740,
+        totalMarks: 1100,
+      },
+      portalVerificationData: {
+        status: 'GAZETTE_VERIFIED',
+        sourceType: 'GAZETTE',
+        boardMarks: 740,
+        gazetteFilename: 'AJKBISE_2024.pdf',
+        candidateName: 'Sheikh Haseeb Ur Rehman',
+      },
+      reviewed_at: '2026-11-16T18:14:00.000Z',
+      reviewed_by_name: 'Reviewer Staff',
+      review_method: 'STAFF_DOCUMENT',
+      review_notes: 'Confirmed with original board gazette',
+    },
+  ];
+
+  const auditLogs = [
+    {
+      id: 88,
+      action: 'OVERRIDE_MARKS',
+      payload_before: { fsc_obtained_marks: 520 },
+      payload_after: { fsc_obtained_marks: 740 },
+      created_at: '2026-11-16T18:13:00.000Z',
+    },
+  ];
+
+  const timeline = AdmissionIntakeService._buildCandidateTimeline({
+    student,
+    documents,
+    tokens,
+    auditLogs,
+  });
+
+  assert.ok(timeline.length >= 7);
+
+  // Check chronological sort
+  for (let i = 1; i < timeline.length; i++) {
+    const prev = new Date(timeline[i - 1].timestamp).getTime();
+    const curr = new Date(timeline[i].timestamp).getTime();
+    assert.ok(prev <= curr, `Timeline event ${i - 1} (${timeline[i - 1].title}) must precede event ${i} (${timeline[i].title})`);
+  }
+
+  // Check specific milestones
+  assert.equal(timeline[0].category, 'LEAD');
+  assert.ok(timeline[0].title.includes('Lead imported'));
+
+  const tokenCreate = timeline.find((e) => e.category === 'INTAKE_LINK');
+  assert.ok(tokenCreate);
+  assert.ok(tokenCreate.title.toLowerCase().includes('upload link generated'));
+
+  const reminder = timeline.find((e) => e.category === 'REMINDER');
+  assert.ok(reminder);
+  assert.ok(reminder.title.includes('12-hour expiration reminder'));
+
+  const upload = timeline.find((e) => e.category === 'UPLOAD');
+  assert.ok(upload);
+  assert.ok(upload.title.includes('FSC MARKSHEET'));
+
+  const ocr = timeline.find((e) => e.category === 'OCR');
+  assert.ok(ocr);
+  assert.ok(ocr.title.includes('Neural OCR'));
+  assert.ok(ocr.description.includes('740 / 1100'));
+
+  const gazette = timeline.find((e) => e.category === 'GAZETTE');
+  assert.ok(gazette);
+  assert.ok(gazette.title.includes('Official Gazette match confirmed'));
+
+  const override = timeline.find((e) => e.category === 'OVERRIDE');
+  assert.ok(override);
+  assert.ok(override.title.includes('Staff overrode candidate marks'));
+  assert.ok(override.description.includes('520 -> 740'));
+
+  const verified = timeline.find((e) => e.category === 'VERIFIED');
+  assert.ok(verified);
+  assert.ok(verified.title.includes('Candidate officially verified'));
 });

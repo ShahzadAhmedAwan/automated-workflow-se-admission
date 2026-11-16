@@ -12,6 +12,7 @@ import { AppError } from '../../../core/errors/app-error.js';
 import { config } from '../../../core/config/env.js';
 import { BoardSourceService } from '../services/board-source.service.js';
 import { StorageService } from '../services/storage/storage.service.js';
+import { ExpirationReminderService } from '../services/expiration-reminder.service.js';
 
 export class StaffVerificationController {
   static async listBoardSources(_req, res, next) {
@@ -170,13 +171,13 @@ export class StaffVerificationController {
       const payload = reissueTokenSchema.parse(req.body);
       const studentId = payload.studentId;
 
-      // 1. Verify if candidate exists in adm_students
+      // 1. Verify if candidate exists in adm_students (by student id or lead id)
       const [students] = await pool.execute(
-        `SELECT id, full_name, phone_normalized FROM adm_students WHERE id = ?`,
-        [studentId]
+        `SELECT id, lead_id, full_name, phone_normalized FROM adm_students WHERE id = ? OR lead_id = ? LIMIT 1`,
+        [studentId, studentId]
       );
 
-      let targetStudentId = studentId;
+      let targetStudentId = students.length ? students[0].id : studentId;
       let student = students[0];
 
       // 2. If not found in adm_students, check if it is a lead from mkt_leads
@@ -229,14 +230,17 @@ export class StaffVerificationController {
       // 4. Dispatch WhatsApp notice via Outbox
       const uploadUrl = `${config.APP_ORIGIN}/upload/${tokenData.rawToken}`;
       const docListFormatted = payload.allowedDocTypes.map((d) => d.replace(/_/g, ' ')).join(', ');
-      const messageText = `📋 *Admissions Update for ${student.full_name}:*
+      const messageText = `*Admissions Office: Document Upload Request*
 
-Your document upload link has been issued.
+Dear ${student.full_name},
 
-👉 *Click the link below to open the upload portal:*
+Your document upload link has been issued. Please upload the following required documents:
+- ${docListFormatted}
+
+Portal link:
 ${uploadUrl}
 
-*(Required: ${docListFormatted} | Link expires in ${payload.expiresInHours} hours)*`;
+(Link valid for ${payload.expiresInHours} hours)`;
 
       await dispatchJob({
         queueName: 'whatsapp_outreach',
@@ -263,6 +267,53 @@ ${uploadUrl}
           uploadUrl,
         },
       });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * One-click Bulk Dispatch: scans all students with unverified documents,
+   * detects their missing requirements, and dispatches tailored upload links to each applicant.
+   */
+  static async autoDispatchMissing(req, res, next) {
+    try {
+      const expiresInHours = Number(req.body?.expiresInHours) || 48;
+      const result = await AdmissionIntakeService.autoDispatchMissingDocumentLinks({
+        actorId: req.auth?.userId,
+        expiresInHours,
+      });
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Automated / Staff Trigger: Check for tokens expiring within 12 hours with pending documents
+   * and dispatch polite WhatsApp reminders.
+   */
+  static async checkExpirationReminders(req, res, next) {
+    try {
+      const windowHours = Number(req.body?.windowHours) || 12;
+      const result = await ExpirationReminderService.processExpiringTokens({ windowHours });
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * On-demand gazette lookup for a specific marksheet document
+   */
+  static async searchGazette(req, res, next) {
+    try {
+      const documentId = Number(req.params.documentId);
+      const result = await AdmissionIntakeService.searchGazetteForDocument({
+        documentId,
+        actorId: req.auth?.userId,
+      });
+      res.json({ status: 'success', data: result });
     } catch (err) {
       next(err);
     }

@@ -1,5 +1,38 @@
 import 'dotenv/config';
+import os from 'node:os';
 import { z } from 'zod';
+
+function resolveLocalAppOrigin(configuredOrigin) {
+  if (process.env.NODE_ENV === 'production') return configuredOrigin;
+  try {
+    const url = new URL(configuredOrigin);
+    if (/^(192\.168\.|10\.)/.test(url.hostname)) {
+      const ifaces = os.networkInterfaces();
+      // Prioritize active Wi-Fi or wireless adapter
+      for (const name of Object.keys(ifaces)) {
+        if (/wi-?fi|wireless|wlan/i.test(name)) {
+          for (const net of ifaces[name] || []) {
+            if (net.family === 'IPv4' && !net.internal) {
+              return `${url.protocol}//${net.address}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+            }
+          }
+        }
+      }
+      // Fallback: any non-virtual IPv4
+      for (const name of Object.keys(ifaces)) {
+        if (/vmnet|virtual|vEthernet|loopback|host-only/i.test(name)) continue;
+        for (const net of ifaces[name] || []) {
+          if (net.family === 'IPv4' && !net.internal && /^(192\.168\.|10\.)/.test(net.address)) {
+            return `${url.protocol}//${net.address}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
+          }
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return configuredOrigin;
+}
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -45,7 +78,7 @@ if (value.COOKIE_SAME_SITE === 'none' && value.COOKIE_SECURE !== 'true') {
 
 export const config = Object.freeze({
   ...value,
-  APP_ORIGIN: new URL(value.APP_ORIGIN).origin,
+  APP_ORIGIN: resolveLocalAppOrigin(new URL(value.APP_ORIGIN).origin),
   DB_SSL: value.DB_SSL === 'true',
   COOKIE_SECURE: value.COOKIE_SECURE === 'true',
   SMTP_SECURE: value.SMTP_SECURE === 'true',

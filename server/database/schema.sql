@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS adm_students (
   email VARCHAR(254) NULL,
   city VARCHAR(120) NULL,
   prior_degree VARCHAR(80) NULL,
+  eligible_for VARCHAR(100) NULL,
   fsc_roll_no VARCHAR(50) NULL,
   fsc_obtained_marks INT UNSIGNED NULL,
   fsc_total_marks INT UNSIGNED NOT NULL DEFAULT 1100,

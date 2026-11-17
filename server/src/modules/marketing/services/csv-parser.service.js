@@ -146,6 +146,17 @@ export async function parseAndPreviewLeads(inputSource, { previewLimit = 10, dbC
       for (const row of rows) {
         existingPhones.add(row.phone_normalized);
       }
+      try {
+        const [studentRows] = await dbConnection.query(
+          `SELECT phone_normalized FROM adm_students WHERE phone_normalized IN (${slice.map(() => '?').join(',')})`,
+          slice
+        );
+        for (const row of studentRows) {
+          existingPhones.add(row.phone_normalized);
+        }
+      } catch {
+        // Non-blocking if adm_students is not populated in mock DB fixtures
+      }
     }
 
     // Adjust counts and statuses

@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button } from '../../core/ui/primitives.jsx';
-import { IconDocumentCheck, IconShield, IconUploadCloud } from '../../core/icons/Icons.jsx';
+import {
+  IconDocumentCheck,
+  IconShield,
+  IconUploadCloud,
+  IconEye,
+  IconClose,
+} from '../../core/icons/Icons.jsx';
 
 const DOC_LABELS = {
   MATRIC_MARKSHEET: 'Matric / SSC Marksheet (Result Card)',
@@ -18,6 +24,8 @@ export function PublicUploadPortal({ token }) {
   const [tokenData, setTokenData] = useState(null);
   const [error, setError] = useState(null);
   const [files, setFiles] = useState({});
+  const [previews, setPreviews] = useState({});
+  const [lightboxImage, setLightboxImage] = useState(null);
   const [remarks, setRemarks] = useState('');
   const [formError, setFormError] = useState('');
   const [draggingDocType, setDraggingDocType] = useState(null);
@@ -38,11 +46,24 @@ export function PublicUploadPortal({ token }) {
       }
     }
     if (token) init();
+
+    return () => {
+      // Clean up any object URLs on component unmount
+      Object.values(previews).forEach((url) => URL.revokeObjectURL(url));
+    };
   }, [token]);
 
   function handleFileChange(docType, file) {
     setFormError('');
     if (!file) {
+      if (previews[docType]) {
+        URL.revokeObjectURL(previews[docType]);
+        setPreviews((prev) => {
+          const next = { ...prev };
+          delete next[docType];
+          return next;
+        });
+      }
       setFiles((prev) => {
         const next = { ...prev };
         delete next[docType];
@@ -52,7 +73,7 @@ export function PublicUploadPortal({ token }) {
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setFormError(`“${file.name}” is larger than 5 MB. Please choose a smaller file.`);
+      setFormError(`"${file.name}" is larger than 5 MB. Please choose a smaller file.`);
       return;
     }
 
@@ -60,6 +81,26 @@ export function PublicUploadPortal({ token }) {
     if (!allowed.includes(file.mimetype || file.type)) {
       setFormError('Choose a JPEG, PNG or PDF file.');
       return;
+    }
+
+    // Clean up previous preview URL if any
+    if (previews[docType]) {
+      URL.revokeObjectURL(previews[docType]);
+    }
+
+    // Generate instant local thumbnail preview for image documents
+    if (file.type?.startsWith('image/')) {
+      const previewUrl = URL.createObjectURL(file);
+      setPreviews((prev) => ({
+        ...prev,
+        [docType]: previewUrl,
+      }));
+    } else {
+      setPreviews((prev) => {
+        const next = { ...prev };
+        delete next[docType];
+        return next;
+      });
     }
 
     setFiles((prev) => ({
@@ -227,20 +268,55 @@ export function PublicUploadPortal({ token }) {
                   </div>
 
                   {selectedFile ? (
-                    <div className="flex min-h-14 items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white text-emerald-700">
-                          <IconDocumentCheck className="size-4" />
-                        </span>
+                    <div className="flex min-h-16 items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5 sm:p-3">
+                      <div className="flex min-w-0 items-center gap-3">
+                        {previews[docType] ? (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage({ url: previews[docType], title: label })}
+                            className="group relative size-12 shrink-0 cursor-zoom-in overflow-hidden rounded-lg border border-emerald-300/90 bg-white shadow-xs transition hover:ring-2 hover:ring-blue-400"
+                            title="Click to inspect photo in full resolution"
+                          >
+                            <img
+                              src={previews[docType]}
+                              alt={label}
+                              className="size-full object-cover transition-transform duration-200 group-hover:scale-110"
+                            />
+                            <span className="absolute inset-0 grid place-items-center bg-slate-950/30 opacity-0 transition-opacity group-hover:opacity-100">
+                              <IconEye className="size-4 text-white" />
+                            </span>
+                          </button>
+                        ) : selectedFile.type === 'application/pdf' ? (
+                          <span className="grid size-12 shrink-0 place-items-center rounded-lg border border-rose-200 bg-rose-50 text-[11px] font-bold text-rose-700 shadow-xs">
+                            PDF
+                          </span>
+                        ) : (
+                          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-emerald-700 shadow-xs">
+                            <IconDocumentCheck className="size-5" />
+                          </span>
+                        )}
                         <div className="min-w-0">
                           <p className="m-0 truncate text-xs font-semibold text-slate-800">{selectedFile.name}</p>
-                          <p className="mb-0 mt-0.5 text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(0)} KB · Ready to upload</p>
+                          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-500">
+                            <span>{(selectedFile.size / 1024).toFixed(0)} KB</span>
+                            {previews[docType] && (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxImage({ url: previews[docType], title: label })}
+                                className="inline-flex items-center gap-0.5 font-semibold text-blue-700 hover:text-blue-900 hover:underline"
+                              >
+                                <IconEye className="size-3" />
+                                Inspect photo
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <button
                         type="button"
+                        disabled={submitting}
                         onClick={() => handleFileChange(docType, null)}
-                        className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-white hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                        className="shrink-0 rounded-md px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-colors hover:bg-white hover:text-rose-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-40"
                         aria-label={`Remove ${label}`}
                       >
                         Remove
@@ -306,6 +382,49 @@ export function PublicUploadPortal({ token }) {
           </div>
         </form>
       </div>
+
+      {/* Full-Screen Document Image Lightbox Modal */}
+      {lightboxImage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-xs"
+          onClick={() => setLightboxImage(null)}
+        >
+          <div
+            className="relative flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+              <div>
+                <h3 className="m-0 text-sm font-bold text-slate-900">{lightboxImage.title}</h3>
+                <p className="mb-0 mt-0.5 text-[11px] text-slate-500">Ensure text, roll number, and marks breakdown are clearly readable</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLightboxImage(null)}
+                className="grid size-8 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close preview"
+              >
+                <IconClose className="size-4" />
+              </button>
+            </div>
+            <div className="flex max-h-[70vh] items-center justify-center overflow-auto bg-slate-950/5 p-4">
+              <img
+                src={lightboxImage.url}
+                alt={lightboxImage.title}
+                className="max-h-[65vh] w-auto max-w-full rounded-lg object-contain shadow-xs"
+              />
+            </div>
+            <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <span className="text-[11px] text-slate-500">If text is blurry or cropped, please remove and take a clearer photo.</span>
+              <Button variant="subtle" onClick={() => setLightboxImage(null)}>
+                Close Preview
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -63,7 +63,7 @@ export const VERIFICATION_PERMISSIONS = Object.freeze({
 export const TOKEN_CONFIG = Object.freeze({
   EXPIRATION_HOURS: 48,
   MAX_ATTEMPTS: 3,
-  BYTES: 32,
+  BYTES: 16, // 16 bytes = 32 hex chars (128-bit cryptographic entropy). Compact length prevents WhatsApp link wrapping while remaining brute-force proof.
 });
 
 export const OCR_CONFIG = Object.freeze({

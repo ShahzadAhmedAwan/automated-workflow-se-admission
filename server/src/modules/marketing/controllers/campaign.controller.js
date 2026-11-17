@@ -1,3 +1,4 @@
+import { pool } from '../../../core/db/pool.js';
 import { CampaignService } from '../services/campaign.service.js';
 import { parseAndPreviewLeads } from '../services/csv-parser.service.js';
 import { LeadBotService } from '../services/lead-bot.service.js';
@@ -115,6 +116,97 @@ export class CampaignController {
       });
 
       res.json({ status: 'success', data: turnResult });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Health check: Returns live WhatsApp Baileys session connection status
+   */
+  static async getWhatsAppStatus(_req, res, next, db = pool) {
+    try {
+      const [rows] = await db.query(
+        `SELECT setting_value, updated_at FROM sys_settings WHERE setting_key = 'whatsapp_session_status'`
+      );
+
+      if (rows && rows.length) {
+        const val = typeof rows[0].setting_value === 'string'
+          ? JSON.parse(rows[0].setting_value)
+          : rows[0].setting_value;
+        const updatedAt = new Date(val.updatedAt || rows[0].updated_at);
+        const isStale = (Date.now() - updatedAt.getTime()) > 90 * 1000;
+
+        if (!isStale) {
+          const connected = val.status === 'CONNECTED';
+          return res.json({
+            status: 'success',
+            data: {
+              connected,
+              status: val.status || (connected ? 'CONNECTED' : 'DISCONNECTED'),
+              phone: val.phone || null,
+              updatedAt: updatedAt.toISOString(),
+              error: val.error || null,
+            },
+          });
+        }
+      }
+
+      // Fallback: If sys_settings has no fresh heartbeat (e.g. running process was started
+      // prior to status tracking code or temporary interval lag), inspect live database
+      // activity signals from sys_baileys_auth and mkt_leads.
+      let fallbackPhone = null;
+      try {
+        const [credsRows] = await db.query(
+          `SELECT data_value, updated_at FROM sys_baileys_auth WHERE session_id = 'default' AND data_key = 'creds'`
+        );
+        if (credsRows && credsRows.length) {
+          const creds = typeof credsRows[0].data_value === 'string'
+            ? JSON.parse(credsRows[0].data_value)
+            : credsRows[0].data_value;
+          if (creds?.me?.id) {
+            fallbackPhone = creds.me.id.split(':')[0].replace(/\D/g, '');
+          }
+
+          const [activityRows] = await db.query(
+            `SELECT MAX(updated_at) AS last_active FROM (
+               SELECT updated_at FROM sys_baileys_auth WHERE session_id = 'default'
+               UNION ALL
+               SELECT updated_at FROM mkt_leads
+             ) AS t`
+          );
+
+          const lastActive = activityRows?.[0]?.last_active ? new Date(activityRows[0].last_active) : null;
+          if (lastActive && (Date.now() - lastActive.getTime()) < 300 * 1000) {
+            return res.json({
+              status: 'success',
+              data: {
+                connected: true,
+                status: 'CONNECTED',
+                phone: fallbackPhone,
+                updatedAt: lastActive.toISOString(),
+                error: null,
+              },
+            });
+          }
+        }
+      } catch {
+        // Silently pass if sys_baileys_auth is not accessible or in a mock test
+      }
+
+      const lastKnown = rows && rows.length ? rows[0] : null;
+      const lastVal = lastKnown ? (typeof lastKnown.setting_value === 'string' ? JSON.parse(lastKnown.setting_value) : lastKnown.setting_value) : null;
+
+      res.json({
+        status: 'success',
+        data: {
+          connected: false,
+          status: lastVal?.status === 'NEEDS_QR' ? 'NEEDS_QR' : 'OFFLINE',
+          phone: lastVal?.phone || fallbackPhone || null,
+          updatedAt: lastKnown?.updated_at ? new Date(lastKnown.updated_at).toISOString() : null,
+          error: lastVal?.error || null,
+        },
+      });
     } catch (err) {
       next(err);
     }

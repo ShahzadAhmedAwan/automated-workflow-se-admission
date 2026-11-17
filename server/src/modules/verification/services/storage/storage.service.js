@@ -154,9 +154,9 @@ export class StorageService {
 
   /**
    * Migrate verified document from R2 to Google Drive archive
-   * Archive a verified document. Missing Drive configuration fails closed and preserves the source.
+   * Archives into candidate-specific subfolder (or root archive folder fallback).
    */
-  static async migrateToGoogleDrive({ storageKey, filename, mimeType, storageProvider }) {
+  static async migrateToGoogleDrive({ storageKey, filename, mimeType, storageProvider, studentId = null, studentCnic = null }) {
     const email = process.env.GDRIVE_SERVICE_ACCOUNT_EMAIL;
     const privateKey = process.env.GDRIVE_PRIVATE_KEY?.replace(/\\n/g, '\n');
     const folderId = process.env.GDRIVE_ARCHIVE_FOLDER_ID;
@@ -174,10 +174,42 @@ export class StorageService {
     if (existing.files?.[0]?.id) {
       return { gdriveFileId: existing.files[0].id, gdriveFolderId: existing.files[0].parents?.[0] || folderId, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
     }
+
+    // Resolve or create student-specific subfolder in Drive
+    let targetFolderId = folderId;
+    if (studentId) {
+      try {
+        const folderName = `std_${studentId}${studentCnic ? '_' + studentCnic : ''}`;
+        const searchFolder = new URL('https://www.googleapis.com/drive/v3/files');
+        searchFolder.searchParams.set('q', `'${folderId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+        searchFolder.searchParams.set('fields', 'files(id)');
+        const folderRes = await fetch(searchFolder, { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) });
+        if (folderRes.ok) {
+          const folderData = await folderRes.json();
+          if (folderData.files?.[0]?.id) {
+            targetFolderId = folderData.files[0].id;
+          } else {
+            const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [folderId] }),
+              signal: AbortSignal.timeout(15_000),
+            });
+            if (createRes.ok) {
+              const createdFolder = await createRes.json();
+              if (createdFolder.id) targetFolderId = createdFolder.id;
+            }
+          }
+        }
+      } catch {
+        targetFolderId = folderId; // Fallback to root archive folder
+      }
+    }
+
     const bytes = await this.getFileBuffer(storageKey, storageProvider);
     const boundary = `se-admissions-${crypto.randomUUID()}`;
     const safeName = path.basename(filename || 'admissions-document').replace(/[\\/\u0000-\u001f]/g, '_').slice(0, 180);
-    const metadata = { name: safeName, parents: [folderId], appProperties: { sourceKeyHash } };
+    const metadata = { name: safeName, parents: [targetFolderId], appProperties: { sourceKeyHash } };
     const body = Buffer.concat([
       Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
       bytes,
@@ -192,7 +224,7 @@ export class StorageService {
     if (!response.ok) throw new Error(`Google Drive archive upload failed (${response.status}).`);
     const archived = await response.json();
     if (!archived.id) throw new Error('Google Drive did not confirm the archived file.');
-    return { gdriveFileId: archived.id, gdriveFolderId: archived.parents?.[0] || folderId, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
+    return { gdriveFileId: archived.id, gdriveFolderId: targetFolderId, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
   }
 
   static async _getDriveAccessToken(email, privateKey) {

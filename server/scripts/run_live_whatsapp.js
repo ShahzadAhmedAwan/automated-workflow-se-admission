@@ -22,12 +22,32 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { useMySQLAuthState } from '../src/core/baileys/mysql-auth-store.js';
 import { pool } from '../src/core/db/pool.js';
-import { claimJobs } from '../src/core/queue/outboxBus.js';
+import { claimJobs, completeJob, retryJob } from '../src/core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../src/contracts/event-types.js';
 import { LeadBotService } from '../src/modules/marketing/services/lead-bot.service.js';
 import { normalizePhoneNumber } from '../src/modules/marketing/services/csv-parser.service.js';
 
 let sock = null;
+
+async function recordWhatsAppStatus({ status, phone = null, qr = false, error = null }) {
+  try {
+    const payload = JSON.stringify({
+      status,
+      phone,
+      qr,
+      error,
+      updatedAt: new Date().toISOString(),
+    });
+    await pool.execute(
+      `INSERT INTO sys_settings (setting_key, setting_value)
+       VALUES ('whatsapp_session_status', ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP(3)`,
+      [payload]
+    );
+  } catch (err) {
+    console.error('[WhatsApp Status Record Error]:', err.message);
+  }
+}
 
 async function startWhatsAppBot() {
   console.log('\n=============================================================');
@@ -55,12 +75,17 @@ async function startWhatsAppBot() {
     if (qr) {
       console.log('\n📲 QR CODE GENERATED: Scan this with your WhatsApp:');
       qrcode.generate(qr, { small: true });
+      await recordWhatsAppStatus({ status: 'NEEDS_QR', qr: true });
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log(`WhatsApp connection closed (code ${statusCode}). Reconnecting: ${shouldReconnect}`);
+      await recordWhatsAppStatus({
+        status: shouldReconnect ? 'RECONNECTING' : 'DISCONNECTED',
+        error: statusCode ? `Closed code ${statusCode}` : 'Disconnected',
+      });
       if (shouldReconnect) {
         setTimeout(startWhatsAppBot, 5000);
       } else {
@@ -69,6 +94,8 @@ async function startWhatsAppBot() {
     } else if (connection === 'open') {
       const userJid = sock.user?.id || '';
       const userPhone = userJid.split(':')[0] || userJid.split('@')[0];
+      await recordWhatsAppStatus({ status: 'CONNECTED', phone: userPhone });
+
       console.log('\n=============================================================');
       console.log(`🟢 WHATSAPP CONNECTED SUCCESSFULLY!`);
       console.log(`📱 Phone Number: +${userPhone}`);
@@ -76,6 +103,15 @@ async function startWhatsAppBot() {
       console.log('=============================================================\n');
     }
   });
+
+  // Keep alive heartbeat every 30 seconds
+  setInterval(async () => {
+    if (sock?.user) {
+      const userJid = sock.user?.id || '';
+      const userPhone = userJid.split(':')[0] || userJid.split('@')[0];
+      await recordWhatsAppStatus({ status: 'CONNECTED', phone: userPhone });
+    }
+  }, 30000);
 
   // Listen to live inbound messages
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -113,10 +149,11 @@ async function startWhatsAppBot() {
         // Send presence (typing...)
         await sock.sendPresenceUpdate('composing', jid);
 
-        // Process message through Module 2 state machine
+        // Process message through Module 2 state machine (queueReply: false prevents double messaging since sock.sendMessage sends it directly below)
         const turnResult = await LeadBotService.processIncomingMessage({
           fromPhone: senderPhone,
           messageBody: rawText,
+          queueReply: false,
         }, pool);
 
         console.log(`🤖 Lead State: [${turnResult.state}] | Eligible For: [${turnResult.eligibleFor || 'N/A'}] | Reply: "${turnResult.reply}"`);
@@ -134,7 +171,11 @@ async function startWhatsAppBot() {
   startOutboxPollingLoop();
 }
 
+let isOutboxPollingStarted = false;
+
 function startOutboxPollingLoop() {
+  if (isOutboxPollingStarted) return;
+  isOutboxPollingStarted = true;
   console.log('⚙️ Outbox Poller active: listening for WHATSAPP_MESSAGE jobs...');
 
   setInterval(async () => {
@@ -166,30 +207,23 @@ function startOutboxPollingLoop() {
           await sock.sendPresenceUpdate('paused', jid);
 
           console.log(`✅ Message delivered to ${jid}`);
-
-          // Mark job completed
-          await pool.execute(
-            `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL, last_error = NULL
-             WHERE id = ?`,
-            [job.id]
-          );
+          await completeJob(job.id, lockOwner);
         } catch (deliveryErr) {
           console.error(`❌ Delivery failed for ${jid}:`, deliveryErr.message);
           // If sending to @s.whatsapp.net failed for a 15-digit number, retry with @lid
+          let fallbackDelivered = false;
           if (!jid.endsWith('@lid') && recipientPhone.length >= 14) {
             try {
               const lidJid = `${recipientPhone}@lid`;
               await sock.sendMessage(lidJid, { text: messageText });
               console.log(`✅ Message delivered via fallback to ${lidJid}`);
-              await pool.execute(
-                `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL, last_error = NULL
-                 WHERE id = ?`,
-                [job.id]
-              );
-              continue;
+              await completeJob(job.id, lockOwner);
+              fallbackDelivered = true;
             } catch {}
           }
-          throw deliveryErr;
+          if (!fallbackDelivered) {
+            await retryJob(job, lockOwner, deliveryErr);
+          }
         }
       }
     } catch (err) {

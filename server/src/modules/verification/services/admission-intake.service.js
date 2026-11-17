@@ -20,6 +20,10 @@ import { AppError } from '../../../core/errors/app-error.js';
 import { logAudit } from '../../../core/audit/audit-logger.js';
 import { config } from '../../../core/config/env.js';
 import { normalizePhoneNumber } from '../../marketing/services/csv-parser.service.js';
+import {
+  buildPortalUrl,
+  formatUploadRequestMessage,
+} from './portal-message.service.js';
 
 export class AdmissionIntakeService {
   /**
@@ -117,13 +121,14 @@ export class AdmissionIntakeService {
       });
 
       // Dispatch WhatsApp message with upload link
-      const uploadUrl = `${config.APP_ORIGIN}/upload/${token.rawToken}`;
-      const messageText = `🎉 *Congratulations ${lead.fullName}!* You are qualified for Admissions at Department of Software Engineering.
-
-👉 *Click the link below to upload your documents:*
-${uploadUrl}
-
-*(Valid for 48 hours. Please upload your FSc and Matric marksheets)*`;
+      const uploadUrl = buildPortalUrl(token.rawToken);
+      const messageText = formatUploadRequestMessage({
+        studentName: lead.fullName,
+        allowedDocTypes: [DOCUMENT_TYPES.FSC_MARKSHEET, DOCUMENT_TYPES.MATRIC_MARKSHEET],
+        uploadUrl,
+        expiresInHours: 48,
+        headerTitle: 'Admissions Document Upload Request',
+      });
 
       await dispatchJob({
         queueName: 'whatsapp_outreach',
@@ -440,7 +445,7 @@ ${uploadUrl}
   /**
    * Outbox worker job handler for MIGRATE_GDRIVE
    */
-  static async migrateGDriveJob({ documentId, studentId, filename, r2Key, fileMime }, db = pool) {
+  static async migrateGDriveJob({ documentId, studentId, studentCnic, filename, r2Key, fileMime }, db = pool) {
     const [documents] = await db.execute(
       `SELECT storage_provider, storage_key, gdrive_file_id, verification_status
          FROM adm_student_documents WHERE id = ? AND student_id = ?`,
@@ -460,6 +465,8 @@ ${uploadUrl}
       filename,
       mimeType: fileMime,
       storageProvider: document.storage_provider,
+      studentId,
+      studentCnic,
     });
 
     const connection = await db.getConnection();
@@ -815,53 +822,29 @@ ${uploadUrl}
   }
 
   /**
-   * Get single student review dossier with all uploaded documents, OCR, and portal responses
+   * Get single student review dossier with all uploaded documents, OCR, and portal responses.
+   * Completely read-only and idempotent: uses COALESCE and LEFT JOIN to present candidate attributes
+   * without mutating database records on GET requests.
    */
   static async getStudentReviewDossier(studentId, db = pool) {
-    // Auto-complete any currently NULL student fields from linked marketing lead and uploaded document extractions
-    try {
-      // Sync missing fields from marketing lead (email, city, father_name, cnic, eligible_for, prior_degree, application_no)
-      await db.execute(
-        `UPDATE adm_students s
-           LEFT JOIN mkt_leads l ON s.lead_id = l.id
-            SET s.application_no = COALESCE(s.application_no, CONCAT('APP-2026-', LPAD(s.id, 4, '0'))),
-                s.email = COALESCE(s.email, l.email),
-                s.city = COALESCE(s.city, l.city),
-                s.father_name = COALESCE(s.father_name, l.father_name),
-                s.cnic = COALESCE(s.cnic, l.cnic),
-                s.eligible_for = COALESCE(s.eligible_for, l.eligible_for),
-                s.prior_degree = COALESCE(s.prior_degree, l.prior_degree)
-          WHERE s.id = ?`,
-        [studentId]
-      );
-
-      const [existingDocs] = await db.query(
-        `SELECT doc_type, extracted_data FROM adm_student_documents WHERE student_id = ? AND extracted_data IS NOT NULL`,
-        [studentId]
-      );
-      for (const d of existingDocs) {
-        const ext = typeof d.extracted_data === 'string' ? JSON.parse(d.extracted_data) : d.extracted_data;
-        if (ext && typeof ext === 'object') {
-          await this.syncExtractedDataToStudent({
-            studentId,
-            docType: d.doc_type,
-            extracted: ext,
-            connection: db,
-          });
-        }
-      }
-    } catch {
-      // Non-blocking fallback
-    }
-
     const [students] = await db.execute(
-      `SELECT s.id, s.application_no, s.cnic, s.full_name, s.father_name, s.phone_normalized, s.email, s.city,
-              s.prior_degree, s.eligible_for,
-              fsc_roll_no, fsc_obtained_marks, fsc_total_marks,
-              matric_obtained_marks, matric_total_marks,
+      `SELECT s.id,
+              COALESCE(s.application_no, CONCAT('APP-2026-', LPAD(s.id, 4, '0'))) AS application_no,
+              COALESCE(s.cnic, l.cnic) AS cnic,
+              s.full_name,
+              COALESCE(s.father_name, l.father_name) AS father_name,
+              s.phone_normalized,
+              COALESCE(s.email, l.email) AS email,
+              COALESCE(s.city, l.city) AS city,
+              COALESCE(s.prior_degree, l.prior_degree) AS prior_degree,
+              COALESCE(s.eligible_for, l.eligible_for) AS eligible_for,
+              s.fsc_roll_no, s.fsc_obtained_marks, s.fsc_total_marks,
+              s.matric_obtained_marks, s.matric_total_marks,
               s.overall_status, s.discrepancy_notes, s.gdrive_folder_id, s.verified_at,
               s.verified_by, verifier.display_name AS verified_by_name, s.created_at, s.updated_at
-         FROM adm_students s LEFT JOIN sys_users verifier ON verifier.id = s.verified_by
+         FROM adm_students s
+         LEFT JOIN mkt_leads l ON s.lead_id = l.id
+         LEFT JOIN sys_users verifier ON verifier.id = s.verified_by
         WHERE s.id = ?`,
       [studentId]
     );
@@ -1313,11 +1296,19 @@ ${uploadUrl}
           expiresInHours: 48,
           connection,
         });
-        const uploadUrl = `${config.APP_ORIGIN}/upload/${token.rawToken}`;
+        const uploadUrl = buildPortalUrl(token.rawToken);
+        const messageText = formatUploadRequestMessage({
+          studentName: studentBefore.full_name,
+          allowedDocTypes: [targetDocument.doc_type],
+          uploadUrl,
+          expiresInHours: 48,
+          customNote: notes || 'Please upload a replacement document.',
+          headerTitle: 'Document Re-upload Request',
+        });
         await dispatchJob({ queueName: 'whatsapp_outreach', jobType: EVENT_TYPES.WHATSAPP_MESSAGE, payload: {
           recipientPhone: studentBefore.phone_normalized,
           messageType: 'TRANSACTIONAL',
-          messageText: `Admissions document update for ${studentBefore.full_name}: ${notes || 'Please upload a replacement document.'}\n${uploadUrl}\nThis link expires in 48 hours.`,
+          messageText,
           metadata: { module: 'MODULE_3_VERIFICATION', studentId, tokenId: token.tokenId },
         }, connection });
       }
@@ -1409,20 +1400,14 @@ ${uploadUrl}
         expiresInHours,
       });
 
-      const uploadUrl = `${config.APP_ORIGIN}/upload/${tokenData.rawToken}`;
-      const docListFormatted = missingDocs.map((d) => d.replace(/_/g, ' ')).join(', ');
-
-      const messageText = `*Admissions Office: Document Upload Request*
-
-Dear ${student.full_name},
-
-Your document verification portal is active. Please upload the following required documents:
-- ${docListFormatted}
-
-Portal link:
-${uploadUrl}
-
-(Link valid for ${expiresInHours} hours)`;
+      const uploadUrl = buildPortalUrl(tokenData.rawToken);
+      const messageText = formatUploadRequestMessage({
+        studentName: student.full_name,
+        allowedDocTypes: missingDocs,
+        uploadUrl,
+        expiresInHours,
+        headerTitle: 'Document Upload Request',
+      });
 
       await dispatchJob({
         queueName: 'whatsapp_outreach',

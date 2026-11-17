@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../modules/auth/AuthProvider.jsx';
 import { LoginPage } from '../modules/auth/LoginPage.jsx';
 import { UserManagementView } from '../modules/auth/UserManagementView.jsx';
 import { MarketingModuleView } from '../modules/marketing/MarketingModuleView.jsx';
 import { VerificationModuleView } from '../modules/verification/VerificationModuleView.jsx';
+import { marketingApi } from '../modules/marketing/marketingApi.js';
 import { Button } from '../core/ui/primitives.jsx';
 import {
   IconDashboard,
@@ -25,6 +26,28 @@ export function App() {
   const [currentNav, setCurrentNav] = useState('marketing');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [waStatus, setWaStatus] = useState({ connected: false, status: 'CHECKING', phone: null });
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+
+    async function checkWhatsAppStatus() {
+      try {
+        const data = await marketingApi.getWhatsAppStatus();
+        if (mounted && data) setWaStatus(data);
+      } catch {
+        if (mounted) setWaStatus({ connected: false, status: 'OFFLINE', phone: null });
+      }
+    }
+
+    checkWhatsAppStatus();
+    const interval = setInterval(checkWhatsAppStatus, 20000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user]);
 
   if (status === 'loading') {
     return (
@@ -129,6 +152,45 @@ export function App() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2.5 sm:gap-4">
+            {/* WhatsApp Session Health Badge */}
+            {waStatus.connected ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 shadow-xs"
+                title={`WhatsApp Connected (+${waStatus.phone || 'Bot'}). Outreach worker is active.`}
+              >
+                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden md:inline">WhatsApp Online</span>
+                <span className="md:hidden">Online</span>
+              </span>
+            ) : waStatus.status === 'NEEDS_QR' ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 shadow-xs"
+                title="WhatsApp requires QR scan. Run 'npm run start:whatsapp' and scan QR."
+              >
+                <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                <span className="hidden sm:inline">WhatsApp: Scan QR</span>
+                <span className="sm:hidden">Scan QR</span>
+              </span>
+            ) : waStatus.status === 'RECONNECTING' ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800 shadow-xs"
+                title="WhatsApp client is reconnecting..."
+              >
+                <span className="size-2 rounded-full bg-blue-500 animate-pulse" />
+                <span className="hidden sm:inline">WhatsApp Reconnecting</span>
+                <span className="sm:hidden">Reconnecting</span>
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-800 shadow-xs"
+                title="WhatsApp bot process is offline. Run 'npm run start:whatsapp' to start the outreach bot."
+              >
+                <span className="size-2 rounded-full bg-rose-500" />
+                <span className="hidden md:inline">WhatsApp Offline</span>
+                <span className="md:hidden">Offline</span>
+              </span>
+            )}
+
             <span className="hidden items-center gap-2 text-xs font-medium text-slate-600 sm:inline-flex"><span className="size-2 rounded-full bg-blue-600" />Fall 2026</span>
             {isSuperAdmin && (
               <button type="button" onClick={() => selectNavigation('staff')} className="inline-flex min-h-9 items-center gap-2 rounded-md bg-blue-700 px-3 text-xs font-semibold text-white transition hover:bg-blue-800 sm:px-4">

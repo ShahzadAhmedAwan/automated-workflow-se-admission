@@ -191,7 +191,7 @@ ${knowledge}
       q.includes('who speaks')
     ) {
       return (
-        "Assalam-o-Alaikum! 🎓 I am the official automated Admissions Assistant for the *Department of Software Engineering* at *The University of Azad Jammu & Kashmir (UAJK)*, Chehla Campus, Muzaffarabad.\n\n" +
+        "Assalam-o-Alaikum! I am the official automated Admissions Assistant for the *Department of Software Engineering* at *The University of Azad Jammu & Kashmir (UAJK)*, Chehla Campus, Muzaffarabad.\n\n" +
         "I am here to assist students with admissions, program options (B.Sc. Software Engineering, SET, CET), eligibility criteria, scholarships, and fee structures for Fall 2026."
       );
     }
@@ -229,9 +229,9 @@ ${knowledge}
       return (
         "This is an official admissions inquiry and guidance service from the *Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK)*, Chehla Campus.\n\n" +
         "We offer:\n" +
-        "• *B.Sc. Software Engineering (SE)* - PEC Accredited\n" +
-        "• *B.Sc. Software Engineering Technology (SET)* - NTC Accredited (Pre-Med eligible)\n" +
-        "• *B.Sc. Computer Engineering Technology (CET)* - NTC Accredited (Pre-Med eligible)\n\n" +
+        "- *B.Sc. Software Engineering (SE)* - PEC Accredited\n" +
+        "- *B.Sc. Software Engineering Technology (SET)* - NTC Accredited (Pre-Med eligible)\n" +
+        "- *B.Sc. Computer Engineering Technology (CET)* - NTC Accredited (Pre-Med eligible)\n\n" +
         "Would you like to check your eligibility or know more about our programs?"
       );
     }
@@ -245,10 +245,10 @@ ${knowledge}
       q.includes('stay')
     ) {
       return (
-        "🏠 *Hostel Facilities at UAJK (Chehla Campus):*\n" +
-        "• Hostels are available for both male and female students on merit/allotment basis.\n" +
-        "• Chehla Campus has 1 male hostel and 2 female hostels.\n" +
-        "• Approximate monthly hostel charges are ~PKR 8,000/month (including basic meals and utilities)."
+        "*Hostel Facilities (Chehla Campus):*\n" +
+        "- Hostels are available for both male and female students on merit/allotment basis.\n" +
+        "- Chehla Campus has 1 male hostel and 2 female hostels.\n" +
+        "- Approximate monthly hostel charges are ~PKR 8,000/month (including basic meals and utilities)."
       );
     }
 
@@ -262,12 +262,12 @@ ${knowledge}
       q.includes('nats')
     ) {
       return (
-        "📝 *Entrance Test Information:*\n" +
-        "• The University Entrance Test is mandatory for SE, SET, and CET.\n" +
-        "• Test Fee: PKR 1,000 (deposit via HBL challan).\n" +
-        "• Venue: Chehla Campus, Muzaffarabad.\n" +
-        "• Requirements on test day: Original CNIC/B-Form and printed Admit Card.\n" +
-        "• Help Desk Contact: 0300-6253998 / 0333-5750711."
+        "*Entrance Test Information:*\n" +
+        "- The University Entrance Test is mandatory for SE, SET, and CET.\n" +
+        "- Test Fee: PKR 1,000 (deposit via HBL challan).\n" +
+        "- Venue: Chehla Campus, Muzaffarabad.\n" +
+        "- Requirements on test day: Original CNIC/B-Form and printed Admit Card.\n" +
+        "- Help Desk Contact: 0300-6253998 / 0333-5750711."
       );
     }
 
@@ -280,9 +280,9 @@ ${knowledge}
       q.includes('biology')
     ) {
       return (
-        "🔬 *Pre-Medical Eligibility Policy at UAJK:*\n" +
-        "• *SET & CET:* F.Sc. Pre-Medical students with minimum 50% marks are fully eligible under NTC policy. (You will study an additional non-credit deficiency Mathematics course in 1st semester).\n" +
-        "• *B.Sc. Software Engineering (SE):* Up to 40% seats can be offered to Pre-Medical students who score 60%+ in F.Sc. under PEC policy quota + Entry Test."
+        "*Pre-Medical Eligibility Policy at UAJK:*\n" +
+        "- *SET & CET:* F.Sc. Pre-Medical students with minimum 50% marks are fully eligible under NTC policy. (You will study an additional non-credit deficiency Mathematics course in 1st semester).\n" +
+        "- *B.Sc. Software Engineering (SE):* Up to 40% seats can be offered to Pre-Medical students who score 60%+ in F.Sc. under PEC policy quota + Entry Test."
       );
     }
 
@@ -296,12 +296,12 @@ ${knowledge}
       q.includes('charges')
     ) {
       return (
-        "📌 *Fee Structure for Department of Software Engineering (UAJK):*\n" +
-        "• *B.Sc. Software Engineering (SE):* ~PKR 60,130 per semester\n" +
-        "• *B.Sc. Software Engineering Technology (SET):* ~PKR 60,130 per semester\n" +
-        "• *B.Sc. Computer Engineering Technology (CET):* ~PKR 59,130 per semester\n" +
-        "• *Application Processing Fee:* PKR 3,000 (payable via HBL challan)\n" +
-        "• *Entry Test Fee:* PKR 1,000\n" +
+        "*Fee Structure (Department of Software Engineering, UAJK):*\n" +
+        "- *B.Sc. Software Engineering (SE):* ~PKR 60,130 per semester\n" +
+        "- *B.Sc. Software Engineering Technology (SET):* ~PKR 60,130 per semester\n" +
+        "- *B.Sc. Computer Engineering Technology (CET):* ~PKR 59,130 per semester\n" +
+        "- *Application Processing Fee:* PKR 3,000 (payable via HBL challan)\n" +
+        "- *Entry Test Fee:* PKR 1,000\n" +
         "Scholarships and easy fee installment facilities are also available."
       );
     }
@@ -316,11 +316,11 @@ ${knowledge}
       q.includes('60%')
     ) {
       return (
-        "🎓 *Eligibility Criteria (Department of Software Engineering):*\n" +
-        "• *B.Sc. Software Engineering (SE):* Minimum 60% in F.Sc. Pre-Engineering / ICS / DAE or Pre-Med quota + Entry test.\n" +
-        "• *B.Sc. Software Engineering Technology (SET):* Minimum 50% in F.Sc. (Pre-Engineering, ICS, Pre-Medical, DAE).\n" +
-        "• *B.Sc. Computer Engineering Technology (CET):* Minimum 50% in F.Sc. (Pre-Engineering, ICS, Pre-Medical, DAE).\n" +
-        "• No 3rd division in academic career."
+        "*Eligibility Criteria (Department of Software Engineering):*\n" +
+        "- *B.Sc. Software Engineering (SE):* Minimum 60% in F.Sc. Pre-Engineering / ICS / DAE or Pre-Med quota + Entry test.\n" +
+        "- *B.Sc. Software Engineering Technology (SET):* Minimum 50% in F.Sc. (Pre-Engineering, ICS, Pre-Medical, DAE).\n" +
+        "- *B.Sc. Computer Engineering Technology (CET):* Minimum 50% in F.Sc. (Pre-Engineering, ICS, Pre-Medical, DAE).\n" +
+        "- No 3rd division in academic career."
       );
     }
 
@@ -333,7 +333,7 @@ ${knowledge}
       q.includes('migration')
     ) {
       return (
-        "📋 *Required Documents Checklist:*\n" +
+        "*Required Documents Checklist:*\n" +
         "1. Attested copies of Matric & F.Sc./ICS certificates & DMCs\n" +
         "2. Character Certificate from college last attended\n" +
         "3. Copy of CNIC or Form-B (Applicant & Guardian)\n" +
@@ -352,10 +352,10 @@ ${knowledge}
       q.includes('schedule')
     ) {
       return (
-        "🗓️ *Important Admissions Schedule & Deadlines:*\n" +
-        "• Applications for the upcoming intake are currently being accepted online.\n" +
-        "• Merit lists are announced shortly following the Entry Test and document verification.\n" +
-        "• Visit the official portal https://uajk.edu.pk/ for the exact closing date and test calendar."
+        "*Important Admissions Schedule & Deadlines:*\n" +
+        "- Applications for the upcoming intake are currently being accepted online.\n" +
+        "- Merit lists are announced shortly following the Entry Test and document verification.\n" +
+        "- Visit the official portal https://uajk.edu.pk/ for the exact closing date and test calendar."
       );
     }
 
@@ -372,12 +372,12 @@ ${knowledge}
       q.includes('campus')
     ) {
       return (
-        "📞 *Department Contact & Helpline:*\n" +
-        "• *Campus:* Chehla / Main Campus, Muzaffarabad, UAJK\n" +
-        "• *Department Helpline:* +92-5822-960510\n" +
-        "• *Coordinator:* Engr. Dr. Muhammad Zaman Fakhar\n" +
-        "• *Department Email:* se@uajk.edu.pk\n" +
-        "• *Official Website:* https://uajk.edu.pk/"
+        "*Department Contact & Helpline:*\n" +
+        "- *Campus:* Chehla / Main Campus, Muzaffarabad, UAJK\n" +
+        "- *Department Helpline:* +92-5822-960510\n" +
+        "- *Coordinator:* Engr. Dr. Muhammad Zaman Fakhar\n" +
+        "- *Department Email:* se@uajk.edu.pk\n" +
+        "- *Official Website:* https://uajk.edu.pk/"
       );
     }
 
@@ -392,7 +392,7 @@ ${knowledge}
       q.includes('cet')
     ) {
       return (
-        "🎓 *Programs Offered at Department of Software Engineering (UAJK):*\n" +
+        "*Programs Offered (Department of Software Engineering, UAJK):*\n" +
         "1. *B.Sc. Software Engineering (SE)* - 4 Years, PEC Accredited\n" +
         "2. *B.Sc. Software Engineering Technology (SET)* - 4 Years, NTC Accredited\n" +
         "3. *B.Sc. Computer Engineering Technology (CET)* - 4 Years, NTC Accredited\n" +
@@ -407,10 +407,10 @@ ${knowledge}
       q.includes('hec scholarship')
     ) {
       return (
-        "🌟 *Scholarships at UAJK:*\n" +
-        "• Merit Scholarships for top board and university scorers\n" +
-        "• HEC Need-Based & Ehsaas Scholarships\n" +
-        "• AJK Zakat & District Council Scholarships\n" +
+        "*Scholarships at UAJK:*\n" +
+        "- Merit Scholarships for top board and university scorers\n" +
+        "- HEC Need-Based & Ehsaas Scholarships\n" +
+        "- AJK Zakat & District Council Scholarships\n" +
         "Students can apply for financial assistance after securing admission."
       );
     }

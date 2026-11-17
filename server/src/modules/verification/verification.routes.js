@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { rateLimit } from 'express-rate-limit';
+import { config } from '../../core/config/env.js';
 import { IntakeController } from './controllers/intake.controller.js';
 import { StaffVerificationController } from './controllers/staff-verification.controller.js';
 import { authenticate, requirePermission } from '../auth/index.js';
@@ -44,14 +46,23 @@ const gazetteUpload = multer({
 
 export const verificationRoutes = Router();
 
+const intakeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: config.NODE_ENV === 'test' ? 1000 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many upload attempts. Please try again in a few minutes.' } },
+});
+
 // ============================================================================
 // Public Capability-Based Intake Endpoints (No Login Required)
 // ============================================================================
 
-verificationRoutes.get('/intake/token/:token', IntakeController.validateToken);
+verificationRoutes.get('/intake/token/:token', intakeLimiter, IntakeController.validateToken);
 
 verificationRoutes.post(
   '/intake/token/:token/submit',
+  intakeLimiter,
   documentUpload.fields(Object.values(DOCUMENT_TYPES).map((name) => ({ name, maxCount: 1 }))),
   IntakeController.submitDocuments
 );

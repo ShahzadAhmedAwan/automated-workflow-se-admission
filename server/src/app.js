@@ -46,6 +46,15 @@ export function createApp() {
   app.use(`${config.API_BASE_PATH}/auth`, authRoutes);
   app.use(`${config.API_BASE_PATH}/marketing`, marketingRoutes);
   app.use(`${config.API_BASE_PATH}/verification`, verificationRoutes);
+
+  // Short and standard public upload redirect handlers
+  app.get('/u/:token', (req, res) => {
+    res.redirect(`${config.APP_ORIGIN}/u/${encodeURIComponent(req.params.token)}`);
+  });
+  app.get('/upload/:token', (req, res) => {
+    res.redirect(`${config.APP_ORIGIN}/u/${encodeURIComponent(req.params.token)}`);
+  });
+
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

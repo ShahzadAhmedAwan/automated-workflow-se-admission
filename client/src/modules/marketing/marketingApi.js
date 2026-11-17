@@ -53,4 +53,9 @@ export const marketingApi = {
     }, false);
     return res.data;
   },
+
+  async getWhatsAppStatus() {
+    const res = await apiRequest('/marketing/whatsapp/status', {}, true);
+    return res.data;
+  },
 };

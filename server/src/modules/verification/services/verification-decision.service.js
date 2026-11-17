@@ -9,6 +9,10 @@ import {
 } from '../verification.constants.js';
 import { config } from '../../../core/config/env.js';
 import { IdentityMatcherService } from './identity-matcher.service.js';
+import {
+  buildPortalUrl,
+  formatDiscrepancyMessage,
+} from './portal-message.service.js';
 
 export class VerificationDecisionService {
   /**
@@ -58,10 +62,24 @@ export class VerificationDecisionService {
       targetClaimedMarks = student.matric_obtained_marks || 0;
     }
 
-    // Determine if OCR matches applicant-stated marks
-    // (If student didn't claim marks initially, we accept the OCR marks as truth)
-    const marksMatch = Number.isFinite(ocrMarks) && Number.isFinite(extractedOcr?.totalMarks) && extractedOcr.totalMarks > 0 && ocrMarks >= 0 && ocrMarks <= extractedOcr.totalMarks &&
-      (!targetClaimedMarks || targetClaimedMarks === ocrMarks);
+    const boardMarks = Number(portalVerification?.boardMarks);
+    const hasValidBoardMarks = Number.isFinite(boardMarks);
+
+    // Ground Truth Hierarchy:
+    // If official board portal or gazette result confirms the claimed marks,
+    // auto-reconcile minor OCR reading artifacts (within 5 marks) with the authoritative board score
+    const boardMatchesClaimed = hasValidBoardMarks && Boolean(targetClaimedMarks) && boardMarks === targetClaimedMarks;
+    const boardMatchesOcr = hasValidBoardMarks && boardMarks === ocrMarks;
+    const effectiveMarks = (boardMatchesClaimed && Number.isFinite(ocrMarks) && Math.abs(ocrMarks - boardMarks) <= 5)
+      ? boardMarks
+      : ocrMarks;
+
+    if (effectiveMarks !== ocrMarks && Number.isFinite(effectiveMarks)) {
+      extractedOcr.obtainedMarks = effectiveMarks;
+    }
+
+    const marksMatch = Number.isFinite(effectiveMarks) && Number.isFinite(extractedOcr?.totalMarks) && extractedOcr.totalMarks > 0 && effectiveMarks >= 0 && effectiveMarks <= extractedOcr.totalMarks &&
+      (!targetClaimedMarks || targetClaimedMarks === effectiveMarks);
     const matchOcrPortal = extractedOcr?.candidateName && portalVerification?.candidateName
       ? IdentityMatcherService.compareNames(extractedOcr.candidateName, portalVerification.candidateName).isMatch
       : false;
@@ -69,7 +87,8 @@ export class VerificationDecisionService {
       ? IdentityMatcherService.compareNames(extractedOcr.candidateName, student.full_name).isMatch
       : false;
     const identityMatched = matchOcrPortal && matchOcrStudent;
-    const portalMatched = portalVerification?.isVerified === true && !portalVerification.isMock && Number(portalVerification.boardMarks) === ocrMarks && identityMatched;
+    const portalMatched = portalVerification?.isVerified === true && !portalVerification.isMock &&
+      (boardMatchesOcr || (boardMatchesClaimed && Math.abs(ocrMarks - boardMarks) <= 5)) && identityMatched;
 
     if (extractedOcr?.isMock || extractedOcr?.source === 'MOCK') {
       return this._handleManualReviewEscalation({ documentId, student, discrepancyReason: 'Simulated OCR data cannot be used for a candidate decision.', connection });
@@ -247,14 +266,16 @@ export class VerificationDecisionService {
     );
 
     // Dispatch WhatsApp alert to student
-    const uploadUrl = `${config.APP_ORIGIN}/upload/${newToken.rawToken}`;
-    const alertMessage = `⚠️ *Admissions Verification Notice*:
-${discrepancyReason}
-
-👉 *Click the link below to upload the correct document:*
-${uploadUrl}
-
-*(Link valid for 48 hours)*`;
+    const uploadUrl = buildPortalUrl(newToken.rawToken);
+    const alertMessage = formatDiscrepancyMessage({
+      studentName: student.full_name,
+      docType,
+      discrepancyReason,
+      uploadUrl,
+      attemptCount: nextAttempt,
+      maxAttempts: TOKEN_CONFIG.MAX_ATTEMPTS,
+      expiresInHours: 48,
+    });
 
     await dispatchJob({
       queueName: 'whatsapp_outreach',

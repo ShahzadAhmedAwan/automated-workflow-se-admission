@@ -184,7 +184,12 @@ export class CampaignService {
       );
 
       const defaultGreeting = (name) =>
-        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK). Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, or fee structure? (Reply *Yes* to apply, or ask any question!)`;
+        `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+        `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
+        `Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n` +
+        `- Reply *Yes* to apply\n` +
+        `- Or feel free to ask any question you have!`;
 
       let scheduledCount = 0;
 
@@ -312,10 +317,13 @@ export class CampaignService {
       await connection.beginTransaction();
 
       const defaultBroadcastMessage = (name) =>
-        `Assalam-o-Alaikum ${name !== 'Prospective Applicant' ? name : ''}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
+        `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+        `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+        `Assalam-o-Alaikum ${name !== 'Prospective Applicant' && name ? name : ''}!\n\n` +
+        `This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
         `Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, fee structure, or courses?\n\n` +
-        `• Reply *Yes* to apply\n` +
-        `• Or ask any questions you have!`;
+        `- Reply *Yes* to apply\n` +
+        `- Or ask any questions you have!`;
 
       let currentScheduleTime = new Date(now);
       currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
@@ -335,8 +343,25 @@ export class CampaignService {
           : entry.fullName;
 
         if (existing.length) {
+          // Never re-spam candidates who explicitly opted out or already completed qualification
+          if (['NOT_INTERESTED', 'QUALIFIED'].includes(existing[0].conversation_state)) {
+            continue;
+          }
           leadId = existing[0].id;
         } else {
+          // Check if student is already enrolled/verified in Admissions
+          try {
+            const [enrolled] = await connection.query(
+              `SELECT id, overall_status FROM adm_students WHERE phone_normalized = ? LIMIT 1`,
+              [entry.phoneNormalized]
+            );
+            if (enrolled.length && enrolled[0].overall_status === 'VERIFIED') {
+              continue;
+            }
+          } catch {
+            // Non-blocking in mock environments
+          }
+
           const [ins] = await connection.execute(
             `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, city, conversation_state)
              VALUES (?, ?, ?, ?, ?, 'IDLE')`,
@@ -409,12 +434,35 @@ export class CampaignService {
   }
 
   /**
-   * Adjusts a Date object forward to the next valid daylight window (e.g. 09:00 - 20:00)
+   * Adjusts a Date object forward to the next valid daylight window (e.g. 09:00 - 20:00).
+   * Respects target timezone (defaults to Asia/Karachi in non-test environments or when specified).
    */
-  static adjustToDaylight(date, startHour = 9, endHour = 20) {
+  static adjustToDaylight(date, startHour = 9, endHour = 20, timeZone = null) {
     const d = new Date(date);
-    const hour = d.getHours();
+    const targetTz = timeZone || (process.env.NODE_ENV === 'test' ? null : 'Asia/Karachi');
 
+    if (targetTz) {
+      const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: targetTz,
+        hour: 'numeric',
+        hour12: false,
+      });
+      const hourStr = formatter.format(d);
+      const hour = parseInt(hourStr, 10);
+
+      if (hour < startHour) {
+        const diffHours = startHour - hour;
+        d.setTime(d.getTime() + diffHours * 3600 * 1000);
+        d.setMinutes(0, 0, 0);
+      } else if (hour >= endHour) {
+        const diffHours = (24 - hour) + startHour;
+        d.setTime(d.getTime() + diffHours * 3600 * 1000);
+        d.setMinutes(0, 0, 0);
+      }
+      return d;
+    }
+
+    const hour = d.getHours();
     if (hour < startHour) {
       d.setHours(startHour, 0, 0, 0);
     } else if (hour >= endHour) {

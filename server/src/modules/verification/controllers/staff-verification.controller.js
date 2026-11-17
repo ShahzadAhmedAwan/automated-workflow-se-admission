@@ -13,6 +13,10 @@ import { config } from '../../../core/config/env.js';
 import { BoardSourceService } from '../services/board-source.service.js';
 import { StorageService } from '../services/storage/storage.service.js';
 import { ExpirationReminderService } from '../services/expiration-reminder.service.js';
+import {
+  buildPortalUrl,
+  formatUploadRequestMessage,
+} from '../services/portal-message.service.js';
 
 export class StaffVerificationController {
   static async listBoardSources(_req, res, next) {
@@ -228,19 +232,15 @@ export class StaffVerificationController {
       });
 
       // 4. Dispatch WhatsApp notice via Outbox
-      const uploadUrl = `${config.APP_ORIGIN}/upload/${tokenData.rawToken}`;
-      const docListFormatted = payload.allowedDocTypes.map((d) => d.replace(/_/g, ' ')).join(', ');
-      const messageText = `*Admissions Office: Document Upload Request*
-
-Dear ${student.full_name},
-
-Your document upload link has been issued. Please upload the following required documents:
-- ${docListFormatted}
-
-Portal link:
-${uploadUrl}
-
-(Link valid for ${payload.expiresInHours} hours)`;
+      const uploadUrl = buildPortalUrl(tokenData.rawToken);
+      const messageText = formatUploadRequestMessage({
+        studentName: student.full_name,
+        allowedDocTypes: payload.allowedDocTypes,
+        uploadUrl,
+        expiresInHours: payload.expiresInHours,
+        customNote: payload.reason || null,
+        headerTitle: 'Document Upload Request',
+      });
 
       await dispatchJob({
         queueName: 'whatsapp_outreach',

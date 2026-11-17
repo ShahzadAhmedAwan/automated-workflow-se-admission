@@ -1,3 +1,4 @@
+import './setup-test-env.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -13,6 +14,14 @@ import { BoardSourceService } from '../src/modules/verification/services/board-s
 import { IdentityMatcherService } from '../src/modules/verification/services/identity-matcher.service.js';
 import { ExpirationReminderService } from '../src/modules/verification/services/expiration-reminder.service.js';
 import { GazetteSearchService } from '../src/modules/verification/services/gazette-search.service.js';
+import {
+  formatDocumentLabel,
+  formatDocumentList,
+  buildPortalUrl,
+  formatUploadRequestMessage,
+  formatDiscrepancyMessage,
+  formatReminderMessage,
+} from '../src/modules/verification/services/portal-message.service.js';
 import { manualReviewActionSchema } from '../src/modules/verification/verification.schemas.js';
 import {
   DOCUMENT_TYPES,
@@ -21,7 +30,7 @@ import {
   TOKEN_CONFIG,
 } from '../src/modules/verification/verification.constants.js';
 
-test('IntakeTokenService: creates high-entropy 32-byte tokens and deterministic SHA-256 hashes', async () => {
+test('IntakeTokenService: creates high-entropy 16-byte tokens and deterministic SHA-256 hashes', async () => {
   const mockDb = {
     async execute(query, params) {
       assert.ok(query.includes('INSERT INTO adm_intake_tokens'));
@@ -40,7 +49,7 @@ test('IntakeTokenService: creates high-entropy 32-byte tokens and deterministic 
   });
 
   assert.equal(result.tokenId, 88);
-  assert.equal(result.rawToken.length, 64); // 32 bytes in hex = 64 hex characters
+  assert.equal(result.rawToken.length, TOKEN_CONFIG.BYTES * 2); // 16 bytes in hex = 32 hex characters
   assert.equal(result.tokenHash, crypto.createHash('sha256').update(result.rawToken).digest('hex'));
   assert.equal(result.attemptCount, 1);
   assert.ok(result.expiresAt > new Date());
@@ -596,9 +605,9 @@ test('ExpirationReminderService: scans expiring tokens and dispatches WhatsApp r
   assert.equal(dispatchedJobs.length, 1);
   const jobPayload = JSON.parse(dispatchedJobs[0].params[2]);
   assert.equal(jobPayload.recipientPhone, '923179459856');
-  assert.ok(jobPayload.messageText.includes('Admissions Reminder: Document Submission Deadline'));
-  assert.ok(jobPayload.messageText.includes('expires in 6 hours'));
-  assert.ok(jobPayload.messageText.includes('FSC MARKSHEET, MATRIC MARKSHEET'));
+  assert.ok(jobPayload.messageText.includes('Admissions Deadline Reminder'));
+  assert.ok(jobPayload.messageText.includes('expires in *6 hours*'));
+  assert.ok(jobPayload.messageText.includes('FSc / HSSC Intermediate Marksheet'));
   assert.ok(jobPayload.messageText.includes('abc123tokenraw'));
 
   // Both tokens should have reminder_sent_at updated so they are never double-processed
@@ -862,4 +871,73 @@ test('AdmissionIntakeService._buildCandidateTimeline: constructs chronologically
   const verified = timeline.find((e) => e.category === 'VERIFIED');
   assert.ok(verified);
   assert.ok(verified.title.includes('Candidate officially verified'));
+});
+
+test('PortalMessageService: formats clean, structured WhatsApp upload messages with short clickable link', () => {
+  const url = buildPortalUrl('dfc903954dcdb0f30dced2e786c409d8');
+  assert.ok(url.includes('/u/dfc903954dcdb0f30dced2e786c409d8'));
+  assert.ok(url.length < 75); // Compact URL ensures no WhatsApp word-wrapping bugs
+
+  // Test document label formatting (clean, emoji-free)
+  assert.equal(formatDocumentLabel(DOCUMENT_TYPES.CNIC_FRONT), 'CNIC / B-Form (Front Side)');
+  assert.equal(formatDocumentLabel(DOCUMENT_TYPES.FSC_MARKSHEET), 'FSc / HSSC Intermediate Marksheet');
+  assert.equal(formatDocumentLabel(DOCUMENT_TYPES.MATRIC_MARKSHEET), 'Matric / SSC Marksheet');
+  assert.equal(formatDocumentLabel('CUSTOM_DOC'), 'Custom Doc');
+
+  // Test structured upload request message
+  const message = formatUploadRequestMessage({
+    studentName: 'Sheikh Haseeb Ur Rehman',
+    allowedDocTypes: [
+      DOCUMENT_TYPES.CNIC_FRONT,
+      DOCUMENT_TYPES.FSC_MARKSHEET,
+      DOCUMENT_TYPES.MATRIC_MARKSHEET,
+    ],
+    rawToken: 'dfc903954dcdb0f30dced2e786c409d8',
+    expiresInHours: 48,
+  });
+
+  assert.ok(message.includes('DEPARTMENT OF SOFTWARE ENGINEERING'));
+  assert.ok(message.includes('Dear *Sheikh Haseeb Ur Rehman*'));
+  assert.ok(message.includes('- CNIC / B-Form (Front Side)'));
+  assert.ok(message.includes('- FSc / HSSC Intermediate Marksheet'));
+  assert.ok(message.includes('- Matric / SSC Marksheet'));
+  assert.ok(message.includes('*Portal Link:*'));
+  assert.ok(message.includes(url));
+  assert.ok(message.includes('*Validity:* 48 hours'));
+
+  // Ensure URL is on its own separate line for guaranteed WhatsApp linkifier detection
+  const lines = message.split('\n');
+  const urlLineIndex = lines.indexOf(url);
+  assert.ok(urlLineIndex > 0);
+  assert.equal(lines[urlLineIndex - 1], '*Portal Link:*');
+  assert.equal(lines[urlLineIndex + 1], '');
+
+  // Test discrepancy message
+  const discrepancyMsg = formatDiscrepancyMessage({
+    studentName: 'Ali Khan',
+    docType: DOCUMENT_TYPES.FSC_MARKSHEET,
+    discrepancyReason: 'Marksheet was blurry and serial number was unreadable.',
+    uploadUrl: url,
+    attemptCount: 2,
+    maxAttempts: 3,
+  });
+
+  assert.ok(discrepancyMsg.includes('*Admissions Verification Notice*'));
+  assert.ok(discrepancyMsg.includes('FSc / HSSC Intermediate Marksheet'));
+  assert.ok(discrepancyMsg.includes('Marksheet was blurry and serial number was unreadable.'));
+  assert.ok(discrepancyMsg.includes('Attempt 2 of 3'));
+  assert.ok(discrepancyMsg.includes(url));
+
+  // Test deadline reminder message
+  const reminderMsg = formatReminderMessage({
+    studentName: 'Sara Ahmed',
+    pendingDocTypes: [DOCUMENT_TYPES.CNIC_FRONT],
+    uploadUrl: url,
+    hoursLeft: 6,
+  });
+
+  assert.ok(reminderMsg.includes('*Admissions Deadline Reminder*'));
+  assert.ok(reminderMsg.includes('expires in *6 hours*'));
+  assert.ok(reminderMsg.includes('- CNIC / B-Form (Front Side)'));
+  assert.ok(reminderMsg.includes(url));
 });

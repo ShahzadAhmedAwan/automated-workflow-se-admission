@@ -4,6 +4,28 @@ import { IdentityMatcherService } from './identity-matcher.service.js';
 import { OCR_CONFIG } from '../verification.constants.js';
 
 export class GazetteSearchService {
+  static _textCache = new Map();
+
+  static getCachedText(key) {
+    if (!key) return null;
+    const entry = this._textCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > 30 * 60 * 1000) {
+      this._textCache.delete(key);
+      return null;
+    }
+    return entry.text;
+  }
+
+  static setCachedText(key, text) {
+    if (!key || !text) return;
+    if (this._textCache.size >= 3) {
+      const oldestKey = this._textCache.keys().next().value;
+      this._textCache.delete(oldestKey);
+    }
+    this._textCache.set(key, { text, timestamp: Date.now() });
+  }
+
   /**
    * Decode hex strings in PDF format, e.g. <353335343533> or UTF-16BE <003500330035>
    * @param {string} hexStr
@@ -314,14 +336,21 @@ export class GazetteSearchService {
     const rollStr = String(rollNumber).trim();
 
     try {
-      // 1. Retrieve the gazette PDF buffer
-      const buffer = fileBuffer || (storageKey ? await StorageService.getFileBuffer(storageKey, storageProvider) : null);
-      if (!buffer) {
-        return { found: false, reason: 'Gazette file could not be accessed from storage.' };
-      }
+      // 1. Retrieve extracted text from in-memory cache if previously parsed for this gazette
+      let pdfText = storageKey ? this.getCachedText(storageKey) : null;
+      let buffer = null;
 
-      // 2. Perform fast pure-Node PDF text stream extraction
-      const pdfText = this.extractTextFromPdfBuffer(buffer);
+      if (!pdfText) {
+        buffer = fileBuffer || (storageKey ? await StorageService.getFileBuffer(storageKey, storageProvider) : null);
+        if (!buffer) {
+          return { found: false, reason: 'Gazette file could not be accessed from storage.' };
+        }
+        // Perform fast pure-Node PDF text stream extraction
+        pdfText = this.extractTextFromPdfBuffer(buffer);
+        if (storageKey && pdfText) {
+          this.setCachedText(storageKey, pdfText);
+        }
+      }
 
       if (pdfText && pdfText.trim().length > 0) {
         const textResult = this.searchPdfTextForCandidate({

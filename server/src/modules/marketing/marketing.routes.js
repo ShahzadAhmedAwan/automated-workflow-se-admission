@@ -78,3 +78,10 @@ marketingRoutes.post(
   '/webhook/incoming-message',
   CampaignController.handleIncomingMessage
 );
+
+// Staff-accessible WhatsApp session health status check
+marketingRoutes.get(
+  '/whatsapp/status',
+  authenticate,
+  CampaignController.getWhatsAppStatus
+);

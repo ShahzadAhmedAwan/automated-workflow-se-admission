@@ -3,6 +3,10 @@ import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
 import { MANDATORY_ADMISSION_DOCUMENTS } from '../verification.constants.js';
 import { config } from '../../../core/config/env.js';
+import {
+  buildPortalUrl,
+  formatReminderMessage,
+} from './portal-message.service.js';
 
 export class ExpirationReminderService {
   /**
@@ -80,26 +84,18 @@ export class ExpirationReminderService {
         continue;
       }
 
-      const pendingDocsFormatted = pendingDocs.map((d) => d.replace(/_/g, ' ')).join(', ');
       const uploadUrl = t.raw_token
-        ? `${config.APP_ORIGIN}/upload/${t.raw_token}`
-        : `${config.APP_ORIGIN}/upload`;
+        ? buildPortalUrl(t.raw_token)
+        : `${config.APP_ORIGIN}/u`;
 
       const hoursLeft = Math.max(1, Math.round((new Date(t.expires_at).getTime() - Date.now()) / (1000 * 60 * 60)));
 
-      const messageText = `*Admissions Reminder: Document Submission Deadline*
-
-Dear ${t.full_name},
-
-This is a reminder that your document submission link for Software Engineering admissions expires in ${hoursLeft} hour${hoursLeft === 1 ? '' : 's'}.
-
-Pending required documents:
-- ${pendingDocsFormatted}
-
-Upload portal:
-${uploadUrl}
-
-Please submit your documents before the window closes so your application can be verified.`;
+      const messageText = formatReminderMessage({
+        studentName: t.full_name,
+        pendingDocTypes: pendingDocs,
+        uploadUrl,
+        hoursLeft,
+      });
 
       // 1. Dispatch WhatsApp reminder via Outbox queue
       await dispatchJob({

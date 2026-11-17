@@ -6,6 +6,10 @@ import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
 import { DOCUMENT_TYPES, STUDENT_OVERALL_STATUS } from '../verification.constants.js';
 import { config } from '../../../core/config/env.js';
+import {
+  buildPortalUrl,
+  formatUploadRequestMessage,
+} from './portal-message.service.js';
 
 export class DiscrepancyParserService {
   /**
@@ -171,9 +175,14 @@ export class DiscrepancyParserService {
           });
 
           // Dispatch transactional WhatsApp message via Outbox
-          const uploadUrl = `${config.APP_ORIGIN}/upload/${tokenData.rawToken}`;
-          const docListFormatted = rec.allowedDocTypes.map((d) => d.replace(/_/g, ' ')).join(', ');
-          const messageText = `Dear ${rec.fullName}, your admissions profile requires verification of the following documents: ${docListFormatted}. Please submit clear copies within 48 hours using your secure link: ${uploadUrl}`;
+          const uploadUrl = buildPortalUrl(tokenData.rawToken);
+          const messageText = formatUploadRequestMessage({
+            studentName: rec.fullName,
+            allowedDocTypes: rec.allowedDocTypes,
+            uploadUrl,
+            expiresInHours: 48,
+            headerTitle: 'Discrepancy Resolution: Document Request',
+          });
 
           await dispatchJob({
             queueName: 'whatsapp_outreach',

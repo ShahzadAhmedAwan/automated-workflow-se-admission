@@ -6,8 +6,10 @@ import { PublicUploadPortal } from './modules/verification/PublicUploadPortal.js
 import './styles.css';
 
 const pathname = window.location.pathname;
-const isPublicUpload = pathname.startsWith('/upload/');
-const rawPart = isPublicUpload ? pathname.split('/upload/')[1] : null;
+const isPublicUpload = pathname.startsWith('/upload/') || pathname.startsWith('/u/');
+const rawPart = isPublicUpload
+  ? (pathname.startsWith('/u/') ? pathname.split('/u/')[1] : pathname.split('/upload/')[1])
+  : null;
 const uploadToken = rawPart
   ? decodeURIComponent(rawPart.split('?')[0].split('#')[0].trim()).replace(/\/$/, '')
   : null;

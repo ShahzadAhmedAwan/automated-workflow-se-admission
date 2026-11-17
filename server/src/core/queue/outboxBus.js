@@ -56,21 +56,21 @@ export async function claimJobs({ batchSize = 5, lockOwner = randomUUID(), stale
   }
 }
 
-async function completeJob(jobId, lockOwner) {
+export async function completeJob(jobId, lockOwner) {
   await pool.execute(
     `UPDATE outbox_jobs SET status = 'COMPLETED', locked_at = NULL, lock_owner = NULL, last_error = NULL
       WHERE id = ? AND status = 'PROCESSING' AND lock_owner = ?`, [jobId, lockOwner],
   );
 }
 
-async function extendLease(jobId, lockOwner) {
+export async function extendLease(jobId, lockOwner) {
   await pool.execute(
     `UPDATE outbox_jobs SET locked_at = CURRENT_TIMESTAMP(3)
       WHERE id = ? AND status = 'PROCESSING' AND lock_owner = ?`, [jobId, lockOwner],
   );
 }
 
-async function retryJob(job, lockOwner, error) {
+export async function retryJob(job, lockOwner, error) {
   const message = String(error?.message ?? error).slice(0, 4000);
   if (job.attempts >= MAX_ATTEMPTS) {
     await pool.execute(

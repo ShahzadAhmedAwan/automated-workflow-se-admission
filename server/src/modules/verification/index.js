@@ -9,6 +9,14 @@ export { IdentityMatcherService } from './services/identity-matcher.service.js';
 export { ExpirationReminderService } from './services/expiration-reminder.service.js';
 export { GazetteSearchService } from './services/gazette-search.service.js';
 export {
+  formatDocumentLabel,
+  formatDocumentList,
+  buildPortalUrl,
+  formatUploadRequestMessage,
+  formatDiscrepancyMessage,
+  formatReminderMessage,
+} from './services/portal-message.service.js';
+export {
   DOCUMENT_TYPES,
   DOCUMENT_VERIFICATION_STATUS,
   STUDENT_OVERALL_STATUS,

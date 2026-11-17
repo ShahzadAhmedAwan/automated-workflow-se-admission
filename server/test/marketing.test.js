@@ -29,6 +29,7 @@ const {
   parseAndPreviewLeads,
 } = await import('../src/modules/marketing/services/csv-parser.service.js');
 const { CampaignService } = await import('../src/modules/marketing/services/campaign.service.js');
+const { CampaignController } = await import('../src/modules/marketing/controllers/campaign.controller.js');
 const { LeadBotService } = await import('../src/modules/marketing/services/lead-bot.service.js');
 const { AIKnowledgeService } = await import('../src/modules/marketing/services/ai-knowledge.service.js');
 const {
@@ -95,6 +96,13 @@ test('Daylight Hours Adjuster: ensures scheduling is kept between permitted dayt
   const adjustedDay = CampaignService.adjustToDaylight(validDay, 9, 20);
   assert.equal(adjustedDay.getHours(), 14);
   assert.equal(adjustedDay.getMinutes(), 30);
+
+  // Timezone-aware daylight check for Pakistan (Asia/Karachi UTC+5)
+  // 02:00 UTC = 07:00 PKT (before 9 AM PKT) -> should adjust to 09:00 PKT (04:00 UTC)
+  const utcEarly = new Date('2026-05-10T02:00:00Z');
+  const adjustedPkt = CampaignService.adjustToDaylight(utcEarly, 9, 20, 'Asia/Karachi');
+  const pktHour = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Karachi', hour: 'numeric', hour12: false }).format(adjustedPkt), 10);
+  assert.equal(pktHour, 9);
 });
 
 test('LeadBotService: input parsing and validation heuristics', () => {
@@ -111,10 +119,13 @@ test('LeadBotService: input parsing and validation heuristics', () => {
   assert.equal(outOf.obtained, 850);
   assert.equal(outOf.total, 1100);
 
-  // Percentage format: "78%"
+  // Percentage format: "78%" and "100%"
   const pct = LeadBotService.parseMarks('78%');
   assert.ok(pct);
   assert.equal(pct.percentage, 78);
+  const pct100 = LeadBotService.parseMarks('100%');
+  assert.ok(pct100);
+  assert.equal(pct100.percentage, 100);
 
   // Affirmative / Negative detection
   assert.equal(LeadBotService.isAffirmative('Yes'), true);
@@ -852,4 +863,72 @@ test('LeadBotService: Graceful handling of "who are you", "why texting me", "wha
   }, mockDb);
   assert.equal(turnMidIntakeOptOut.state, CONVERSATION_STATE.NOT_INTERESTED);
   assert.ok(turnMidIntakeOptOut.reply.includes('respect your decision') || turnMidIntakeOptOut.reply.includes('future studies'));
+});
+
+test('CampaignController.getWhatsAppStatus: evaluates session freshness and reports status accurately', async () => {
+  let responseData = null;
+  const mockRes = {
+    json(payload) {
+      responseData = payload;
+      return payload;
+    },
+  };
+
+  // Case 1: Empty settings table
+  const mockEmptyDb = {
+    async query() {
+      return [[]];
+    },
+  };
+  await CampaignController.getWhatsAppStatus({}, mockRes, (err) => { throw err; }, mockEmptyDb);
+  assert.equal(responseData.status, 'success');
+  assert.equal(responseData.data.connected, false);
+  assert.equal(responseData.data.status, 'OFFLINE');
+
+  // Case 2: Active connected session with recent heartbeat
+  const mockActiveDb = {
+    async query() {
+      return [[
+        {
+          setting_value: JSON.stringify({
+            status: 'CONNECTED',
+            phone: '923179459856',
+            updatedAt: new Date().toISOString(),
+          }),
+          updated_at: new Date(),
+        },
+      ]];
+    },
+  };
+  await CampaignController.getWhatsAppStatus({}, mockRes, (err) => { throw err; }, mockActiveDb);
+  assert.equal(responseData.status, 'success');
+  assert.equal(responseData.data.connected, true);
+  assert.equal(responseData.data.status, 'CONNECTED');
+  assert.equal(responseData.data.phone, '923179459856');
+
+  // Case 3: Fallback detection when sys_settings is empty but recent DB activity exists
+  const mockFallbackDb = {
+    async query(sql) {
+      if (sql.includes('sys_settings')) {
+        return [[]]; // sys_settings has no row
+      }
+      if (sql.includes("data_key = 'creds'")) {
+        return [[{
+          data_value: JSON.stringify({
+            me: { id: '923179459856:1@s.whatsapp.net' }
+          }),
+          updated_at: new Date()
+        }]];
+      }
+      if (sql.includes('last_active')) {
+        return [[{ last_active: new Date().toISOString() }]];
+      }
+      return [[]];
+    },
+  };
+  await CampaignController.getWhatsAppStatus({}, mockRes, (err) => { throw err; }, mockFallbackDb);
+  assert.equal(responseData.status, 'success');
+  assert.equal(responseData.data.connected, true);
+  assert.equal(responseData.data.status, 'CONNECTED');
+  assert.equal(responseData.data.phone, '923179459856');
 });

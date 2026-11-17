@@ -123,8 +123,8 @@ export class LeadBotService {
       }
     }
 
-    // Pattern: 75% or 75.5%
-    const percentMatch = clean.match(/(\d{2}(?:\.\d+)?)\s*%/);
+    // Pattern: 75% or 75.5% or 100%
+    const percentMatch = clean.match(/(?:^|[^\d])(100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\s*%/);
     if (percentMatch) {
       const pct = parseFloat(percentMatch[1]);
       if (pct >= 0 && pct <= 100) {
@@ -176,7 +176,7 @@ export class LeadBotService {
    * Main turn processor for incoming applicant WhatsApp messages
    * Deterministic, graceful multi-case qualification engine
    */
-  static async processIncomingMessage({ fromPhone, messageBody, rawTimestamp = new Date() }, db = pool) {
+  static async processIncomingMessage({ fromPhone, messageBody, rawTimestamp = new Date(), queueReply = true }, db = pool) {
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
@@ -195,10 +195,12 @@ export class LeadBotService {
       );
 
       const standardGreeting =
-        "Assalam-o-Alaikum! Welcome to the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK), Chehla Campus.\n\n" +
-        "Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, fee structure, or courses?\n\n" +
-        "• Reply *Yes* to register your admission interest\n" +
-        "• Or feel free to ask any question you have!";
+        "*DEPARTMENT OF SOFTWARE ENGINEERING*\n" +
+        "University of Azad Jammu & Kashmir (UAJK)\n\n" +
+        "Assalam-o-Alaikum! Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n" +
+        "Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n" +
+        "- Reply *Yes* to register your admission interest\n" +
+        "- Or feel free to ask any question you have!";
 
       // If new unsolicited lead
       if (!leads.length) {
@@ -224,7 +226,9 @@ export class LeadBotService {
             reply,
             CONVERSATION_STATE.AWAITING_INTEREST,
             [],
-            rawTimestamp
+            rawTimestamp,
+            {},
+            { queueReply }
           );
 
           await connection.commit();
@@ -240,7 +244,9 @@ export class LeadBotService {
           standardGreeting,
           CONVERSATION_STATE.AWAITING_INTEREST,
           [],
-          rawTimestamp
+          rawTimestamp,
+          {},
+          { queueReply }
         );
 
         await connection.commit();
@@ -300,7 +306,7 @@ export class LeadBotService {
           else if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs, eligibility, or courses, please feel free to ask anytime!";
             qualificationChanged = true;
             isEligible = false;
@@ -335,7 +341,7 @@ export class LeadBotService {
           if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -344,7 +350,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME)}`;
+              `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME)}`;
             nextState = CONVERSATION_STATE.AWAITING_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fullName = messageBody.trim();
@@ -366,7 +372,7 @@ export class LeadBotService {
           if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -375,7 +381,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME)}`;
+              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME)}`;
             nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fatherName = messageBody.trim();
@@ -399,7 +405,7 @@ export class LeadBotService {
           if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -414,7 +420,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To check your program eligibility:* What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)`;
+              `*To check your program eligibility:* What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)`;
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
           } else if (!parsed) {
             replyText =
@@ -488,7 +494,7 @@ export class LeadBotService {
           ) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -506,6 +512,22 @@ export class LeadBotService {
             replyText =
               "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
               "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+          } else if (
+            clean.includes('arts') ||
+            clean.includes('humanities') ||
+            clean.includes('commerce') ||
+            clean.includes('icom') ||
+            clean.includes('i.com') ||
+            /\b(fa|f\.a)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.NOT_INTERESTED;
+            qualificationChanged = true;
+            isEligible = false;
+            ineligibilityReason = INELIGIBILITY_REASON.NO_MATHEMATICS;
+            eligibleFor = PROGRAM_ELIGIBILITY.NONE;
+            replyText =
+              "Thank you for sharing your background. Engineering and Computing Technology programs (SE, SET, CET) require an FSc Pre-Engineering, ICS, Pre-Medical, or DAE background.\n\n" +
+              "Unfortunately, candidates with Arts, Humanities, or Commerce backgrounds are not eligible for these programs. If you would like information about other university departments or programs, feel free to ask anytime!";
           } else if (
             LeadBotService.isAffirmative(messageBody) ||
             clean.includes('pre-eng') ||
@@ -532,7 +554,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS)}`;
+              `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS)}`;
             nextState = CONVERSATION_STATE.AWAITING_MATHS;
           } else {
             replyText =
@@ -550,7 +572,7 @@ export class LeadBotService {
           if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -564,7 +586,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To continue your registration:* Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).`;
+              `*To continue your registration:* Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).`;
             nextState = CONVERSATION_STATE.AWAITING_CNIC;
           } else if (parsedCnic) {
             cnic = parsedCnic;
@@ -587,7 +609,7 @@ export class LeadBotService {
           if (LeadBotService.isNegative(messageBody)) {
             nextState = CONVERSATION_STATE.NOT_INTERESTED;
             replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career! 🌟\n\n" +
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
               "If you ever have any questions about university programs or need guidance in the future, feel free to reach out anytime.";
             qualificationChanged = true;
             isEligible = false;
@@ -601,7 +623,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `👉 *To complete your registration:* Please provide your Email Address (e.g. *applicant@example.com*).`;
+              `*To complete your registration:* Please provide your Email Address (e.g. *applicant@example.com*).`;
             nextState = CONVERSATION_STATE.AWAITING_EMAIL;
           } else if (parsedEmail) {
             email = parsedEmail;
@@ -615,16 +637,19 @@ export class LeadBotService {
             }
 
             replyText =
-              `🎉 Congratulations *${fullName || 'Candidate'}*!\n\n` +
+              `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+              `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+              `*Admissions Pre-Registration Confirmed*\n\n` +
+              `Congratulations *${fullName || 'Candidate'}*,\n\n` +
               `Your admission interest for the Department of Software Engineering at UAJK has been successfully recorded.\n\n` +
-              `📋 *Application Summary:*\n` +
-              `• *Candidate:* ${fullName}\n` +
-              `• *Father's Name:* ${fatherName || 'On Record'}\n` +
-              `• *CNIC/B-Form:* ${cnic}\n` +
-              `• *Email:* ${email}\n` +
-              `• *FSc Marks:* ${marksObtained || 'Recorded'}\n\n` +
-              `Our admissions desk will contact you and send your document verification portal link shortly.\n` +
-              `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime!`;
+              `*Application Summary:*\n` +
+              `- Candidate: ${fullName}\n` +
+              `- Father's Name: ${fatherName || 'On Record'}\n` +
+              `- CNIC/B-Form: ${cnic}\n` +
+              `- Email: ${email}\n` +
+              `- FSc Marks: ${marksObtained || 'Recorded'}\n\n` +
+              `Our admissions office will process your profile and issue your document verification portal link shortly.\n` +
+              `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime.`;
           } else {
             replyText =
               "Please provide a valid email address (for example: *applicant@example.com*).\n\n" +
@@ -683,7 +708,8 @@ export class LeadBotService {
             ? ELIGIBILITY_STATUS.ELIGIBLE
             : (ineligibilityReason ? ELIGIBILITY_STATUS.INELIGIBLE : lead.eligibility_status),
           ineligibilityReason,
-        }
+        },
+        { queueReply }
       );
 
       // If newly qualified, publish LEAD_QUALIFIED event to outbox_jobs for Module 3 handoff
@@ -744,7 +770,8 @@ export class LeadBotService {
     nextState,
     history,
     timestamp,
-    extraFields = {}
+    extraFields = {},
+    options = { queueReply: true }
   ) {
     const safeHistory = Array.isArray(history) ? history : [];
     const updatedHistory = [
@@ -808,17 +835,19 @@ export class LeadBotService {
       params
     );
 
-    // Enqueue outbound reply immediately
-    await dispatchJob({
-      queueName: 'whatsapp_replies',
-      jobType: EVENT_TYPES.WHATSAPP_MESSAGE,
-      payload: {
-        recipientPhone: phoneNormalized,
-        messageType: 'TRANSACTIONAL',
-        messageText: replyText,
-        metadata: { leadId, state: nextState },
-      },
-      connection,
-    });
+    // Enqueue outbound reply if enabled (defaults to true for webhook/async flows, false when directly sent via socket)
+    if (options.queueReply !== false) {
+      await dispatchJob({
+        queueName: 'whatsapp_replies',
+        jobType: EVENT_TYPES.WHATSAPP_MESSAGE,
+        payload: {
+          recipientPhone: phoneNormalized,
+          messageType: 'TRANSACTIONAL',
+          messageText: replyText,
+          metadata: { leadId, state: nextState },
+        },
+        connection,
+      });
+    }
   }
 }

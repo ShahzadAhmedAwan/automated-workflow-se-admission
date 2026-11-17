@@ -434,6 +434,157 @@ export class CampaignService {
   }
 
   /**
+   * Send WhatsApp greeting to a single student on-demand and register them in mkt_leads
+   */
+  static async sendSingleLeadOutreach(
+    {
+      campaignId = null,
+      fullName,
+      phone,
+      city = '',
+      priorDegree = '',
+      customGreeting = null,
+    },
+    db = pool
+  ) {
+    const phoneNormalized = normalizePhoneNumber(phone);
+    if (!phoneNormalized) {
+      throw new AppError(400, 'INVALID_PHONE_NUMBER', 'Please provide a valid mobile or WhatsApp phone number.');
+    }
+
+    const connection = typeof db.getConnection === 'function' ? await db.getConnection() : db;
+    const shouldRelease = typeof db.getConnection === 'function' && typeof connection.release === 'function';
+
+    try {
+      if (typeof connection.beginTransaction === 'function') {
+        await connection.beginTransaction();
+      }
+
+      let targetCampaignId = campaignId;
+      if (!targetCampaignId) {
+        const [cRows] = await connection.query(
+          `SELECT id FROM mkt_campaigns ORDER BY id DESC LIMIT 1`
+        );
+        if (cRows && cRows.length) {
+          targetCampaignId = cRows[0].id;
+        } else {
+          const [newC] = await connection.execute(
+            `INSERT INTO mkt_campaigns (name, description, status)
+             VALUES ('Direct Outreach', 'Individual student direct outreach', 'ACTIVE')`
+          );
+          targetCampaignId = newC.insertId;
+        }
+      }
+
+      // Check if lead already exists
+      const [existingLeads] = await connection.query(
+        `SELECT id, conversation_state FROM mkt_leads WHERE phone_normalized = ? LIMIT 1`,
+        [phoneNormalized]
+      );
+
+      let leadId;
+      if (existingLeads && existingLeads.length) {
+        leadId = existingLeads[0].id;
+        await connection.execute(
+          `UPDATE mkt_leads
+           SET full_name = ?,
+               phone_raw = ?,
+               city = COALESCE(NULLIF(?, ''), city),
+               prior_degree = COALESCE(NULLIF(?, ''), prior_degree),
+               conversation_state = 'GREETING_SENT',
+               last_interaction_at = CURRENT_TIMESTAMP(3)
+           WHERE id = ?`,
+          [fullName, phone, city, priorDegree, leadId]
+        );
+      } else {
+        const [insertResult] = await connection.execute(
+          `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, city, prior_degree, conversation_state, last_interaction_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'GREETING_SENT', CURRENT_TIMESTAMP(3))`,
+          [targetCampaignId, fullName, phone, phoneNormalized, city || null, priorDegree || null]
+        );
+        leadId = insertResult.insertId;
+        await connection.execute(
+          `UPDATE mkt_campaigns SET total_leads = total_leads + 1 WHERE id = ?`,
+          [targetCampaignId]
+        );
+      }
+
+      const defaultGreeting = (name) =>
+        `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+        `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
+        `Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n` +
+        `- Reply *Yes* to apply\n` +
+        `- Or feel free to ask any question you have!`;
+
+      const greetingText = customGreeting && customGreeting.trim()
+        ? customGreeting.replace(/{name}/gi, fullName)
+        : defaultGreeting(fullName);
+
+      // Dispatch immediately
+      await dispatchJob({
+        queueName: 'whatsapp_outreach',
+        jobType: EVENT_TYPES.WHATSAPP_MESSAGE,
+        payload: {
+          recipientPhone: phoneNormalized,
+          messageType: 'CAMPAIGN',
+          messageText: greetingText,
+          metadata: {
+            campaignId: targetCampaignId,
+            leadId,
+            leadName: fullName,
+            directOutreach: true,
+          },
+        },
+        availableAt: new Date(),
+        connection,
+      });
+
+      const initialHistory = [
+        {
+          direction: 'OUTBOUND',
+          text: greetingText,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+
+      await connection.execute(
+        `UPDATE mkt_leads
+         SET chat_history = ?
+         WHERE id = ?`,
+        [JSON.stringify(initialHistory), leadId]
+      );
+
+      await connection.execute(
+        `UPDATE mkt_campaigns SET sent_count = sent_count + 1 WHERE id = ?`,
+        [targetCampaignId]
+      );
+
+      if (typeof connection.commit === 'function') {
+        await connection.commit();
+      }
+
+      return {
+        leadId,
+        fullName,
+        phoneNormalized,
+        campaignId: targetCampaignId,
+        status: 'GREETING_QUEUED',
+        message: `WhatsApp greeting dispatched to ${fullName} (${phoneNormalized}).`,
+      };
+    } catch (err) {
+      if (typeof connection.rollback === 'function') {
+        await connection.rollback();
+      }
+      throw err;
+    } finally {
+      if (shouldRelease) {
+        connection.release();
+      }
+    }
+  }
+
+  /**
    * Adjusts a Date object forward to the next valid daylight window (e.g. 09:00 - 20:00).
    * Respects target timezone (defaults to Asia/Karachi in non-test environments or when specified).
    */

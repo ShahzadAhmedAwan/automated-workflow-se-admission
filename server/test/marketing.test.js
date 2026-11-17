@@ -127,6 +127,18 @@ test('LeadBotService: input parsing and validation heuristics', () => {
   assert.ok(pct100);
   assert.equal(pct100.percentage, 100);
 
+  // Invalid marks validation (obtained > total)
+  const invalidRatio = LeadBotService.parseMarks('550/500');
+  assert.ok(invalidRatio);
+  assert.equal(invalidRatio.error, 'OBTAINED_EXCEEDS_TOTAL');
+  assert.equal(invalidRatio.obtained, 550);
+  assert.equal(invalidRatio.total, 500);
+
+  const invalidPct = LeadBotService.parseMarks('115%');
+  assert.ok(invalidPct);
+  assert.equal(invalidPct.error, 'PERCENTAGE_EXCEEDS_100');
+  assert.equal(invalidPct.percentage, 115);
+
   // Affirmative / Negative detection
   assert.equal(LeadBotService.isAffirmative('Yes'), true);
   assert.equal(LeadBotService.isAffirmative('han bilkul'), true);
@@ -430,6 +442,15 @@ test('LeadBotService: Graceful handling of invalid inputs', async () => {
 
   assert.equal(turnInvalidEmail.state, CONVERSATION_STATE.AWAITING_EMAIL);
   assert.ok(turnInvalidEmail.reply.includes('valid email address'));
+
+  // 4. Enter mathematically impossible marks (e.g. 550/500)
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_MARKS;
+  const turnInvalidMarks = await LeadBotService.processIncomingMessage({
+    fromPhone: '923459988776',
+    messageBody: '550/500',
+  }, mockDb);
+  assert.equal(turnInvalidMarks.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnInvalidMarks.reply.includes('cannot exceed total marks'));
 });
 
 test('LeadBotService Case 2: Student says No (Graceful exit & remains open to inquiries)', async () => {
@@ -931,4 +952,62 @@ test('CampaignController.getWhatsAppStatus: evaluates session freshness and repo
   assert.equal(responseData.data.connected, true);
   assert.equal(responseData.data.status, 'CONNECTED');
   assert.equal(responseData.data.phone, '923179459856');
+});
+
+test('CampaignService.sendSingleLeadOutreach: normalizes phone, queues immediate job and records greeting state', async () => {
+  const dispatchedJobs = [];
+  let leadUpdated = false;
+
+  const mockDbConnection = {
+    async query(sql) {
+      if (sql.includes('SELECT id FROM mkt_campaigns')) {
+        return [[{ id: 42 }]];
+      }
+      if (sql.includes('SELECT id, conversation_state FROM mkt_leads')) {
+        return [[]]; // New lead
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('INSERT INTO mkt_leads')) {
+        return [{ insertId: 101 }];
+      }
+      if (sql.includes('INSERT INTO outbox_jobs')) {
+        dispatchedJobs.push({
+          jobType: params[1],
+          payload: JSON.parse(params[2]),
+        });
+        return [{ insertId: 1 }];
+      }
+      if (sql.includes('UPDATE mkt_leads')) {
+        leadUpdated = true;
+        return [{ affectedRows: 1 }];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  const result = await CampaignService.sendSingleLeadOutreach({
+    fullName: 'Test Applicant',
+    phone: '03001234567',
+    city: 'Muzaffarabad',
+  }, mockDb);
+
+  assert.equal(result.leadId, 101);
+  assert.equal(result.phoneNormalized, '923001234567');
+  assert.equal(result.status, 'GREETING_QUEUED');
+  assert.equal(dispatchedJobs.length, 1);
+  assert.equal(dispatchedJobs[0].payload.recipientPhone, '923001234567');
+  assert.ok(dispatchedJobs[0].payload.messageText.includes('Test Applicant'));
+  assert.equal(leadUpdated, true);
 });

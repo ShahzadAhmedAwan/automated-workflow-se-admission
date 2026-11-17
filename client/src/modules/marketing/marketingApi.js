@@ -38,6 +38,14 @@ export const marketingApi = {
     return res.data;
   },
 
+  async sendSingleLead(payload) {
+    const res = await apiRequest('/marketing/leads/single', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, true);
+    return res.data;
+  },
+
   async triggerOutreach(campaignId, options = {}) {
     const res = await apiRequest(`/marketing/campaigns/${campaignId}/outreach`, {
       method: 'POST',

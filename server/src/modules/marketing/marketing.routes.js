@@ -56,6 +56,14 @@ marketingRoutes.post(
   CampaignController.importLeads
 );
 
+// Single student manual outreach
+marketingRoutes.post(
+  '/leads/single',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.sendSingleLead
+);
+
 // Outreach trigger
 marketingRoutes.post(
   '/campaigns/:id/outreach',

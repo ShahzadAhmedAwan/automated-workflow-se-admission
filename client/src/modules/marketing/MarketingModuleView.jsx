@@ -45,6 +45,15 @@ export function MarketingModuleView() {
   const [selectedTargetCampaign, setSelectedTargetCampaign] = useState('');
   const [committing, setCommitting] = useState(false);
 
+  // Single Applicant Direct Outreach
+  const [singleName, setSingleName] = useState('');
+  const [singlePhone, setSinglePhone] = useState('');
+  const [singleCampaignId, setSingleCampaignId] = useState('');
+  const [singleCity, setSingleCity] = useState('');
+  const [singleDegree, setSingleDegree] = useState('');
+  const [singleCustomGreeting, setSingleCustomGreeting] = useState('');
+  const [singleSending, setSingleSending] = useState(false);
+
   // Live Simulator
   const [simPhone, setSimPhone] = useState('923001234567');
   const [simMessage, setSimMessage] = useState('Yes');
@@ -141,6 +150,34 @@ export function MarketingModuleView() {
     }
   }
 
+  async function handleSingleLeadSubmit(e) {
+    e.preventDefault();
+    if (!singleName.trim() || !singlePhone.trim()) return;
+    setSingleSending(true);
+    setError('');
+    try {
+      const res = await marketingApi.sendSingleLead({
+        fullName: singleName.trim(),
+        phone: singlePhone.trim(),
+        campaignId: singleCampaignId ? Number(singleCampaignId) : undefined,
+        city: singleCity.trim() || undefined,
+        priorDegree: singleDegree.trim() || undefined,
+        customGreeting: singleCustomGreeting.trim() || undefined,
+      });
+      setSuccess(`WhatsApp greeting dispatched to ${res.fullName} (${res.phoneNormalized}). The bot will guide them when they reply.`);
+      setSingleName('');
+      setSinglePhone('');
+      setSingleCity('');
+      setSingleDegree('');
+      setSingleCustomGreeting('');
+      await loadCampaigns();
+    } catch (err) {
+      setError(err.message || 'Failed to dispatch single message.');
+    } finally {
+      setSingleSending(false);
+    }
+  }
+
   async function handleSendSimulatedTurn(e) {
     e.preventDefault();
     if (!simMessage.trim()) return;
@@ -207,6 +244,7 @@ export function MarketingModuleView() {
         tabs={[
           { id: 'campaigns', label: 'Campaigns' },
           { id: 'csv', label: 'Import applicants' },
+          { id: 'single', label: 'Single applicant' },
           { id: 'simulator', label: 'Message simulator' },
         ]}
       />
@@ -459,7 +497,121 @@ export function MarketingModuleView() {
         </div>
       )}
 
-      {/* ======================= TAB 3: LIVE BOT CHAT SIMULATOR ======================= */}
+      {/* ======================= TAB 3: SINGLE APPLICANT DIRECT OUTREACH ======================= */}
+      {activeTab === 'single' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs max-w-2xl">
+          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-1.5">
+            Direct WhatsApp Outreach (Single Applicant)
+          </h3>
+          <p className="text-xs text-slate-500 mb-6">
+            Dispatch an automated admissions greeting to an individual student immediately. When they reply, the AI bot takes over and guides them through the qualification process.
+          </p>
+
+          <form onSubmit={handleSingleLeadSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  Student full name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={singleName}
+                  onChange={(e) => setSingleName(e.target.value)}
+                  placeholder="e.g. Sheikh Haseeb Ur Rehman"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  WhatsApp / Mobile number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={singlePhone}
+                  onChange={(e) => setSinglePhone(e.target.value)}
+                  placeholder="e.g. 03001234567 or +923001234567"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 font-mono focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  Assign to campaign
+                </label>
+                <select
+                  value={singleCampaignId}
+                  onChange={(e) => setSingleCampaignId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:border-blue-600 focus:outline-none bg-white"
+                >
+                  <option value="">Default (Direct Outreach)</option>
+                  {campaigns.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  City / District (optional)
+                </label>
+                <input
+                  type="text"
+                  value={singleCity}
+                  onChange={(e) => setSingleCity(e.target.value)}
+                  placeholder="e.g. Muzaffarabad"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                  Prior degree (optional)
+                </label>
+                <input
+                  type="text"
+                  value={singleDegree}
+                  onChange={(e) => setSingleDegree(e.target.value)}
+                  placeholder="e.g. Pre-Engineering"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                Custom greeting message (optional)
+              </label>
+              <textarea
+                rows={3}
+                value={singleCustomGreeting}
+                onChange={(e) => setSingleCustomGreeting(e.target.value)}
+                placeholder="Leave blank to use the official department greeting. You can use {name} for student's name."
+                className="w-full px-3.5 py-2 rounded-lg border border-slate-300 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="submit"
+                disabled={singleSending || !singleName.trim() || !singlePhone.trim()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-medium text-sm transition shadow-xs disabled:opacity-50 cursor-pointer"
+              >
+                <IconSend className="size-4" />
+                <span>{singleSending ? 'Queueing WhatsApp message…' : 'Send WhatsApp greeting'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ======================= TAB 4: LIVE BOT CHAT SIMULATOR ======================= */}
       {activeTab === 'simulator' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Chat Panel */}

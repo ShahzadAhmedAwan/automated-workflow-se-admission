@@ -33,3 +33,12 @@ export const incomingMessageWebhookSchema = z.object({
   body: z.string().trim().min(1),
   timestamp: z.coerce.date().optional(),
 }).strict();
+
+export const singleLeadOutreachSchema = z.object({
+  campaignId: z.coerce.number().int().positive().optional(),
+  fullName: z.string().trim().min(2).max(150),
+  phone: z.string().trim().min(7).max(30),
+  city: z.string().trim().max(120).optional().default(''),
+  priorDegree: z.string().trim().max(80).optional().default(''),
+  customGreeting: z.string().trim().max(1000).optional(),
+}).strict();

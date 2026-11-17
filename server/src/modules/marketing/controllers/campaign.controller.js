@@ -7,6 +7,7 @@ import {
   leadImportSchema,
   triggerCampaignSchema,
   incomingMessageWebhookSchema,
+  singleLeadOutreachSchema,
 } from '../marketing.schemas.js';
 import { normalizePhoneNumber } from '../services/csv-parser.service.js';
 
@@ -59,6 +60,16 @@ export class CampaignController {
     try {
       const payload = leadImportSchema.parse(req.body);
       const result = await CampaignService.importLeads(payload.campaignId, payload.leads);
+      res.status(201).json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async sendSingleLead(req, res, next) {
+    try {
+      const payload = singleLeadOutreachSchema.parse(req.body);
+      const result = await CampaignService.sendSingleLeadOutreach(payload);
       res.status(201).json({ status: 'success', data: result });
     } catch (err) {
       next(err);

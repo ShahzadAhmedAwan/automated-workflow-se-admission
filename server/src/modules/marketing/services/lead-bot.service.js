@@ -109,24 +109,45 @@ export class LeadBotService {
     if (!text) return null;
     const clean = text.trim().replace(/,/g, '');
 
-    // Pattern: 420/550 or 420 / 550 or 420 out of 550
-    const ratioMatch = clean.match(/(\d{2,4})\s*(?:\/|\bout\s+of\b)\s*(\d{2,4})/i);
+    // Pattern 1: Ratio format like 420/550, 850/1100, 420 out of 550, 550/500
+    const ratioMatch = clean.match(/(\d{1,4})\s*(?:\/|\bout\s+of\b)\s*(\d{1,4})/i);
     if (ratioMatch) {
       const obtained = parseFloat(ratioMatch[1]);
       const total = parseFloat(ratioMatch[2]);
-      if (total > 0 && obtained <= total) {
+
+      if (total <= 0) {
         return {
+          error: 'INVALID_TOTAL',
           obtained: Math.round(obtained),
           total: Math.round(total),
-          percentage: (obtained / total) * 100,
         };
       }
+
+      if (obtained > total) {
+        return {
+          error: 'OBTAINED_EXCEEDS_TOTAL',
+          obtained: Math.round(obtained),
+          total: Math.round(total),
+        };
+      }
+
+      return {
+        obtained: Math.round(obtained),
+        total: Math.round(total),
+        percentage: (obtained / total) * 100,
+      };
     }
 
-    // Pattern: 75% or 75.5% or 100%
-    const percentMatch = clean.match(/(?:^|[^\d])(100(?:\.0+)?|\d{1,2}(?:\.\d+)?)\s*%/);
+    // Pattern 2: Percentage format like 75%, 75.5%, 100%, 120%
+    const percentMatch = clean.match(/(?:^|[^\d])(\d{1,3}(?:\.\d+)?)\s*%/);
     if (percentMatch) {
       const pct = parseFloat(percentMatch[1]);
+      if (pct > 100) {
+        return {
+          error: 'PERCENTAGE_EXCEEDS_100',
+          percentage: pct,
+        };
+      }
       if (pct >= 0 && pct <= 100) {
         return {
           obtained: Math.round(pct * 11),
@@ -136,13 +157,25 @@ export class LeadBotService {
       }
     }
 
-    // Bare number: if > 100 assume out of 1100 (Pakistani standard) or out of 550 (Part 1)
-    const numMatch = clean.match(/\b(\d{3,4})\b/);
+    // If string contained an explicit separator ('/' or 'out of' or '%'),
+    // do NOT fall through to bare number regex.
+    if (/[\/%]|\bout\s+of\b/i.test(clean)) {
+      return null;
+    }
+
+    // Pattern 3: Bare number
+    const numMatch = clean.match(/\b(\d{2,4})\b/);
     if (numMatch) {
       const num = parseInt(numMatch[1], 10);
-      if (num <= 550) {
+      if (num > 1100) {
+        return {
+          error: 'MARKS_EXCEEDS_MAX',
+          obtained: num,
+        };
+      }
+      if (num >= 100 && num <= 550) {
         return { obtained: num, total: 550, percentage: (num / 550) * 100 };
-      } else if (num <= 1100) {
+      } else if (num > 550 && num <= 1100) {
         return { obtained: num, total: 1100, percentage: (num / 1100) * 100 };
       }
     }
@@ -415,8 +448,26 @@ export class LeadBotService {
 
           const parsed = LeadBotService.parseMarks(messageBody);
 
-          // If user asked a question instead of providing marks
-          if (!parsed && AIKnowledgeService.isQuestion(messageBody)) {
+          // If user provided mathematically invalid marks (e.g. 550/500, >100%, or >1100)
+          if (parsed?.error) {
+            if (parsed.error === 'OBTAINED_EXCEEDS_TOTAL') {
+              replyText =
+                `The obtained marks (*${parsed.obtained}*) cannot exceed total marks (*${parsed.total}*).\n\n` +
+                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+            } else if (parsed.error === 'PERCENTAGE_EXCEEDS_100') {
+              replyText =
+                `Percentage (*${parsed.percentage}%*) cannot exceed 100%.\n\n` +
+                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+            } else if (parsed.error === 'MARKS_EXCEEDS_MAX') {
+              replyText =
+                `The marks you entered (*${parsed.obtained}*) exceed standard intermediate total marks (1100).\n\n` +
+                `Please provide your marks in the format obtained/total (for example: *420/550* or *850/1100*).`;
+            } else {
+              replyText =
+                `Please provide valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+            }
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+          } else if (!parsed && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +

@@ -4,12 +4,14 @@ import { LoginPage } from '../modules/auth/LoginPage.jsx';
 import { UserManagementView } from '../modules/auth/UserManagementView.jsx';
 import { MarketingModuleView } from '../modules/marketing/MarketingModuleView.jsx';
 import { VerificationModuleView } from '../modules/verification/VerificationModuleView.jsx';
+import { MeritModuleView } from '../modules/merit/MeritModuleView.jsx';
 import { marketingApi } from '../modules/marketing/marketingApi.js';
 import { Button } from '../core/ui/primitives.jsx';
 import {
   IconDashboard,
   IconUsers,
   IconDocumentCheck,
+  IconAcademicCap,
   IconLogout,
   IconPlus,
   IconMenu,
@@ -19,6 +21,7 @@ import {
 const navigation = [
   { id: 'marketing', label: 'Dashboard', icon: IconDashboard },
   { id: 'verification', label: 'Document verification', icon: IconDocumentCheck },
+  { id: 'merit', label: 'Merit lists', icon: IconAcademicCap },
 ];
 
 export function App() {
@@ -225,6 +228,19 @@ export function App() {
                 <p className="mb-1 text-xs font-medium text-slate-500">Review applicant documents</p>
               </section>
               <VerificationModuleView />
+            </div>
+          )}
+
+          {currentNav === 'merit' && (
+            <div>
+              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="mb-1 text-xs font-semibold text-blue-700">Admissions workspace</p>
+                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Merit engine & snapshots</h1>
+                </div>
+                <p className="mb-1 text-xs font-medium text-slate-500">Official ranking, SEET test sync & snapshots</p>
+              </section>
+              <MeritModuleView />
             </div>
           )}
 

@@ -72,13 +72,13 @@ export class AdmissionIntakeService {
         studentId = existing[0].id;
         await connection.execute(
           `UPDATE adm_students
-              SET lead_id = COALESCE(lead_id, ?),
+              SET lead_id = COALESCE(?, lead_id),
                   full_name = COALESCE(?, full_name),
-                  father_name = COALESCE(father_name, ?),
-                  cnic = COALESCE(cnic, ?),
-                  email = COALESCE(email, ?),
-                  city = COALESCE(city, ?),
-                  eligible_for = COALESCE(eligible_for, ?),
+                  father_name = COALESCE(?, father_name),
+                  cnic = COALESCE(?, cnic),
+                  email = COALESCE(?, email),
+                  city = COALESCE(?, city),
+                  eligible_for = COALESCE(?, eligible_for),
                   fsc_obtained_marks = COALESCE(?, fsc_obtained_marks),
                   application_no = COALESCE(application_no, CONCAT('APP-2026-', LPAD(id, 4, '0')))
             WHERE id = ?`,

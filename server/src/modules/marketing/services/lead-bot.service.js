@@ -131,6 +131,15 @@ export class LeadBotService {
         };
       }
 
+      // Total marks in Intermediate (FSc/ICS) must be 550 (Part 1) or 1100 (Part 2)
+      if (total !== 550 && total !== 1100) {
+        return {
+          error: 'INVALID_TOTAL_MARKS',
+          obtained: Math.round(obtained),
+          total: Math.round(total),
+        };
+      }
+
       return {
         obtained: Math.round(obtained),
         total: Math.round(total),
@@ -203,6 +212,66 @@ export class LeadBotService {
       default:
         return "Please let us know how we can assist you.";
     }
+  }
+
+  /**
+   * Helper to detect correction / edit / mistake intent in English and Roman Urdu
+   */
+  static isCorrectionIntent(text) {
+    if (!text) return false;
+    const clean = text.trim().toLowerCase();
+    const patterns = [
+      /\b(mistake|ghalti|galti|galati|ghlti|wrong|galat|ghalat)\b/i,
+      /\b(correct|correction|edit|change|update|modify|replace|reset)\b/i,
+      /\b(wanna correct|want to correct|can i change|kuch change|theek karna|sahi karna|durust)\b/i,
+      /\b(by mistake|mistakenly|glat likh|ghalat likh|wrong entry|i made a mistake|i did a mistake)\b/i,
+      /\b(change marks|change name|change cnic|change email|change father|change group)\b/i,
+    ];
+    return patterns.some((p) => p.test(clean));
+  }
+
+  /**
+   * Helper to format standard or updated confirmation summary
+   */
+  static formatConfirmationMessage({ fullName, fatherName, cnic, email, marks, isUpdated = false }) {
+    const title = isUpdated ? "*Admissions Pre-Registration Updated*" : "*Admissions Pre-Registration Confirmed*";
+    const greeting = isUpdated
+      ? `Your details have been successfully updated, *${fullName || 'Candidate'}*.`
+      : `Congratulations *${fullName || 'Candidate'}*,\n\nYour admission interest for the Department of Software Engineering at UAJK has been successfully recorded.`;
+    const summaryTitle = isUpdated ? "*Updated Application Summary:*" : "*Application Summary:*";
+
+    return (
+      `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+      `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+      `${title}\n\n` +
+      `${greeting}\n\n` +
+      `${summaryTitle}\n` +
+      `- Candidate: ${fullName || 'Candidate'}\n` +
+      `- Father's Name: ${fatherName || 'On Record'}\n` +
+      `- CNIC/B-Form: ${cnic || 'On Record'}\n` +
+      `- Email: ${email || 'On Record'}\n` +
+      `- FSc Marks: ${marks || 'Recorded'}\n\n` +
+      `Our admissions office will process your profile and issue your document verification portal link shortly.\n` +
+      `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime.`
+    );
+  }
+
+  /**
+   * Helper to return the interactive correction options menu
+   */
+  static getCorrectionMenuText() {
+    return (
+      "No problem at all! You can easily update your information.\n\n" +
+      "What would you like to correct?\n" +
+      "1. Full Name\n" +
+      "2. Father's Name\n" +
+      "3. Marks (FSc / ICS / DAE)\n" +
+      "4. Academic Group (Pre-Eng / ICS / Pre-Med / DAE)\n" +
+      "5. CNIC / Form-B\n" +
+      "6. Email Address\n" +
+      "7. All Details (Start over from scratch)\n\n" +
+      "Please reply with the number (1-7) or tell me what was wrong (for example: reply *3* or *Marks* to correct your score, or send your correct details directly)."
+    );
   }
 
   /**
@@ -387,8 +456,22 @@ export class LeadBotService {
             nextState = CONVERSATION_STATE.AWAITING_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fullName = messageBody.trim();
-            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-            replyText = `Thank you, *${fullName}*! What is your *Father's Name*?`;
+            if (fatherName && cnic && email && marksObtained) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+              replyText = `Thank you, *${fullName}*! What is your *Father's Name*?`;
+            }
           } else {
             replyText =
               "Please enter a valid full name (alphabetic characters only, e.g. *Muhammad Ali*).\n\n" +
@@ -418,10 +501,24 @@ export class LeadBotService {
             nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fatherName = messageBody.trim();
-            nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            replyText =
-              `Noted. What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
-              `*(For example: 420/550, 850/1100, or 75%)*`;
+            if (cnic && email && marksObtained) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Noted. What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
+                `*(For example: 420/550, 850/1100, or 75%)*`;
+            }
           } else {
             replyText =
               "Please enter a valid Father's name (letters only, e.g. *Tariq Mahmood*).\n\n" +
@@ -448,9 +545,13 @@ export class LeadBotService {
 
           const parsed = LeadBotService.parseMarks(messageBody);
 
-          // If user provided mathematically invalid marks (e.g. 550/500, >100%, or >1100)
+          // If user provided mathematically invalid marks (e.g. 550/500, >100%, 420/900, or >1100)
           if (parsed?.error) {
-            if (parsed.error === 'OBTAINED_EXCEEDS_TOTAL') {
+            if (parsed.error === 'INVALID_TOTAL_MARKS') {
+              replyText =
+                `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
+                `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
+            } else if (parsed.error === 'OBTAINED_EXCEEDS_TOTAL') {
               replyText =
                 `The obtained marks (*${parsed.obtained}*) cannot exceed total marks (*${parsed.total}*).\n\n` +
                 `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
@@ -464,7 +565,7 @@ export class LeadBotService {
                 `Please provide your marks in the format obtained/total (for example: *420/550* or *850/1100*).`;
             } else {
               replyText =
-                `Please provide valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+                `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
             }
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
           } else if (!parsed && AIKnowledgeService.isQuestion(messageBody)) {
@@ -522,10 +623,25 @@ export class LeadBotService {
                 eligibleFor = PROGRAM_ELIGIBILITY.SET_CET;
               }
 
-              nextState = CONVERSATION_STATE.AWAITING_MATHS;
-              replyText =
-                `Noted: *${parsed.percentage.toFixed(1)}%* marks.\n\n` +
-                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+              // If candidate already completed other details (e.g. updating marks after qualification)
+              if (cnic && email && fatherName && (hasMaths !== null || lead.has_maths !== null)) {
+                nextState = CONVERSATION_STATE.QUALIFIED;
+                qualificationChanged = true;
+                isEligible = true;
+                replyText = LeadBotService.formatConfirmationMessage({
+                  fullName,
+                  fatherName,
+                  cnic,
+                  email,
+                  marks: marksObtained,
+                  isUpdated: true,
+                });
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                replyText =
+                  `Noted: *${parsed.percentage.toFixed(1)}%* marks.\n\n` +
+                  `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+              }
             }
           }
           break;
@@ -559,10 +675,24 @@ export class LeadBotService {
           ) {
             hasMaths = false;
             priorDegree = 'Pre-Medical';
-            nextState = CONVERSATION_STATE.AWAITING_CNIC;
-            replyText =
-              "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
-              "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            if (cnic && email && marksObtained && fatherName) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText =
+                "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
+                "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            }
           } else if (
             clean.includes('arts') ||
             clean.includes('humanities') ||
@@ -591,16 +721,44 @@ export class LeadBotService {
             else if (clean.includes('dae')) priorDegree = 'DAE';
             else priorDegree = 'FSc Pre-Engineering';
 
-            nextState = CONVERSATION_STATE.AWAITING_CNIC;
-            replyText =
-              "Great! Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            if (cnic && email && marksObtained && fatherName) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText =
+                "Great! Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            }
           } else if (LeadBotService.isNegative(messageBody)) {
             hasMaths = false;
             priorDegree = 'Pre-Medical';
-            nextState = CONVERSATION_STATE.AWAITING_CNIC;
-            replyText =
-              "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
-              "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            if (cnic && email && marksObtained && fatherName) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText =
+                "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
+                "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+            }
           } else if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
@@ -641,9 +799,23 @@ export class LeadBotService {
             nextState = CONVERSATION_STATE.AWAITING_CNIC;
           } else if (parsedCnic) {
             cnic = parsedCnic;
-            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
-            replyText =
-              "Thank you! Finally, please provide your *active Email Address* for official admission updates and portal access:";
+            if (email && marksObtained && fatherName) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              isEligible = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+              replyText =
+                "Thank you! Finally, please provide your *active Email Address* for official admission updates and portal access:";
+            }
           } else {
             replyText =
               "Please provide a valid 13-digit Pakistani CNIC or Form-B number (for example: *12345-1234567-1*).\n\n" +
@@ -687,20 +859,14 @@ export class LeadBotService {
               eligibleFor = PROGRAM_ELIGIBILITY.SE_SET_CET;
             }
 
-            replyText =
-              `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
-              `University of Azad Jammu & Kashmir (UAJK)\n\n` +
-              `*Admissions Pre-Registration Confirmed*\n\n` +
-              `Congratulations *${fullName || 'Candidate'}*,\n\n` +
-              `Your admission interest for the Department of Software Engineering at UAJK has been successfully recorded.\n\n` +
-              `*Application Summary:*\n` +
-              `- Candidate: ${fullName}\n` +
-              `- Father's Name: ${fatherName || 'On Record'}\n` +
-              `- CNIC/B-Form: ${cnic}\n` +
-              `- Email: ${email}\n` +
-              `- FSc Marks: ${marksObtained || 'Recorded'}\n\n` +
-              `Our admissions office will process your profile and issue your document verification portal link shortly.\n` +
-              `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime.`;
+            replyText = LeadBotService.formatConfirmationMessage({
+              fullName,
+              fatherName,
+              cnic,
+              email,
+              marks: marksObtained,
+              isUpdated: Boolean(lead.email && lead.conversation_state === CONVERSATION_STATE.AWAITING_EMAIL && history.length > 8),
+            });
           } else {
             replyText =
               "Please provide a valid email address (for example: *applicant@example.com*).\n\n" +
@@ -711,20 +877,343 @@ export class LeadBotService {
         }
 
         // ---------------------------------------------------------------------
-        // Step 7: Already Qualified or Inactive - Answer Any Inquiries Gracefully
+        // Step 7: Candidate Already Qualified - Mistake Correction & Inquiries
         // ---------------------------------------------------------------------
-        case CONVERSATION_STATE.QUALIFIED:
-        case CONVERSATION_STATE.NOT_INTERESTED:
-        case CONVERSATION_STATE.GENERAL_INQUIRY: {
-          // If asking a question
+        case CONVERSATION_STATE.QUALIFIED: {
+          const clean = messageBody.trim().toLowerCase();
+
+          // Check direct field value submissions
+          const marksInMsg = LeadBotService.parseMarks(messageBody);
+          const cnicInMsg = LeadBotService.parseCnic(messageBody);
+          const emailInMsg = LeadBotService.parseEmail(messageBody);
+
+          // 1. Candidate sends marks directly (e.g. "950", "920/1100", "420/550", "marks 920", "ghalti se 550 likh diya marks 920 hain")
+          if (
+            marksInMsg &&
+            (LeadBotService.isCorrectionIntent(messageBody) ||
+              clean.includes('mark') ||
+              clean.includes('score') ||
+              clean.includes('fsc') ||
+              /^\d{2,4}(\/\d{2,4})?%?$/.test(clean) ||
+              /\b(out of|\/)\b/i.test(clean))
+          ) {
+            if (marksInMsg.error) {
+              if (marksInMsg.error === 'INVALID_TOTAL_MARKS') {
+                replyText =
+                  `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
+                  `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
+              } else if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
+                replyText =
+                  `The obtained marks (*${marksInMsg.obtained}*) cannot exceed total marks (*${marksInMsg.total}*).\n\n` +
+                  `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+              } else if (marksInMsg.error === 'PERCENTAGE_EXCEEDS_100') {
+                replyText =
+                  `Percentage (*${marksInMsg.percentage}%*) cannot exceed 100%.\n\n` +
+                  `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+              } else {
+                replyText =
+                  `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
+              }
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            } else if (marksInMsg.percentage < 50.0) {
+              marksObtained = marksInMsg.obtained;
+              nextState = CONVERSATION_STATE.NOT_INTERESTED;
+              qualificationChanged = true;
+              isEligible = false;
+              ineligibilityReason = INELIGIBILITY_REASON.BELOW_MINIMUM_MARKS_50;
+              eligibleFor = PROGRAM_ELIGIBILITY.NONE;
+              replyText =
+                `Thank you for sharing your updated marks. The minimum requirement for Engineering & Technology programs at UAJK is 50% (your score: ${marksInMsg.percentage.toFixed(1)}%).\n\n` +
+                `Unfortunately, you do not meet the minimum threshold for SE, SET, or CET. If you wish to learn about other programs or have questions, feel free to ask anytime!`;
+            } else {
+              marksObtained = marksInMsg.obtained;
+              eligibleFor =
+                marksInMsg.percentage >= 60.0
+                  ? PROGRAM_ELIGIBILITY.SE_SET_CET
+                  : PROGRAM_ELIGIBILITY.SET_CET;
+              qualificationChanged = true;
+              isEligible = true;
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            }
+            break;
+          }
+
+          // 2. Candidate sends CNIC directly (e.g. "12345-6576665-4", "cnic 12345-6576665-4")
+          if (
+            cnicInMsg &&
+            (LeadBotService.isCorrectionIntent(messageBody) ||
+              clean.includes('cnic') ||
+              clean.includes('b-form') ||
+              clean.includes('form-b') ||
+              /^\d{13}$|^\d{5}-\d{7}-\d{1}$/.test(clean))
+          ) {
+            cnic = cnicInMsg;
+            qualificationChanged = true;
+            isEligible = true;
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            replyText = LeadBotService.formatConfirmationMessage({
+              fullName,
+              fatherName,
+              cnic,
+              email,
+              marks: marksObtained,
+              isUpdated: true,
+            });
+            break;
+          }
+
+          // 3. Candidate sends Email directly (e.g. "noting@gmail.com", "email noting@gmail.com")
+          if (
+            emailInMsg &&
+            (LeadBotService.isCorrectionIntent(messageBody) ||
+              clean.includes('email') ||
+              clean.includes('mail') ||
+              /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean))
+          ) {
+            email = emailInMsg;
+            qualificationChanged = true;
+            isEligible = true;
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            replyText = LeadBotService.formatConfirmationMessage({
+              fullName,
+              fatherName,
+              cnic,
+              email,
+              marks: marksObtained,
+              isUpdated: true,
+            });
+            break;
+          }
+
+          // 4. Candidate provides Name directly (e.g. "name is Java Script", "change name to Java Script")
+          const directNameMatch = messageBody.match(/(?:(?:my\s+)?name|naam)\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
+          if (directNameMatch && LeadBotService.isValidName(directNameMatch[1])) {
+            fullName = directNameMatch[1].trim();
+            qualificationChanged = true;
+            isEligible = true;
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            replyText = LeadBotService.formatConfirmationMessage({
+              fullName,
+              fatherName,
+              cnic,
+              email,
+              marks: marksObtained,
+              isUpdated: true,
+            });
+            break;
+          }
+
+          // 5. Candidate provides Father's Name directly (e.g. "father name is Tariq", "abbu ka naam Tariq")
+          const directFatherMatch = messageBody.match(/(?:father|walid|abbu)\s*(?:(?:'s\s+)?name|naam)?\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
+          if (directFatherMatch && LeadBotService.isValidName(directFatherMatch[1])) {
+            fatherName = directFatherMatch[1].trim();
+            qualificationChanged = true;
+            isEligible = true;
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            replyText = LeadBotService.formatConfirmationMessage({
+              fullName,
+              fatherName,
+              cnic,
+              email,
+              marks: marksObtained,
+              isUpdated: true,
+            });
+            break;
+          }
+
+          // 6. Candidate selects specific field to edit (Option 1 to 7 or field keywords)
+          if (
+            clean === '1' ||
+            clean === 'name' ||
+            clean === 'full name' ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(name|naam)\b/i.test(clean) ||
+            /\b(name|naam)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_NAME;
+            replyText = "No problem! What is your correct *Full Name*?";
+            break;
+          }
+
+          if (
+            clean === '2' ||
+            clean === 'father' ||
+            clean === 'father name' ||
+            clean === "father's name" ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(father|walid|abbu)\b/i.test(clean) ||
+            /\b(father|walid|abbu)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+            replyText = "No problem! What is your correct *Father's Name*?";
+            break;
+          }
+
+          if (
+            clean === '3' ||
+            clean === 'marks' ||
+            clean === 'score' ||
+            clean === 'fsc' ||
+            clean === 'fsc marks' ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(mark|marks|score|fsc)\b/i.test(clean) ||
+            /\b(mark|marks|score|fsc)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            replyText = "No problem! What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)";
+            break;
+          }
+
+          if (
+            clean === '4' ||
+            clean === 'group' ||
+            clean === 'academic group' ||
+            clean === 'maths' ||
+            clean === 'pre-medical' ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(group|math|maths|subject|pre-med|pre-eng)\b/i.test(clean) ||
+            /\b(group|math|maths|subject|pre-med|pre-eng)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            replyText = "No problem! Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
+            break;
+          }
+
+          if (
+            clean === '5' ||
+            clean === 'cnic' ||
+            clean === 'b-form' ||
+            clean === 'form b' ||
+            clean === 'form-b' ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(cnic|b-form|form-b|bform|id card|shanakhti)\b/i.test(clean) ||
+            /\b(cnic|b-form|form-b|bform|id card|shanakhti)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            replyText = "No problem! Please provide your correct 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).";
+            break;
+          }
+
+          if (
+            clean === '6' ||
+            clean === 'email' ||
+            clean === 'email address' ||
+            /\b(change|correct|edit|update|wrong)\b.*\b(email|mail)\b/i.test(clean) ||
+            /\b(email|mail)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
+          ) {
+            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            replyText = "No problem! Please provide your correct active *Email Address* (e.g. *applicant@example.com*).";
+            break;
+          }
+
+          if (
+            clean === '7' ||
+            clean === 'all' ||
+            clean === 'start over' ||
+            clean === 'everything' ||
+            /\b(restart|start over|re-enter|all details|dobara)\b/i.test(clean)
+          ) {
+            fullName = 'Prospective Applicant';
+            fatherName = null;
+            marksObtained = null;
+            hasMaths = null;
+            cnic = null;
+            email = null;
+            priorDegree = null;
+            nextState = CONVERSATION_STATE.AWAITING_NAME;
+            replyText = "Let's restart your admission registration from scratch. What is your *Full Name*?";
+            break;
+          }
+
+          // 7. General statement of mistake or desire to correct (e.g. "I did a mistake", "ghalti ho gaii", "I wanna correct something")
+          if (LeadBotService.isCorrectionIntent(messageBody)) {
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            replyText = LeadBotService.getCorrectionMenuText();
+            break;
+          }
+
+          // 8. General Question / FAQ Inquiries
           if (AIKnowledgeService.isQuestion(messageBody)) {
             replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
-          } else if (LeadBotService.isAffirmative(messageBody) && currentState === CONVERSATION_STATE.NOT_INTERESTED) {
-            // Student changed their mind and wants to apply now
-            nextState = CONVERSATION_STATE.AWAITING_NAME;
-            replyText = "Welcome back! Let's get your admission inquiry registered. What is your *Full Name*?";
           } else {
-            // General polite acknowledgment + FAQ guidance
+            // Polite acknowledgment of pre-registration status
+            replyText =
+              "Your admission interest is confirmed! If you would like to correct any information, reply with *Correction* or tell us what you'd like to update.\n\n" +
+              "If you have any questions regarding fees, hostels, or entry test, feel free to ask anytime!";
+          }
+          break;
+        }
+
+        case CONVERSATION_STATE.NOT_INTERESTED: {
+          const marksInMsg = LeadBotService.parseMarks(messageBody);
+
+          // If candidate sent invalid marks format (e.g. total != 550 and != 1100, or obtained > total)
+          if (marksInMsg?.error) {
+            if (marksInMsg.error === 'INVALID_TOTAL_MARKS') {
+              replyText =
+                `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
+                `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
+            } else if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
+              replyText =
+                `The obtained marks (*${marksInMsg.obtained}*) cannot exceed total marks (*${marksInMsg.total}*).\n\n` +
+                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+            } else {
+              replyText =
+                `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
+            }
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            break;
+          }
+
+          // If candidate previously disqualified updates their marks to >= 50%
+          if (marksInMsg && !marksInMsg.error && marksInMsg.percentage >= 50.0) {
+            marksObtained = marksInMsg.obtained;
+            isEligible = true;
+            ineligibilityReason = null;
+            eligibleFor = marksInMsg.percentage >= 60.0 ? PROGRAM_ELIGIBILITY.SE_SET_CET : PROGRAM_ELIGIBILITY.SET_CET;
+            if (cnic && email && fatherName) {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              qualificationChanged = true;
+              replyText = LeadBotService.formatConfirmationMessage({
+                fullName,
+                fatherName,
+                cnic,
+                email,
+                marks: marksObtained,
+                isUpdated: true,
+              });
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText =
+                `Updated your marks to *${marksInMsg.percentage.toFixed(1)}%* (${marksObtained}).\n\n` +
+                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+            }
+          } else if (LeadBotService.isCorrectionIntent(messageBody)) {
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            replyText = "No problem at all! Let's update your marks. What were your obtained marks in FSc / ICS? (Total marks can only be *550* or *1100*, e.g. *420/550* or *850/1100*).";
+          } else if (LeadBotService.isAffirmative(messageBody)) {
+            if (fullName) {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText = `Welcome back ${fullName}! What was your score in FSc / ICS? (e.g. *420/550* or *850/1100*).`;
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_NAME;
+              replyText = "Welcome back! Let's get your admission inquiry registered. What is your *Full Name*?";
+            }
+          } else if (AIKnowledgeService.isQuestion(messageBody)) {
+            replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
+          } else {
+            replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
+          }
+          break;
+        }
+
+        case CONVERSATION_STATE.GENERAL_INQUIRY: {
+          if (AIKnowledgeService.isQuestion(messageBody)) {
+            replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
+          } else {
             replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
           }
           break;

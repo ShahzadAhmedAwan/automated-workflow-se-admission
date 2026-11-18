@@ -247,6 +247,11 @@ CREATE TABLE IF NOT EXISTS adm_students (
   fsc_total_marks INT UNSIGNED NOT NULL DEFAULT 1100,
   matric_obtained_marks INT UNSIGNED NULL,
   matric_total_marks INT UNSIGNED NOT NULL DEFAULT 1100,
+  entry_test_roll_no VARCHAR(50) NULL,
+  entry_test_marks DECIMAL(7,2) NULL,
+  entry_test_total DECIMAL(7,2) NOT NULL DEFAULT 100.00,
+  dob DATE NULL,
+  quota_category VARCHAR(80) NOT NULL DEFAULT 'OPEN_MERIT',
   overall_status ENUM(
     'PENDING',
     'DOCS_REQUESTED',
@@ -355,4 +360,117 @@ CREATE TABLE IF NOT EXISTS adm_board_sources (
 INSERT IGNORE INTO adm_board_sources (board_name, board_aliases, academic_year, source_type, result_url)
 VALUES
   ('Federal Board (FBISE)', JSON_ARRAY('FBISE', 'FBISE Islamabad', 'Federal Board'), 'ALL', 'PORTAL_URL', 'https://portal.fbise.edu.pk/fbise-conduct/result/'),
-  ('AJK BISE Mirpur', JSON_ARRAY('AJK BISE', 'BISE AJK', 'AJK Board', 'Mirpur Board'), 'ALL', 'PORTAL_URL', 'https://ajkbise.net/results.php');
+  ('AJK BISE Mirpur', JSON_ARRAY('AJK BISE', 'BISE AJK', 'AJK Board', 'Mirpur Board'), 'ALL', 'PORTAL_URL', 'https://ajkbise.net/results.php'),
+  ('State Engineering Entry Test (SEET)', JSON_ARRAY('SEET', 'MUST SEET', 'Entry Test'), '2026', 'PORTAL_URL', 'https://seet.must.edu.pk/seet_result.php');
+
+-- ============================================================================
+-- MODULE 4: Merit Engine & Seat Verification Slice
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS mrt_official_results (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  source_type ENUM('SEET_PORTAL', 'BOARD_GAZETTE', 'BOARD_PORTAL', 'MANUAL_ENTRY') NOT NULL,
+  board_or_test_name VARCHAR(160) NOT NULL,
+  cnic VARCHAR(30) NULL,
+  roll_no VARCHAR(50) NULL,
+  candidate_name VARCHAR(200) NULL,
+  father_name VARCHAR(200) NULL,
+  marks_obtained DECIMAL(7,2) NOT NULL,
+  total_marks DECIMAL(7,2) NOT NULL DEFAULT 100.00,
+  percentage DECIMAL(5,2) NULL,
+  test_date VARCHAR(40) NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'PASS',
+  raw_payload JSON NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mrt_results_cnic (cnic),
+  KEY ix_mrt_results_roll (roll_no),
+  KEY ix_mrt_results_source (source_type, board_or_test_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mrt_policies (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name VARCHAR(150) NOT NULL,
+  version VARCHAR(30) NOT NULL DEFAULT '1.0',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  program_code VARCHAR(40) NOT NULL DEFAULT 'SE',
+  matric_weightage DECIMAL(5,2) NOT NULL DEFAULT 10.00,
+  fsc_weightage DECIMAL(5,2) NOT NULL DEFAULT 40.00,
+  entry_test_weightage DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+  tie_breaker_rules JSON NULL,
+  quota_definitions JSON NULL,
+  created_by CHAR(36) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mrt_policies_active (is_active, program_code),
+  CONSTRAINT fk_mrt_policies_creator FOREIGN KEY (created_by) REFERENCES sys_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mrt_snapshots (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  policy_id BIGINT UNSIGNED NOT NULL,
+  snapshot_title VARCHAR(200) NOT NULL,
+  iteration_number INT UNSIGNED NOT NULL DEFAULT 1,
+  is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+  total_candidates INT UNSIGNED NOT NULL DEFAULT 0,
+  selected_count INT UNSIGNED NOT NULL DEFAULT 0,
+  waitlisted_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_by CHAR(36) NULL,
+  locked_by CHAR(36) NULL,
+  locked_at DATETIME(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mrt_snapshots_policy (policy_id, iteration_number),
+  KEY ix_mrt_snapshots_locked (is_locked),
+  CONSTRAINT fk_mrt_snapshots_policy FOREIGN KEY (policy_id) REFERENCES mrt_policies(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_mrt_snapshots_creator FOREIGN KEY (created_by) REFERENCES sys_users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_mrt_snapshots_locker FOREIGN KEY (locked_by) REFERENCES sys_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mrt_entries (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  snapshot_id BIGINT UNSIGNED NOT NULL,
+  student_id BIGINT UNSIGNED NOT NULL,
+  merit_position INT UNSIGNED NOT NULL,
+  quota_category VARCHAR(80) NOT NULL DEFAULT 'OPEN_MERIT',
+  matric_score_used DECIMAL(7,2) NOT NULL,
+  matric_total_used DECIMAL(7,2) NOT NULL DEFAULT 1100.00,
+  fsc_score_used DECIMAL(7,2) NOT NULL,
+  fsc_total_used DECIMAL(7,2) NOT NULL DEFAULT 1100.00,
+  entry_test_score_used DECIMAL(7,2) NOT NULL,
+  entry_test_total_used DECIMAL(7,2) NOT NULL DEFAULT 100.00,
+  aggregate_score DECIMAL(6,3) NOT NULL,
+  tie_break_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  decision_status ENUM('SELECTED', 'WAITLISTED', 'REJECTED') NOT NULL DEFAULT 'WAITLISTED',
+  notification_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  notification_sent_at DATETIME(3) NULL,
+  created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY ix_mrt_entries_snapshot (snapshot_id, merit_position),
+  KEY ix_mrt_entries_student (student_id),
+  KEY ix_mrt_entries_status (snapshot_id, decision_status),
+  CONSTRAINT fk_mrt_entries_snapshot FOREIGN KEY (snapshot_id) REFERENCES mrt_snapshots(id) ON DELETE CASCADE,
+  CONSTRAINT fk_mrt_entries_student FOREIGN KEY (student_id) REFERENCES adm_students(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO mrt_policies (
+  id, name, version, is_active, program_code, matric_weightage, fsc_weightage, entry_test_weightage, tie_breaker_rules, quota_definitions
+) VALUES (
+  1,
+  'B.Sc. Software Engineering - Fall 2026 Policy',
+  '1.0',
+  TRUE,
+  'SE',
+  10.00,
+  40.00,
+  50.00,
+  JSON_ARRAY('ENTRY_TEST', 'FSC', 'MATRIC', 'AGE'),
+  JSON_ARRAY(
+    JSON_OBJECT('code', 'OPEN_MERIT', 'title', 'Open Merit', 'seats', 70),
+    JSON_OBJECT('code', 'AJK_REGIONAL', 'title', 'AJK District Quota', 'seats', 15),
+    JSON_OBJECT('code', 'SPORTS', 'title', 'Sports Quota', 'seats', 5)
+  )
+);

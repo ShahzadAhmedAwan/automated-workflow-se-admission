@@ -7,6 +7,7 @@ import { config } from './core/config/env.js';
 import { authRoutes } from './modules/auth/index.js';
 import { marketingRoutes } from './modules/marketing/index.js';
 import { verificationRoutes } from './modules/verification/index.js';
+import { meritRoutes } from './modules/merit/index.js';
 import { errorHandler, notFoundHandler } from './core/http/error-handler.js';
 import { pool } from './core/db/pool.js';
 
@@ -24,7 +25,7 @@ export function createApp() {
     if (!origin) return true;
     if (origin === config.APP_ORIGIN) return true;
     if (origin === 'http://localhost:5173' || origin === 'http://127.0.0.1:5173') return true;
-    if (/^http:\/\/192\.168\.\d+\.\d+:5173$/.test(origin)) return true;
+    if (/^http:\/\/(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?:\.sslip\.io)?:5173$/.test(origin)) return true;
     return false;
   };
   app.use(cors({
@@ -46,6 +47,7 @@ export function createApp() {
   app.use(`${config.API_BASE_PATH}/auth`, authRoutes);
   app.use(`${config.API_BASE_PATH}/marketing`, marketingRoutes);
   app.use(`${config.API_BASE_PATH}/verification`, verificationRoutes);
+  app.use(`${config.API_BASE_PATH}/merit`, meritRoutes);
 
   // Short and standard public upload redirect handlers
   app.get('/u/:token', (req, res) => {

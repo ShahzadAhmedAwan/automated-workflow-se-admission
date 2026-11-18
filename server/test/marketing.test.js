@@ -134,6 +134,17 @@ test('LeadBotService: input parsing and validation heuristics', () => {
   assert.equal(invalidRatio.obtained, 550);
   assert.equal(invalidRatio.total, 500);
 
+  // Invalid total marks validation (total must be 550 or 1100)
+  const invalidTotal900 = LeadBotService.parseMarks('420/900');
+  assert.ok(invalidTotal900);
+  assert.equal(invalidTotal900.error, 'INVALID_TOTAL_MARKS');
+  assert.equal(invalidTotal900.obtained, 420);
+  assert.equal(invalidTotal900.total, 900);
+
+  const invalidTotal1000 = LeadBotService.parseMarks('600/1000');
+  assert.ok(invalidTotal1000);
+  assert.equal(invalidTotal1000.error, 'INVALID_TOTAL_MARKS');
+
   const invalidPct = LeadBotService.parseMarks('115%');
   assert.ok(invalidPct);
   assert.equal(invalidPct.error, 'PERCENTAGE_EXCEEDS_100');
@@ -451,6 +462,14 @@ test('LeadBotService: Graceful handling of invalid inputs', async () => {
   }, mockDb);
   assert.equal(turnInvalidMarks.state, CONVERSATION_STATE.AWAITING_MARKS);
   assert.ok(turnInvalidMarks.reply.includes('cannot exceed total marks'));
+
+  // 5. Enter invalid total marks (e.g. 420/900) - must only allow 550 or 1100
+  const turnInvalidTotalMarks = await LeadBotService.processIncomingMessage({
+    fromPhone: '923459988776',
+    messageBody: '420/900',
+  }, mockDb);
+  assert.equal(turnInvalidTotalMarks.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnInvalidTotalMarks.reply.includes('Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100*'));
 });
 
 test('LeadBotService Case 2: Student says No (Graceful exit & remains open to inquiries)', async () => {
@@ -1010,4 +1029,120 @@ test('CampaignService.sendSingleLeadOutreach: normalizes phone, queues immediate
   assert.equal(dispatchedJobs[0].payload.recipientPhone, '923001234567');
   assert.ok(dispatchedJobs[0].payload.messageText.includes('Test Applicant'));
   assert.equal(leadUpdated, true);
+});
+
+test('LeadBotService: Post-Confirmation Mistake Correction Flow ("I did a mistake" / "ghalti ho gaii")', async () => {
+  let mockLead = {
+    id: 501,
+    campaign_id: 1,
+    full_name: 'Java',
+    father_name: 'Script',
+    phone_normalized: '923123456789',
+    cnic: '12345-6576665-4',
+    email: 'noting@gmail.com',
+    city: 'Muzaffarabad',
+    prior_degree: 'FSc Pre-Engineering',
+    fsc_marks: 550,
+    has_maths: 1,
+    eligible_for: 'SE, SET, CET',
+    eligibility_status: 'ELIGIBLE',
+    ineligibility_reason: null,
+    conversation_state: 'QUALIFIED',
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query(sql) {
+      if (sql.includes('FROM mkt_leads')) {
+        return [[mockLead]];
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        if (params[0]) mockLead.conversation_state = params[0];
+        // Parse dynamic assignments if any
+        return [{ affectedRows: 1 }];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Test 1: Student says "I did a mistake"
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: 'I did a mistake',
+  }, mockDb);
+
+  assert.equal(turn1.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn1.reply.includes('What would you like to correct?'));
+  assert.ok(turn1.reply.includes('Marks (FSc / ICS / DAE)'));
+
+  // Test 2: Student says "ghalti ho gaii" (Roman Urdu)
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: 'ghalti ho gaii',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn2.reply.includes('What would you like to correct?'));
+
+  // Test 3: Student selects "3" to correct marks
+  const turn3 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: '3',
+  }, mockDb);
+
+  assert.equal(turn3.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn3.reply.includes('score in FSc'));
+
+  // Test 4: Student enters invalid marks (550/500)
+  const turn4 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: '550/500',
+  }, mockDb);
+
+  assert.equal(turn4.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn4.reply.includes('cannot exceed total marks'));
+
+  // Test 5: Student enters correct marks (920/1100)
+  const turn5 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: '920/1100',
+  }, mockDb);
+
+  assert.equal(turn5.state, CONVERSATION_STATE.QUALIFIED);
+  assert.equal(turn5.eligible, true);
+  assert.ok(turn5.reply.includes('Admissions Pre-Registration Updated'));
+  assert.ok(turn5.reply.includes('FSc Marks: 920'));
+  assert.ok(turn5.reply.includes('Candidate: Java'));
+
+  // Test 6: Direct single-turn CNIC correction
+  const turn6 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: 'ghalti se cnic galat likh diya tha correct is 82201-1234567-1',
+  }, mockDb);
+
+  assert.equal(turn6.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn6.reply.includes('Admissions Pre-Registration Updated'));
+  assert.ok(turn6.reply.includes('82201-1234567-1'));
+
+  // Test 7: Direct single-turn Name correction
+  const turn7 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923123456789',
+    messageBody: 'name is Java Script Developer',
+  }, mockDb);
+
+  assert.equal(turn7.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn7.reply.includes('Java Script Developer'));
 });

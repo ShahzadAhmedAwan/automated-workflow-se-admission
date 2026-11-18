@@ -17,6 +17,10 @@
     "auth:bootstrap-admin": "npm run auth:bootstrap-admin --workspace @se-admissions/server",
     "auth:reset-admin": "npm run auth:reset-admin --workspace @se-admissions/server",
     "whatsapp:live": "npm run whatsapp:live --workspace @se-admissions/server",
+    "tunnel": ".\\cloudflared.exe tunnel --edge-ip-version 4 --url http://localhost:5174",
+    "ngrok": ".\\ngrok.exe http 5174",
+    "lead:reset": "npm run lead:reset --workspace @se-admissions/server --",
+    "verification:reset": "npm run verification:reset --workspace @se-admissions/server --",
     "test:auth": "npm run test --workspace @se-admissions/server",
     "test:verification": "npm run test:verification --workspace @se-admissions/server"
   }

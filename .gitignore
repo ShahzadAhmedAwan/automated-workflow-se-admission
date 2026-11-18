@@ -12,3 +12,5 @@ npm-debug.log*
 whatsapp-bot/
 data/uploads/
 server/data/uploads/
+cloudflared.exe
+ngrok.exe

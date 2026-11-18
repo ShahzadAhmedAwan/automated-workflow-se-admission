@@ -3,10 +3,10 @@ import os from 'node:os';
 import { z } from 'zod';
 
 function resolveLocalAppOrigin(configuredOrigin) {
-  if (process.env.NODE_ENV === 'production') return configuredOrigin;
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') return configuredOrigin;
   try {
     const url = new URL(configuredOrigin);
-    if (/^(192\.168\.|10\.)/.test(url.hostname)) {
+    if (/^(192\.168\.|10\.|localhost|127\.0\.0\.1)/.test(url.hostname)) {
       const ifaces = os.networkInterfaces();
       // Prioritize active Wi-Fi or wireless adapter
       for (const name of Object.keys(ifaces)) {

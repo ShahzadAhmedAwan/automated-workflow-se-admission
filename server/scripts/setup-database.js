@@ -49,6 +49,26 @@ try {
         await connection.query(`ALTER TABLE adm_students ADD COLUMN eligible_for VARCHAR(100) NULL AFTER prior_degree`);
         console.info('Added eligible_for column to adm_students');
       }
+      if (!admColNames.includes('entry_test_marks')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN entry_test_marks DECIMAL(7,2) NULL AFTER matric_total_marks`);
+        console.info('Added entry_test_marks column to adm_students');
+      }
+      if (!admColNames.includes('entry_test_total')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN entry_test_total DECIMAL(7,2) NOT NULL DEFAULT 100.00 AFTER entry_test_marks`);
+        console.info('Added entry_test_total column to adm_students');
+      }
+      if (!admColNames.includes('entry_test_roll_no')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN entry_test_roll_no VARCHAR(50) NULL AFTER entry_test_total`);
+        console.info('Added entry_test_roll_no column to adm_students');
+      }
+      if (!admColNames.includes('dob')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN dob DATE NULL AFTER entry_test_roll_no`);
+        console.info('Added dob column to adm_students');
+      }
+      if (!admColNames.includes('quota_category')) {
+        await connection.query(`ALTER TABLE adm_students ADD COLUMN quota_category VARCHAR(80) NOT NULL DEFAULT 'OPEN_MERIT' AFTER dob`);
+        console.info('Added quota_category column to adm_students');
+      }
     } catch {
       // Table might not exist yet if fresh install
     }

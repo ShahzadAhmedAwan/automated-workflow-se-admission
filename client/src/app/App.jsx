@@ -194,7 +194,7 @@ export function App() {
       </aside>
 
       <div className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? 'lg:pl-[72px]' : 'lg:pl-[256px]'}`}>
-        <header className="sticky top-0 z-20 flex min-h-[72px] items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 sm:px-7">
+        <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -205,84 +205,49 @@ export function App() {
             >
               <IconMenu className="size-[18px]" />
             </button>
-            <div className="min-w-0">
-              <p className="mb-0 truncate text-xs text-slate-600">
-                Department Admissions Portal · Signed in as <strong className="font-semibold text-slate-900">{user.displayName}</strong>
-              </p>
+            <div className="flex items-center gap-2.5">
+              <span className="text-sm font-semibold text-slate-900">Department Admissions Portal</span>
+              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 border border-blue-100">
+                Fall 2026
+              </span>
             </div>
           </div>
 
-          {/* Institutional Workflow Stepper: One-Click Quick Navigation */}
-          <div className="hidden xl:flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1 text-xs shadow-2xs">
-            {navigation.map(({ id, step, label }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => selectNavigation(id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition cursor-pointer ${
-                  currentNav === id
-                    ? 'bg-white text-blue-800 shadow-xs border border-slate-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                }`}
-              >
-                <span className={`inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold ${
-                  currentNav === id ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
-                }`}>
-                  {step}
-                </span>
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            {/* WhatsApp Session Status */}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${
+                waStatus.connected
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : waStatus.status === 'NEEDS_QR'
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-600'
+              }`}
+            >
+              <span className={`size-1.5 rounded-full ${waStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <span className="hidden sm:inline">{waStatus.connected ? 'WhatsApp Online' : 'WhatsApp Offline'}</span>
+              <span className="sm:hidden">{waStatus.connected ? 'Online' : 'Offline'}</span>
+            </span>
 
-          <div className="flex shrink-0 items-center gap-2.5 sm:gap-4">
-            {/* WhatsApp Session Health Badge */}
-            {waStatus.connected ? (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 shadow-xs"
-                title={`WhatsApp Connected (+${waStatus.phone || 'Bot'}). Outreach worker is active.`}
-              >
-                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="hidden md:inline">WhatsApp Online</span>
-                <span className="md:hidden">Online</span>
-              </span>
-            ) : waStatus.status === 'NEEDS_QR' ? (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 shadow-xs"
-                title="WhatsApp requires QR scan. Run 'npm run start:whatsapp' and scan QR."
-              >
-                <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
-                <span className="hidden sm:inline">WhatsApp: Scan QR</span>
-                <span className="sm:hidden">Scan QR</span>
-              </span>
-            ) : waStatus.status === 'RECONNECTING' ? (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800 shadow-xs"
-                title="WhatsApp client is reconnecting..."
-              >
-                <span className="size-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="hidden sm:inline">WhatsApp Reconnecting</span>
-                <span className="sm:hidden">Reconnecting</span>
-              </span>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-800 shadow-xs"
-                title="WhatsApp bot process is offline. Run 'npm run start:whatsapp' to start the outreach bot."
-              >
-                <span className="size-2 rounded-full bg-rose-500" />
-                <span className="hidden md:inline">WhatsApp Offline</span>
-                <span className="md:hidden">Offline</span>
-              </span>
-            )}
-
-            <span className="hidden items-center gap-2 text-xs font-medium text-slate-600 sm:inline-flex"><span className="size-2 rounded-full bg-blue-600" />Fall 2026</span>
             {isSuperAdmin && (
-              <button type="button" onClick={() => selectNavigation('staff')} className="inline-flex min-h-9 items-center gap-2 rounded-md bg-blue-700 px-3 text-xs font-semibold text-white transition hover:bg-blue-800 sm:px-4">
-                <IconPlus className="size-4" />
-                <span className="hidden sm:inline">Add staff</span>
+              <button
+                type="button"
+                onClick={() => selectNavigation('staff')}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition"
+              >
+                <IconPlus className="size-3.5" />
+                <span>Add staff</span>
               </button>
             )}
-            <span className="grid size-9 place-items-center rounded-full border border-blue-100 bg-blue-50 text-xs font-bold text-blue-700" title={user.displayName} aria-label={`Signed in as ${user.displayName}`}>{initials}</span>
+
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+              <span className="grid size-8 place-items-center rounded-full bg-blue-50 text-xs font-bold text-blue-700 border border-blue-100" title={user.displayName}>
+                {initials}
+              </span>
+              <span className="hidden sm:block text-xs font-medium text-slate-800">
+                {user.displayName}
+              </span>
+            </div>
           </div>
         </header>
 

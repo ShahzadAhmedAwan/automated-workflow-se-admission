@@ -35,7 +35,38 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
   );
 }
 
-export function SectionTabs({ tabs, value, onChange, label }) {
+export function SectionTabs({ tabs, value, onChange, label, variant = 'underline' }) {
+  if (variant === 'pills') {
+    return (
+      <nav className="flex items-center gap-1 overflow-x-auto p-1 bg-slate-100/90 rounded-xl border border-slate-200/70 scrollbar-none" role="tablist" aria-label={label}>
+        {tabs.map((tab) => {
+          const active = value === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(tab.id)}
+              className={`relative inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition-all duration-150 cursor-pointer ${
+                active
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+              }`}
+            >
+              <span>{tab.label}</span>
+              {tab.count !== undefined && (
+                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${active ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-slate-200/80 text-slate-600'}`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+    );
+  }
+
   return (
     <nav className="flex gap-6 overflow-x-auto border-b border-slate-200 scrollbar-none" role="tablist" aria-label={label}>
       {tabs.map((tab) => {
@@ -62,7 +93,7 @@ export function SectionTabs({ tabs, value, onChange, label }) {
   );
 }
 
-export function MetricStrip({ items, label }) {
+export function MetricStrip({ items, label, className = '' }) {
   const colClass = items.length === 4
     ? 'grid-cols-2 lg:grid-cols-4'
     : items.length === 2
@@ -80,14 +111,17 @@ export function MetricStrip({ items, label }) {
   };
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs" aria-label={label}>
+    <section className={`overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs ${className}`} aria-label={label}>
       <div className={`grid ${colClass} divide-y divide-slate-100 sm:divide-x sm:divide-y-0`}>
         {items.map((item) => (
-          <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-4 sm:min-h-[74px] sm:px-6">
-            <span className="text-xs font-medium text-slate-600">{item.label}</span>
-            <strong className={`text-2xl font-bold leading-none tracking-tight tabular-nums ${getToneClass(item.tone)}`}>
-              {item.value}
-            </strong>
+          <div key={item.label} className="flex flex-col justify-center gap-1.5 px-5 py-4 sm:min-h-[74px] sm:px-6">
+            <span className="text-xs font-medium text-slate-500">{item.label}</span>
+            <div className="flex items-baseline gap-2">
+              <strong className={`text-2xl font-bold leading-none tracking-tight tabular-nums ${getToneClass(item.tone)}`}>
+                {item.value}
+              </strong>
+              {item.detail && <span className="text-[11px] text-slate-400 font-normal">{item.detail}</span>}
+            </div>
           </div>
         ))}
       </div>

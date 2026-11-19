@@ -370,7 +370,7 @@ export function MeritModuleView() {
     });
   }
 
-  // Gazette PDF Upload
+  // SEET Gazette PDF Upload
   async function handleGazetteUpload(e) {
     e.preventDefault();
     if (!gazetteFile) return;
@@ -382,10 +382,10 @@ export function MeritModuleView() {
       formData.append('file', gazetteFile);
       const res = await meritApi.uploadGazette(formData);
       setGazetteResult(res);
-      setSuccess(`Extracted ${res.totalExtracted} records from gazette; backfilled ${res.matchedStudents} student marksheets.`);
+      setSuccess(`Parsed ${res.totalExtracted} SEET results. Successfully linked scores for ${res.matchedStudents} pending candidates (${res.remainingPending ?? 0} candidates still pending).`);
       setGazetteFile(null);
     } catch (err) {
-      setError(err.message || 'Failed to process official gazette PDF.');
+      setError(err.message || 'Failed to process official SEET gazette PDF.');
     } finally {
       setUploadingGazette(false);
     }
@@ -473,34 +473,50 @@ export function MeritModuleView() {
     <div className="space-y-5">
       {/* Alerts */}
       {error && (
-        <div className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700 cursor-pointer">
-            <IconClose className="w-4 h-4" />
+        <div className="flex items-center justify-between rounded-xl border border-rose-200/80 bg-rose-50/80 px-4 py-2.5 text-xs text-rose-800 shadow-2xs backdrop-blur-xs">
+          <div className="flex items-center gap-2 font-medium">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-white">
+              <IconClose className="w-3 h-3" />
+            </span>
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={() => setError('')}
+            className="rounded-md p-1 text-rose-600 hover:bg-rose-100/60 hover:text-rose-900 transition cursor-pointer"
+            aria-label="Dismiss alert"
+          >
+            <IconClose className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {success && (
-        <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          <span className="flex items-center gap-2">
-            <IconCheck className="w-4 h-4 text-emerald-600" />
-            {success}
-          </span>
-          <button onClick={() => setSuccess('')} className="text-emerald-600 hover:text-emerald-800 cursor-pointer">
-            <IconClose className="w-4 h-4" />
+        <div className="flex items-center justify-between rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-4 py-2.5 text-xs text-emerald-900 shadow-2xs backdrop-blur-xs">
+          <div className="flex items-center gap-2.5 font-medium">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-2xs">
+              <IconCheck className="w-3 h-3" />
+            </span>
+            <span>{success}</span>
+          </div>
+          <button
+            onClick={() => setSuccess('')}
+            className="rounded-md p-1 text-emerald-600 hover:bg-emerald-100/60 hover:text-emerald-900 transition cursor-pointer"
+            aria-label="Dismiss notification"
+          >
+            <IconClose className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {/* Tabs */}
       <SectionTabs
+        variant="pills"
         label="Merit engine sections"
         value={activeTab}
         onChange={setActiveTab}
         tabs={[
           { id: 'calculations', label: 'Merit Calculations & Rankings' },
-          { id: 'seet', label: 'SEET & Gazette Test Sync' },
+          { id: 'seet', label: 'SEET Entrance Test & Gazette Sync' },
           { id: 'policies', label: 'Admission Weightage Policies' },
           { id: 'snapshots', label: 'Snapshot History & Export' },
         ]}
@@ -511,22 +527,26 @@ export function MeritModuleView() {
         label="Active merit policy"
         items={[
           {
-            label: 'Matric weightage',
+            label: 'Matric Weightage',
             value: `${activePolicy?.matricWeightage || 10}%`,
+            detail: 'Academic record (10%)',
           },
           {
-            label: 'FSc weightage',
+            label: 'FSc Weightage',
             value: `${activePolicy?.fscWeightage || 40}%`,
+            detail: 'Intermediate record (40%)',
           },
           {
-            label: 'SEET test weightage',
+            label: 'SEET Test Weightage',
             value: `${activePolicy?.entryTestWeightage || 50}%`,
             tone: 'blue',
+            detail: 'Entrance test (50%)',
           },
           {
-            label: 'Seats in quota',
-            value: activePolicy?.quotaDefinitions?.find((q) => q.code === 'OPEN_MERIT')?.seats || 70,
+            label: 'Open Merit Quota',
+            value: `${activePolicy?.quotaDefinitions?.find((q) => q.code === 'OPEN_MERIT')?.seats || 70} Seats`,
             tone: 'emerald',
+            detail: 'Available capacity',
           },
         ]}
       />
@@ -537,8 +557,24 @@ export function MeritModuleView() {
       {activeTab === 'calculations' && (
         <div className="space-y-5">
           <WorkspacePanel
-            title={meritData?.snapshot?.snapshotTitle || 'Merit Calculations'}
-            description={`${filteredEntries.length} of ${totalCount} verified applicants evaluated (${selectedCount} selected, ${seetPendingCount} SEET pending, ${belowCutoffCount} below cutoff)`}
+            title={(
+              <div className="flex items-center gap-2.5">
+                <span>{meritData?.snapshot?.snapshotTitle || 'Merit Calculations & Rankings'}</span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  isLocked
+                    ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200/60'
+                }`}>
+                  <span className={`size-1.5 rounded-full ${isLocked ? 'bg-amber-600' : 'bg-blue-600'}`} />
+                  {isLocked ? 'Official Snapshot (Locked)' : 'Live Preview (Dry Run)'}
+                </span>
+              </div>
+            )}
+            description={
+              allEntries.length === 0
+                ? 'No verified applicants evaluated yet'
+                : `${totalCount} verified applicant${totalCount === 1 ? '' : 's'} evaluated · ${selectedCount} selected · ${seetPendingCount} SEET score pending`
+            }
             actions={(
               <div className="flex flex-wrap items-center gap-2">
                 {snapshots.length > 0 && (
@@ -551,7 +587,7 @@ export function MeritModuleView() {
                         loadSnapshotDetails(Number(e.target.value));
                       }
                     }}
-                    className="h-9 px-3 rounded-md border border-slate-300 bg-white text-xs text-slate-800 focus:outline-none focus:border-blue-600"
+                    className="h-8.5 px-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 shadow-2xs focus:outline-none focus:border-blue-600"
                   >
                     <option value="dry_run">Live Preview (Dry Run)</option>
                     {snapshots.map((s) => (
@@ -564,20 +600,22 @@ export function MeritModuleView() {
 
                 <Button
                   variant="subtle"
+                  size="sm"
                   onClick={runDryRunCalculation}
                   disabled={calculating}
                   title="Run live aggregate calculation"
                 >
-                  <IconCalculator className="size-4" />
+                  <IconCalculator className="size-3.5" />
                   <span>Preview calculation</span>
                 </Button>
 
                 <Button
                   variant="primary"
+                  size="sm"
                   onClick={() => setShowGenerateModal(true)}
                   disabled={calculating}
                 >
-                  <IconAcademicCap className="size-4" />
+                  <IconAcademicCap className="size-3.5" />
                   <span>Generate official snapshot</span>
                 </Button>
 
@@ -585,19 +623,21 @@ export function MeritModuleView() {
                   <>
                     <Button
                       variant="subtle"
+                      size="sm"
                       onClick={handleExportCsv}
                       title="Download as Excel/CSV"
                     >
-                      <IconDownload className="size-4" />
+                      <IconDownload className="size-3.5" />
                       <span>Export CSV</span>
                     </Button>
 
                     <Button
                       variant="subtle"
+                      size="sm"
                       onClick={() => setShowNotifyModal(true)}
                       title="Send WhatsApp selection notices"
                     >
-                      <IconSend className="size-4" />
+                      <IconSend className="size-3.5" />
                       <span>WhatsApp notices</span>
                     </Button>
 
@@ -606,10 +646,10 @@ export function MeritModuleView() {
                         type="button"
                         onClick={handleLockSnapshot}
                         disabled={loading}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-amber-600 hover:bg-amber-700 px-3 text-xs font-semibold text-white transition shadow-xs cursor-pointer"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 px-3 text-xs font-semibold text-white transition shadow-xs cursor-pointer"
                         title="Lock official merit list (Permanent & Immutable)"
                       >
-                        <IconLockClosed className="size-4" />
+                        <IconLockClosed className="size-3.5" />
                         <span>Lock snapshot</span>
                       </button>
                     )}
@@ -629,22 +669,22 @@ export function MeritModuleView() {
 
             {/* Interactive Candidate Filtering Toolbar */}
             {allEntries.length > 0 && (
-              <div className="border-b border-slate-200 bg-slate-50/80 p-3.5 space-y-3">
+              <div className="border-b border-slate-200/80 bg-slate-50/50 p-3 sm:px-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  {/* Category Filter Pills */}
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  {/* Segmented Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/90 rounded-xl border border-slate-200/70">
                     <button
                       type="button"
                       onClick={() => setFilterStatus('ALL')}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                         filterStatus === 'ALL'
-                          ? 'bg-blue-600 text-white shadow-xs'
-                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                          ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
                       <span>All</span>
                       <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        filterStatus === 'ALL' ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'
+                        filterStatus === 'ALL' ? 'bg-slate-100 text-slate-800' : 'bg-slate-200/80 text-slate-600'
                       }`}>
                         {totalCount}
                       </span>
@@ -653,16 +693,16 @@ export function MeritModuleView() {
                     <button
                       type="button"
                       onClick={() => setFilterStatus('SELECTED')}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                         filterStatus === 'SELECTED'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
+                          ? 'bg-white text-emerald-900 font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span className="inline-block size-1.5 rounded-full bg-emerald-400" />
+                      <span className="size-2 rounded-full bg-emerald-500" />
                       <span>Selected</span>
                       <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        filterStatus === 'SELECTED' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800'
+                        filterStatus === 'SELECTED' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200/80 text-slate-600'
                       }`}>
                         {selectedCount}
                       </span>
@@ -671,16 +711,16 @@ export function MeritModuleView() {
                     <button
                       type="button"
                       onClick={() => setFilterStatus('SEET_PENDING')}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                         filterStatus === 'SEET_PENDING'
-                          ? 'bg-amber-600 text-white shadow-xs'
-                          : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
+                          ? 'bg-white text-amber-900 font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span className="inline-block size-1.5 rounded-full bg-amber-400" />
+                      <span className="size-2 rounded-full bg-amber-500" />
                       <span>SEET Pending</span>
                       <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        filterStatus === 'SEET_PENDING' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'
+                        filterStatus === 'SEET_PENDING' ? 'bg-amber-50 text-amber-700' : 'bg-slate-200/80 text-slate-600'
                       }`}>
                         {seetPendingCount}
                       </span>
@@ -689,16 +729,16 @@ export function MeritModuleView() {
                     <button
                       type="button"
                       onClick={() => setFilterStatus('BELOW_MERIT')}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                         filterStatus === 'BELOW_MERIT'
-                          ? 'bg-rose-600 text-white shadow-xs'
-                          : 'bg-white text-rose-800 border border-rose-200 hover:bg-rose-50'
+                          ? 'bg-white text-rose-900 font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
-                      <span className="inline-block size-1.5 rounded-full bg-rose-400" />
+                      <span className="size-2 rounded-full bg-rose-500" />
                       <span>Below Merit (&lt; 40%)</span>
                       <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        filterStatus === 'BELOW_MERIT' ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-800'
+                        filterStatus === 'BELOW_MERIT' ? 'bg-rose-50 text-rose-700' : 'bg-slate-200/80 text-slate-600'
                       }`}>
                         {belowCutoffCount}
                       </span>
@@ -707,15 +747,16 @@ export function MeritModuleView() {
                     <button
                       type="button"
                       onClick={() => setFilterStatus('WAITLISTED')}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                      className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                         filterStatus === 'WAITLISTED'
-                          ? 'bg-slate-700 text-white shadow-xs'
-                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                          ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                       }`}
                     >
+                      <span className="size-2 rounded-full bg-slate-400" />
                       <span>Waitlisted</span>
                       <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                        filterStatus === 'WAITLISTED' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'
+                        filterStatus === 'WAITLISTED' ? 'bg-slate-100 text-slate-800' : 'bg-slate-200/80 text-slate-600'
                       }`}>
                         {waitlistedCount}
                       </span>
@@ -728,7 +769,7 @@ export function MeritModuleView() {
                       <select
                         value={quotaFilter}
                         onChange={(e) => setQuotaFilter(e.target.value)}
-                        className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:border-blue-600 cursor-pointer"
+                        className="h-8.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 shadow-2xs focus:outline-none focus:border-blue-600 cursor-pointer"
                       >
                         <option value="ALL">All Quotas</option>
                         {availableQuotas.map((q) => (
@@ -743,7 +784,7 @@ export function MeritModuleView() {
                         placeholder="Search candidate, CNIC, app #…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="h-8 w-48 sm:w-60 rounded-lg border border-slate-300 bg-white pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                        className="h-8.5 w-48 sm:w-60 rounded-lg border border-slate-200 bg-white pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 shadow-2xs focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-500"
                       />
                       <IconSearch className="size-3.5 absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
                       {searchQuery && (
@@ -765,7 +806,7 @@ export function MeritModuleView() {
                           setSearchQuery('');
                           setQuotaFilter('ALL');
                         }}
-                        className="text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer"
+                        className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                       >
                         Clear filters
                       </button>
@@ -836,85 +877,138 @@ export function MeritModuleView() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[850px] text-left text-xs text-slate-700">
-                  <thead className="border-b border-slate-200 bg-[#f4f7fb] text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+                  <thead className="border-b border-slate-200/80 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                     <tr>
-                      <th className="px-4 py-3 text-center">Rank</th>
-                      <th className="px-4 py-3">Applicant details</th>
-                      <th className="px-3 py-3 text-center">Matric ({activePolicy?.matricWeightage || 10}%)</th>
-                      <th className="px-3 py-3 text-center">FSc ({activePolicy?.fscWeightage || 40}%)</th>
-                      <th className="px-3 py-3 text-center">SEET ({activePolicy?.entryTestWeightage || 50}%)</th>
-                      <th className="px-4 py-3 text-center font-bold text-blue-900">Aggregate</th>
-                      <th className="px-3 py-3 text-center">Quota</th>
-                      <th className="px-3 py-3 text-center">Status</th>
+                      <th className="px-4 py-3.5 text-center w-16">Rank</th>
+                      <th className="px-4 py-3.5">Applicant details</th>
+                      <th className="px-3 py-3.5 text-center">Matric ({activePolicy?.matricWeightage || 10}%)</th>
+                      <th className="px-3 py-3.5 text-center">FSc ({activePolicy?.fscWeightage || 40}%)</th>
+                      <th className="px-3 py-3.5 text-center">SEET ({activePolicy?.entryTestWeightage || 50}%)</th>
+                      <th className="px-4 py-3.5 text-center font-bold text-slate-900">Aggregate</th>
+                      <th className="px-3 py-3.5 text-center">Quota</th>
+                      <th className="px-3 py-3.5 text-center">Status</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-100/90">
                     {filteredEntries.map((entry) => (
-                      <tr key={entry.studentId || entry.id} className="hover:bg-slate-50/80 transition">
-                        <td className="px-4 py-3 text-center font-mono font-bold text-sm">
-                          {entry.meritPosition <= 3 ? (
-                            <span className="inline-flex size-6 items-center justify-center rounded-full bg-blue-100 text-blue-900 font-extrabold text-xs">
-                              {entry.meritPosition}
-                            </span>
-                          ) : (
-                            `#${entry.meritPosition}`
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-slate-900">{entry.fullName}</div>
-                          <div className="text-[11px] text-slate-500">
-                            {entry.fatherName ? `S/D/O ${entry.fatherName} · ` : ''}
-                            CNIC: {entry.cnic || '—'}
-                          </div>
-                        </td>
-                        <td className="px-3 py-3 text-center font-mono">
-                          {entry.matricScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.matricTotalUsed}</span>
-                        </td>
-                        <td className="px-3 py-3 text-center font-mono">
-                          {entry.fscScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.fscTotalUsed}</span>
-                        </td>
-                        <td className="px-3 py-3 text-center font-mono font-medium">
-                          {entry.entryTestScoreUsed > 0 ? (
-                            <span className="text-slate-900 font-semibold">{entry.entryTestScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.entryTestTotalUsed}</span></span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-sans font-medium text-amber-800 border border-amber-200" title="SEET entry test marks not yet recorded">
-                              0 / 100 (Pending)
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center font-mono text-sm font-bold text-blue-700">
-                          {entry.aggregateScore.toFixed(3)}%
-                        </td>
-                        <td className="px-3 py-3 text-center">
-                          <span className="inline-block rounded px-2 py-0.5 text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                            {entry.allocatedQuota || entry.quotaCategory || 'OPEN_MERIT'}
+                      <tr key={entry.studentId || entry.id} className="hover:bg-slate-50/70 transition">
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex size-6 items-center justify-center rounded-md font-mono font-bold text-xs ${
+                            entry.meritPosition === 1
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200/80 shadow-2xs'
+                              : entry.meritPosition <= 3
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200/60'
+                                : 'text-slate-600'
+                          }`}>
+                            {entry.meritPosition}
                           </span>
                         </td>
-                        <td className="px-3 py-3 text-center">
-                          <StatusBadge
-                            tone={
-                              entry.decisionStatus === 'SELECTED'
-                                ? 'success'
-                                : entry.decisionStatus === 'REJECTED'
-                                  ? 'danger'
-                                  : 'neutral'
-                            }
-                          >
-                            {entry.decisionStatus}
-                          </StatusBadge>
-                          {entry.decisionStatus !== 'SELECTED' && (
-                            <div
-                              className="text-[10px] text-amber-700 font-medium mt-0.5"
-                              title={entry.ineligibilityReason || 'Test score pending or below 40% cutoff'}
-                            >
-                              {entry.entryTestScoreUsed <= 0 ? 'SEET test pending' : 'Below 40% cutoff'}
+                        <td className="px-4 py-3.5">
+                          <div className="space-y-0.5">
+                            <div className="font-semibold text-slate-900 text-xs tracking-tight">
+                              {entry.fullName}
                             </div>
-                          )}
-                          {entry.tieBreakLevel > 0 && (
-                            <div className="text-[10px] text-amber-700 font-medium mt-0.5" title={`Tie resolved at Tier ${entry.tieBreakLevel}`}>
-                              Tier {entry.tieBreakLevel} Tie-break
+                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                              {entry.fatherName && <span>S/D/O {entry.fatherName}</span>}
+                              {entry.fatherName && entry.cnic && <span className="text-slate-300">·</span>}
+                              {entry.cnic && (
+                                <span className="font-mono text-slate-500">
+                                  {entry.cnic}
+                                </span>
+                              )}
+                              {entry.applicationNo && (
+                                <>
+                                  <span className="text-slate-300">·</span>
+                                  <span className="font-mono text-[10px] text-slate-400">
+                                    {entry.applicationNo}
+                                  </span>
+                                </>
+                              )}
                             </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3.5 text-center font-mono">
+                          <span className="font-semibold text-slate-800">{entry.matricScoreUsed}</span>
+                          <span className="text-slate-400 text-[10px]"> /{entry.matricTotalUsed}</span>
+                        </td>
+                        <td className="px-3 py-3.5 text-center font-mono">
+                          <span className="font-semibold text-slate-800">{entry.fscScoreUsed}</span>
+                          <span className="text-slate-400 text-[10px]"> /{entry.fscTotalUsed}</span>
+                        </td>
+                        <td className="px-3 py-3.5 text-center">
+                          {entry.entryTestScoreUsed > 0 ? (
+                            <div className="font-mono text-xs">
+                              <span className={`font-bold ${entry.entryTestScoreUsed >= 40 ? 'text-slate-900' : 'text-rose-700'}`}>
+                                {entry.entryTestScoreUsed}
+                              </span>
+                              <span className="text-slate-400 text-[10px]"> /{entry.entryTestTotalUsed}</span>
+                            </div>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-amber-800 text-[10px] font-medium" title="SEET entry test score pending">
+                              <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                              <span>Score Pending</span>
+                            </span>
                           )}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          <div className="space-y-1">
+                            <div className="font-mono text-xs font-bold text-slate-900">
+                              {entry.aggregateScore.toFixed(3)}%
+                            </div>
+                            <div className="w-14 mx-auto h-1 rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  entry.aggregateScore >= 60
+                                    ? 'bg-emerald-500'
+                                    : entry.aggregateScore >= 40
+                                      ? 'bg-blue-500'
+                                      : 'bg-rose-400'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(0, entry.aggregateScore))}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3.5 text-center">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200/60">
+                            {(entry.allocatedQuota || entry.quotaCategory || 'OPEN_MERIT').replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3.5 text-center">
+                          <div className="flex flex-col items-center gap-0.5">
+                            {entry.decisionStatus === 'SELECTED' ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                <span className="size-1.5 rounded-full bg-emerald-500" />
+                                <span>Selected</span>
+                              </span>
+                            ) : entry.decisionStatus === 'REJECTED' ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200">
+                                <span className="size-1.5 rounded-full bg-rose-500" />
+                                <span>Ineligible</span>
+                              </span>
+                            ) : entry.entryTestScoreUsed <= 0 ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                <span className="size-1.5 rounded-full bg-amber-500" />
+                                <span>SEET Pending</span>
+                              </span>
+                            ) : entry.aggregateScore < 40 ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 text-rose-800 border border-rose-200">
+                                <span className="size-1.5 rounded-full bg-rose-500" />
+                                <span>Below Cutoff</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                <span className="size-1.5 rounded-full bg-slate-400" />
+                                <span>Waitlisted</span>
+                              </span>
+                            )}
+
+                            {entry.tieBreakLevel > 0 && (
+                              <span className="inline-flex items-center text-[10px] text-blue-700 font-semibold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/50">
+                                Tier {entry.tieBreakLevel} Tie-break
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1221,14 +1315,14 @@ export function MeritModuleView() {
             </div>
           </div>
 
-          {/* Card 2: Official Gazette PDF Upload */}
+          {/* Card 2: Official SEET Gazette PDF Upload */}
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-900">
-                Official Board / SEET Gazette Upload
+                Official SEET Test Gazette Upload
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                Upload official board or entry test PDF gazette. The streaming engine extracts results without memory overhead and auto-links them to candidates.
+                Upload our university's official SEET entry test PDF gazette. The streaming engine parses test results and automatically matches candidates with pending SEET scores.
               </p>
             </div>
 
@@ -1247,15 +1341,36 @@ export function MeritModuleView() {
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-medium text-xs transition disabled:opacity-50 cursor-pointer"
               >
                 <IconUploadCloud className="size-4" />
-                <span>{uploadingGazette ? 'Processing gazette…' : 'Process Gazette PDF'}</span>
+                <span>{uploadingGazette ? 'Processing SEET gazette…' : 'Process SEET Gazette PDF'}</span>
               </button>
             </form>
 
             {gazetteResult && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs space-y-1.5">
-                <div className="font-bold text-emerald-900">Gazette Processing Complete</div>
-                <div>Extracted results: <strong className="font-mono">{gazetteResult.totalExtracted}</strong></div>
-                <div>Matched admissions candidates: <strong className="font-mono text-emerald-700">{gazetteResult.matchedStudents}</strong></div>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs space-y-2">
+                <div className="font-bold text-emerald-900">SEET Gazette Sync Complete</div>
+                <div>Extracted test scores: <strong className="font-mono">{gazetteResult.totalExtracted}</strong></div>
+                <div>Pending candidates matched & updated: <strong className="font-mono text-emerald-700">{gazetteResult.matchedStudents ?? gazetteResult.matchedPendingStudents}</strong></div>
+                {gazetteResult.remainingPending !== undefined && (
+                  <div>Remaining candidates with pending SEET score: <strong className={`font-mono ${gazetteResult.remainingPending > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{gazetteResult.remainingPending}</strong></div>
+                )}
+                {gazetteResult.matchedDetails?.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-emerald-200/60 space-y-1">
+                    <div className="font-semibold text-emerald-950">Recently Updated Candidates:</div>
+                    <div className="max-h-36 overflow-y-auto space-y-1">
+                      {gazetteResult.matchedDetails.slice(0, 10).map((d, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-[11px] text-emerald-900 bg-white/80 px-2 py-1 rounded">
+                          <span>{d.studentName} ({d.cnic || d.rollNo})</span>
+                          <span className="font-mono font-bold">{d.entryTestMarks} / 100 ({d.status})</span>
+                        </div>
+                      ))}
+                      {gazetteResult.matchedDetails.length > 10 && (
+                        <div className="text-[10px] text-emerald-700 italic">
+                          + {gazetteResult.matchedDetails.length - 10} more candidates
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

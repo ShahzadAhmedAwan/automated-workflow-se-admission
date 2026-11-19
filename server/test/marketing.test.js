@@ -123,9 +123,28 @@ test('LeadBotService: input parsing and validation heuristics', () => {
   const pct = LeadBotService.parseMarks('78%');
   assert.ok(pct);
   assert.equal(pct.percentage, 78);
+  assert.equal(pct.isPartial, true);
   const pct100 = LeadBotService.parseMarks('100%');
   assert.ok(pct100);
   assert.equal(pct100.percentage, 100);
+  assert.equal(pct100.isPartial, true);
+
+  // Partial marks format: bare numbers 500, 900
+  const partial500 = LeadBotService.parseMarks('500');
+  assert.ok(partial500);
+  assert.equal(partial500.isPartial, true);
+  assert.equal(partial500.obtained, 500);
+
+  const partial900 = LeadBotService.parseMarks('900');
+  assert.ok(partial900);
+  assert.equal(partial900.isPartial, true);
+  assert.equal(partial900.obtained, 900);
+
+  // Parse total marks helper
+  assert.equal(LeadBotService.parseTotalMarks('1100'), 1100);
+  assert.equal(LeadBotService.parseTotalMarks('total is 1100'), 1100);
+  assert.equal(LeadBotService.parseTotalMarks('out of 550'), 550);
+  assert.equal(LeadBotService.parseTotalMarks('1000'), 1000);
 
   // Invalid marks validation (obtained > total)
   const invalidRatio = LeadBotService.parseMarks('550/500');
@@ -134,16 +153,18 @@ test('LeadBotService: input parsing and validation heuristics', () => {
   assert.equal(invalidRatio.obtained, 550);
   assert.equal(invalidRatio.total, 500);
 
-  // Invalid total marks validation (total must be 550 or 1100)
-  const invalidTotal900 = LeadBotService.parseMarks('420/900');
-  assert.ok(invalidTotal900);
-  assert.equal(invalidTotal900.error, 'INVALID_TOTAL_MARKS');
-  assert.equal(invalidTotal900.obtained, 420);
-  assert.equal(invalidTotal900.total, 900);
+  // Different total marks: calculate percentage on that total
+  const total900 = LeadBotService.parseMarks('420/900');
+  assert.ok(total900);
+  assert.equal(total900.obtained, 420);
+  assert.equal(total900.total, 900);
+  assert.ok(total900.percentage > 46 && total900.percentage < 47);
 
-  const invalidTotal1000 = LeadBotService.parseMarks('600/1000');
-  assert.ok(invalidTotal1000);
-  assert.equal(invalidTotal1000.error, 'INVALID_TOTAL_MARKS');
+  const total1000 = LeadBotService.parseMarks('600/1000');
+  assert.ok(total1000);
+  assert.equal(total1000.obtained, 600);
+  assert.equal(total1000.total, 1000);
+  assert.equal(total1000.percentage, 60);
 
   const invalidPct = LeadBotService.parseMarks('115%');
   assert.ok(invalidPct);
@@ -463,13 +484,13 @@ test('LeadBotService: Graceful handling of invalid inputs', async () => {
   assert.equal(turnInvalidMarks.state, CONVERSATION_STATE.AWAITING_MARKS);
   assert.ok(turnInvalidMarks.reply.includes('cannot exceed total marks'));
 
-  // 5. Enter invalid total marks (e.g. 420/900) - must only allow 550 or 1100
-  const turnInvalidTotalMarks = await LeadBotService.processIncomingMessage({
+  // 5. Enter invalid percentage > 100% (e.g. 115%)
+  const turnInvalidPct = await LeadBotService.processIncomingMessage({
     fromPhone: '923459988776',
-    messageBody: '420/900',
+    messageBody: '115%',
   }, mockDb);
-  assert.equal(turnInvalidTotalMarks.state, CONVERSATION_STATE.AWAITING_MARKS);
-  assert.ok(turnInvalidTotalMarks.reply.includes('Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100*'));
+  assert.equal(turnInvalidPct.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnInvalidPct.reply.includes('Percentage (*115%*) cannot exceed 100%'));
 });
 
 test('LeadBotService Case 2: Student says No (Graceful exit & remains open to inquiries)', async () => {
@@ -1145,4 +1166,299 @@ test('LeadBotService: Post-Confirmation Mistake Correction Flow ("I did a mistak
 
   assert.equal(turn7.state, CONVERSATION_STATE.QUALIFIED);
   assert.ok(turn7.reply.includes('Java Script Developer'));
+});
+
+test('Marketing Phase: Clean First Question & Outreach Message Wording', async () => {
+  // Test default greeting from CampaignService
+  const greeting = (name) => `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
+    `University of Azad Jammu & Kashmir (UAJK)\n\n` +
+    `Assalam-o-Alaikum ${name}! Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n` +
+    `We are offering the following undergraduate degree programs:\n` +
+    `- *B.Sc. Software Engineering* (Accredited by PEC - Pakistan Engineering Council)\n` +
+    `- *B.Sc. Software Engineering Technology* (Accredited by NTC - National Technology Council)\n` +
+    `- *B.Sc. Computer Engineering Technology* (Accredited by NTC - National Technology Council)\n\n` +
+    `Are you interested in knowing more?\n\n` +
+    `- Reply *Yes* to know more and check your eligibility\n` +
+    `- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!`;
+
+  const msg = greeting('Ali');
+  // Must NOT overwhelm by saying "will you apply here" or "interested in applying"
+  assert.equal(msg.includes('will you apply here'), false);
+  assert.equal(msg.includes('interested in applying here'), false);
+  // Must mention courses and their affiliations simply
+  assert.ok(msg.includes('B.Sc. Software Engineering* (Accredited by PEC'));
+  assert.ok(msg.includes('B.Sc. Software Engineering Technology* (Accredited by NTC'));
+  assert.ok(msg.includes('B.Sc. Computer Engineering Technology* (Accredited by NTC'));
+  // Must ask "Are you interested in knowing more?"
+  assert.ok(msg.includes('Are you interested in knowing more?'));
+  // Must keep questions option
+  assert.ok(msg.includes('feel free to ask any question you have'));
+});
+
+test('Marketing Phase: Student writes 890/1100 in the first question', async () => {
+  let currentLead = {
+    id: 301,
+    campaign_id: 1,
+    full_name: 'Prospective Applicant',
+    father_name: null,
+    phone_normalized: '923001234455',
+    city: null,
+    prior_degree: null,
+    cnic: null,
+    email: null,
+    fsc_marks: null,
+    has_maths: null,
+    eligible_for: null,
+    eligibility_status: 'PENDING',
+    conversation_state: CONVERSATION_STATE.AWAITING_INTEREST,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query() {
+      return [[{ ...currentLead }]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        const setClause = sql.split('SET ')[1].split(' WHERE')[0];
+        const clauses = setClause.split(',').map((c) => c.trim());
+        let pIndex = 0;
+        for (const clause of clauses) {
+          if (clause.includes('=')) {
+            const [col, valExpr] = clause.split('=').map((s) => s.trim());
+            if (valExpr === '?') {
+              const val = params[pIndex++];
+              if (col === 'conversation_state') currentLead.conversation_state = val;
+              else if (col === 'full_name') currentLead.full_name = val;
+              else if (col === 'father_name') currentLead.father_name = val;
+              else if (col === 'fsc_marks') currentLead.fsc_marks = val;
+              else if (col === 'has_maths') currentLead.has_maths = val;
+              else if (col === 'eligible_for') currentLead.eligible_for = val;
+            }
+          }
+        }
+      }
+      return [{ affectedRows: 1, insertId: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Turn 1: In the first question, candidate sends "890/1100"
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001234455',
+    messageBody: '890/1100',
+  }, mockDb);
+
+  // Must parse obtained = 890, total = 1100, calculate percentage = 80.9%, and ask Full Name
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_NAME);
+  assert.equal(currentLead.fsc_marks, 890);
+  assert.equal(currentLead.eligible_for, PROGRAM_ELIGIBILITY.SE_SET_CET);
+  assert.ok(turn1.reply.includes('80.9%'));
+  assert.ok(turn1.reply.includes('890/1100'));
+  assert.ok(turn1.reply.includes('Full Name'));
+
+  // Turn 2: Candidate provides full name
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001234455',
+    messageBody: 'Hamza Tariq',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  assert.ok(turn2.reply.includes("Father's Name"));
+
+  // Turn 3: Candidate provides father's name - must NOT ask for marks again!
+  const turn3 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001234455',
+    messageBody: 'Tariq Mehmood',
+  }, mockDb);
+
+  assert.equal(turn3.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turn3.reply.includes('Mathematics') || turn3.reply.includes('academic group'));
+});
+
+test('Marketing Phase: Different Total Marks calculates percentage accurately', async () => {
+  let currentLead = {
+    id: 302,
+    campaign_id: 1,
+    full_name: 'Danish Khan',
+    father_name: 'Aslam Khan',
+    phone_normalized: '923005544332',
+    fsc_marks: null,
+    has_maths: null,
+    eligible_for: null,
+    eligibility_status: 'PENDING',
+    conversation_state: CONVERSATION_STATE.AWAITING_MARKS,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query() {
+      return [[{ ...currentLead }]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        currentLead.conversation_state = params[0];
+      }
+      return [{ affectedRows: 1, insertId: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Student writes 750/900 (total is 900 instead of 1100 or 550) -> 83.3%
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005544332',
+    messageBody: '750/900',
+  }, mockDb);
+
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.equal(turn1.eligibleFor, PROGRAM_ELIGIBILITY.SE_SET_CET);
+  assert.ok(turn1.reply.includes('83.3%'));
+  assert.ok(turn1.reply.includes('750/900'));
+
+  // Reset to AWAITING_MARKS for 800/1000 -> 80.0%
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_MARKS;
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005544332',
+    messageBody: '800/1000',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.equal(turn2.eligibleFor, PROGRAM_ELIGIBILITY.SE_SET_CET);
+  assert.ok(turn2.reply.includes('80.0%'));
+  assert.ok(turn2.reply.includes('800/1000'));
+});
+
+test('Marketing Phase: If student just writes 500, 900, or 60%, ask him the total marks as well', async () => {
+  let currentLead = {
+    id: 303,
+    campaign_id: 1,
+    full_name: 'Bilal Tariq',
+    father_name: 'Tariq Mehmood',
+    phone_normalized: '923007788990',
+    fsc_marks: null,
+    has_maths: null,
+    eligible_for: null,
+    eligibility_status: 'PENDING',
+    conversation_state: CONVERSATION_STATE.AWAITING_MARKS,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query() {
+      return [[{ ...currentLead }]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        const setClause = sql.split('SET ')[1].split(' WHERE')[0];
+        const clauses = setClause.split(',').map((c) => c.trim());
+        let pIndex = 0;
+        for (const clause of clauses) {
+          if (clause.includes('=')) {
+            const [col, valExpr] = clause.split('=').map((s) => s.trim());
+            if (valExpr === '?') {
+              const val = params[pIndex++];
+              if (col === 'conversation_state') currentLead.conversation_state = val;
+              else if (col === 'fsc_marks') currentLead.fsc_marks = val;
+              else if (col === 'chat_history') currentLead.chat_history = val;
+            }
+          }
+        }
+      }
+      return [{ affectedRows: 1, insertId: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Test Case A: Student just writes "500"
+  const turnA1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: '500',
+  }, mockDb);
+
+  assert.equal(turnA1.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnA1.reply.includes('Total Marks'));
+  assert.equal(currentLead.fsc_marks, 500);
+
+  // Student replies with total marks "550" -> 500/550 = 90.9%
+  const turnA2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: '550',
+  }, mockDb);
+
+  assert.equal(turnA2.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turnA2.reply.includes('90.9%'));
+  assert.ok(turnA2.reply.includes('500/550'));
+
+  // Test Case B: Student just writes "900"
+  currentLead.fsc_marks = null;
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_MARKS;
+  currentLead.chat_history = JSON.stringify([]);
+
+  const turnB1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: '900',
+  }, mockDb);
+
+  assert.equal(turnB1.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnB1.reply.includes('Total Marks'));
+  assert.equal(currentLead.fsc_marks, 900);
+
+  // Student replies with total marks "1100" -> 900/1100 = 81.8%
+  const turnB2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: '1100',
+  }, mockDb);
+
+  assert.equal(turnB2.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turnB2.reply.includes('81.8%'));
+  assert.ok(turnB2.reply.includes('900/1100'));
+
+  // Test Case C: Student just writes "60%"
+  currentLead.fsc_marks = null;
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_MARKS;
+  currentLead.chat_history = JSON.stringify([]);
+
+  const turnC1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: '60%',
+  }, mockDb);
+
+  assert.equal(turnC1.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turnC1.reply.includes('total marks'));
+
+  // Student replies with total marks "1100"
+  const turnC2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923007788990',
+    messageBody: 'total marks 1100',
+  }, mockDb);
+
+  assert.equal(turnC2.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turnC2.reply.includes('60.0%'));
 });

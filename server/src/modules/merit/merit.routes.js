@@ -11,7 +11,7 @@ const upload = multer({
     if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
       cb(null, true);
     } else {
-      cb(new Error('Only official PDF gazette files are accepted.'));
+      cb(new Error('Only official SEET entrance test PDF gazette files are accepted.'));
     }
   },
 });

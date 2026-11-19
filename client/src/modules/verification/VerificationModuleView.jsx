@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { StudentDossierModal } from './StudentDossierModal.jsx';
-import { Button, StatusBadge, MetricStrip, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
+import { Button, StatusBadge, MetricStrip, SectionTabs, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
 import {
   IconDocumentCheck,
   IconSearch,
   IconRefresh,
   IconAlertTriangle,
   IconCheck,
+  IconClose,
   IconPencil,
   IconSend,
   IconUsers,
@@ -249,125 +250,82 @@ export function VerificationModuleView() {
 
       {/* High-level Queue KPI Strip */}
       <MetricStrip
-        label="Verification summary"
+        label="Candidate verification summary"
         items={[
           {
-            label: 'Documents with Problems',
-            value: problemCount,
-            tone: problemCount > 0 ? 'amber' : 'neutral',
-          },
-          {
-            label: 'Needs Manual Review',
-            value: queueSummary.NEEDS_MANUAL_REVIEW,
-            tone: 'rose',
-          },
-          {
-            label: 'Under Review / Intake',
-            value: (queueSummary.UNDER_REVIEW || 0) + (queueSummary.DOCS_REQUESTED || 0),
-            tone: 'blue',
+            label: 'Total Candidates',
+            value: queueSummary.total || queueTotal,
           },
           {
             label: 'Fully Verified',
-            value: queueSummary.VERIFIED,
+            value: queueSummary.VERIFIED || 0,
             tone: 'emerald',
+          },
+          {
+            label: 'Needs Manual Review',
+            value: queueSummary.NEEDS_MANUAL_REVIEW || 0,
+            tone: 'rose',
+          },
+          {
+            label: 'Documents with Issues',
+            value: problemCount,
+            tone: problemCount > 0 ? 'amber' : 'neutral',
           },
         ]}
       />
 
       {/* Navigation Tabs */}
-      <div className="flex gap-6 overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Document verification">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'queue'}
-          onClick={() => setActiveTab('queue')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
-            activeTab === 'queue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          Verification Queue
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'import'}
-          onClick={() => setActiveTab('import')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
-            activeTab === 'import' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          Import Discrepancies (CSV)
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === 'reissue'}
-          onClick={() => setActiveTab('reissue')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
-            activeTab === 'reissue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          Reissue Upload Link
-        </button>
-        {canManageSources && (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'sources'}
-            onClick={() => setActiveTab('sources')}
-            className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
-              activeTab === 'sources' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Board Sources & Gazettes
-          </button>
-        )}
-      </div>
+      <SectionTabs
+        label="Document verification sections"
+        value={activeTab}
+        onChange={setActiveTab}
+        tabs={[
+          { id: 'queue', label: 'Candidate Verification Queue' },
+          { id: 'import', label: 'Import Discrepancies (CSV)' },
+          { id: 'reissue', label: 'Reissue Upload Link' },
+          ...(canManageSources ? [{ id: 'sources', label: 'Board Gazettes & Sources' }] : []),
+        ]}
+      />
 
-      {/* Tab 1: Review Queue with Spacious Layout & Problem Filter */}
+      {/* Tab 1: Review Queue */}
       {activeTab === 'queue' && (
         <section role="tabpanel" aria-label="Verification queue" className="space-y-4">
-          {/* Filter Bar with Dedicated "Has Problem" filter */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          {/* Clean Filter and Search Toolbar */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
               {/* Filter Pills */}
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {/* 1. FILTER FOR STUDENTS THAT HAVE A PROBLEM */}
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => { setFilterStatus('PROBLEMS_ONLY'); setQueuePage(0); }}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 font-bold transition shadow-2xs cursor-pointer ${
-                    filterStatus === 'PROBLEMS_ONLY'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                  onClick={() => { setFilterStatus(''); setQueuePage(0); }}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    !filterStatus
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
-                  <IconAlertTriangle className="size-3.5" />
-                  <span>Problems Only</span>
-                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${filterStatus === 'PROBLEMS_ONLY' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'}`}>
-                    {problemCount}
-                  </span>
+                  All ({queueTotal})
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => { setFilterStatus(''); setQueuePage(0); }}
-                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
-                    !filterStatus
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
+                  onClick={() => { setFilterStatus('VERIFIED'); setQueuePage(0); }}
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    filterStatus === 'VERIFIED'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
                   }`}
                 >
-                  All Candidates ({queueTotal})
+                  Verified ({queueSummary.VERIFIED || 0})
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setFilterStatus('NEEDS_MANUAL_REVIEW'); setQueuePage(0); }}
-                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
+                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                     filterStatus === 'NEEDS_MANUAL_REVIEW'
-                      ? 'bg-rose-700 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
+                      ? 'bg-rose-600 text-white shadow-xs'
+                      : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
                   }`}
                 >
                   Needs Review ({queueSummary.NEEDS_MANUAL_REVIEW || 0})
@@ -375,31 +333,24 @@ export function VerificationModuleView() {
 
                 <button
                   type="button"
-                  onClick={() => { setFilterStatus('UNDER_REVIEW'); setQueuePage(0); }}
-                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
-                    filterStatus === 'UNDER_REVIEW'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
+                  onClick={() => { setFilterStatus('PROBLEMS_ONLY'); setQueuePage(0); }}
+                  className={`inline-flex items-center gap-1 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    filterStatus === 'PROBLEMS_ONLY'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
                   }`}
                 >
-                  Under Review ({queueSummary.UNDER_REVIEW || 0})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { setFilterStatus('VERIFIED'); setQueuePage(0); }}
-                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
-                    filterStatus === 'VERIFIED'
-                      ? 'bg-emerald-700 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  Verified ({queueSummary.VERIFIED || 0})
+                  <span>Problems Only</span>
+                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                    filterStatus === 'PROBLEMS_ONLY' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
+                  }`}>
+                    {problemCount}
+                  </span>
                 </button>
               </div>
 
-              {/* Search and Density Toggle */}
-              <div className="flex flex-wrap items-center gap-3">
+              {/* Search and Action Toolbar */}
+              <div className="flex flex-wrap items-center gap-2">
                 <form onSubmit={handleSearchSubmit} className="relative min-w-[220px]">
                   <IconSearch className="pointer-events-none absolute left-3 top-2.5 size-4 text-slate-400" />
                   <input
@@ -407,47 +358,56 @@ export function VerificationModuleView() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search candidate, phone, CNIC…"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-9 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-9 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none"
                   />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => { setSearchQuery(''); setQueuePage(0); }}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <IconClose className="size-3" />
+                    </button>
+                  )}
                 </form>
 
-                <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-1 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setDensity('spacious')}
-                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'spacious' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    Spacious
-                  </button>
+                <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 text-[11px]">
                   <button
                     type="button"
                     onClick={() => setDensity('compact')}
-                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'compact' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                    className={`rounded px-2 py-0.5 font-semibold transition cursor-pointer ${density === 'compact' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
                   >
-                    Compact
+                    Table
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDensity('spacious')}
+                    className={`rounded px-2 py-0.5 font-semibold transition cursor-pointer ${density === 'spacious' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Cards
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={handleAutoDispatchMissing}
-                    disabled={autoDispatching || loading}
-                    className="bg-blue-600 text-white hover:bg-blue-700 text-xs shadow-xs"
-                  >
-                    {autoDispatching ? 'Dispatching…' : 'Batch Request Missing'}
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={loadQueue}
-                    disabled={loading}
-                    className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
-                    title="Refresh queue"
-                  >
-                    <IconRefresh className="size-4" />
-                  </button>
-                </div>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={handleAutoDispatchMissing}
+                  disabled={autoDispatching || loading}
+                  className="text-xs"
+                >
+                  <IconSend className="size-3 text-blue-600" />
+                  <span>{autoDispatching ? 'Dispatching…' : 'Batch Request Missing'}</span>
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={loadQueue}
+                  disabled={loading}
+                  className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                  title="Refresh queue"
+                >
+                  <IconRefresh className="size-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -758,71 +718,96 @@ export function VerificationModuleView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {queue.map((item) => (
-                    <tr key={item.studentId} className="hover:bg-slate-50/70 transition">
-                      <td className="px-5 py-3.5">
-                        <div className="font-bold text-slate-900">{item.fullName}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {item.fatherName ? `S/O ${item.fatherName} · ` : ''}
-                          CNIC: <span className="font-mono text-slate-700">{item.cnic || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 font-mono text-slate-800">
-                        {item.phoneNormalized || item.phoneRaw}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="font-mono font-semibold text-slate-800">
-                          {item.fscObtainedMarks ? `${item.fscObtainedMarks} / 1100` : '—'}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          {item.priorDegree || 'Group Unspecified'}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        {item.eligibleFor ? (
-                          <span className="inline-block rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 border border-indigo-100">
-                            {item.eligibleFor}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-[10px] italic">General Candidate</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="flex flex-col gap-1">
-                          <StatusBadge
-                            tone={
-                              item.overallStatus === 'VERIFIED'
-                                ? 'success'
-                                : item.overallStatus === 'NEEDS_MANUAL_REVIEW'
-                                  ? 'danger'
-                                  : 'neutral'
-                            }
-                          >
-                            {item.overallStatus}
-                          </StatusBadge>
-                          {item.overallStatus !== 'VERIFIED' && item.discrepancyNotes && (
-                            <span className="text-[10px] text-amber-700 truncate max-w-[180px]" title={item.discrepancyNotes}>
-                              {item.discrepancyNotes.split('\n').filter(Boolean).pop()}
-                            </span>
+                  {queue.map((item) => {
+                    const verifiedCount = Object.values(item.verifiedDocuments || {}).filter((d) => d.isVerified).length;
+                    return (
+                      <tr key={item.studentId} className="hover:bg-slate-50/70 transition">
+                        <td className="px-5 py-3.5">
+                          <div className="font-bold text-slate-900 text-sm">{item.fullName}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {item.fatherName ? `S/O ${item.fatherName} · ` : ''}
+                            CNIC: <span className="font-mono text-slate-700 font-medium">{item.cnic || '—'}</span>
+                            {item.city ? ` · ${item.city}` : ''}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="font-mono font-medium text-slate-800">
+                            {item.phoneNormalized || item.phoneRaw}
+                          </div>
+                          {item.email ? (
+                            <div className="mt-0.5 truncate max-w-[170px] text-[11px] text-slate-500" title={item.email}>
+                              {item.email}
+                            </div>
+                          ) : (
+                            <div className="mt-0.5 text-[10px] text-slate-400 italic">No email on file</div>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                          {Object.values(item.verifiedDocuments || {}).filter((d) => d.isVerified).length} / 5
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <Button
-                          size="sm"
-                          variant="subtle"
-                          onClick={() => setSelectedStudentId(item.studentId)}
-                        >
-                          Review Dossier
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="font-semibold text-slate-900">
+                            {item.fscObtainedMarks ? (
+                              <span>{item.fscObtainedMarks} <span className="text-slate-400 text-[11px]">/ 1100</span></span>
+                            ) : (
+                              '—'
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {item.priorDegree || 'Group Unspecified'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {item.eligibleFor ? (
+                            <span className="inline-block rounded-md bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700 border border-indigo-100">
+                              {item.eligibleFor}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px] italic">General Candidate</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="flex flex-col gap-1">
+                            <StatusBadge
+                              tone={
+                                item.overallStatus === 'VERIFIED'
+                                  ? 'success'
+                                  : item.overallStatus === 'NEEDS_MANUAL_REVIEW'
+                                    ? 'danger'
+                                    : 'neutral'
+                              }
+                            >
+                              {item.overallStatus}
+                            </StatusBadge>
+                            {item.overallStatus !== 'VERIFIED' && item.discrepancyNotes && (
+                              <span className="text-[10px] text-amber-700 truncate max-w-[180px] font-medium" title={item.discrepancyNotes}>
+                                {item.discrepancyNotes.split('\n').filter(Boolean).pop()}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-mono text-[11px] font-semibold ${
+                              verifiedCount >= 3
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}
+                          >
+                            {verifiedCount >= 3 && <IconCheck className="size-3 text-emerald-600" />}
+                            <span>{verifiedCount} / 5</span>
+                          </span>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <Button
+                            size="sm"
+                            variant="subtle"
+                            onClick={() => setSelectedStudentId(item.studentId)}
+                            className="border-slate-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition text-xs font-semibold"
+                          >
+                            Review Dossier
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

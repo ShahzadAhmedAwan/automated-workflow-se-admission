@@ -513,10 +513,14 @@ export class CampaignService {
       const defaultGreeting = (name) =>
         `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
         `University of Azad Jammu & Kashmir (UAJK)\n\n` +
-        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
-        `Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n` +
-        `- Reply *Yes* to apply\n` +
-        `- Or feel free to ask any question you have!`;
+        `Assalam-o-Alaikum ${name}! Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n` +
+        `We are offering the following undergraduate degree programs:\n` +
+        `- *B.Sc. Software Engineering* (Accredited by PEC - Pakistan Engineering Council)\n` +
+        `- *B.Sc. Software Engineering Technology* (Accredited by NTC - National Technology Council)\n` +
+        `- *B.Sc. Computer Engineering Technology* (Accredited by NTC - National Technology Council)\n\n` +
+        `Are you interested in knowing more?\n\n` +
+        `- Reply *Yes* to know more and check your eligibility\n` +
+        `- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!`;
 
       let scheduledCount = 0;
 
@@ -647,10 +651,14 @@ export class CampaignService {
         `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
         `University of Azad Jammu & Kashmir (UAJK)\n\n` +
         `Assalam-o-Alaikum ${name !== 'Prospective Applicant' && name ? name : ''}!\n\n` +
-        `This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
-        `Are you interested in applying here? Or would you like some information first about the university, department, eligibility, programs, fee structure, or courses?\n\n` +
-        `- Reply *Yes* to apply\n` +
-        `- Or ask any questions you have!`;
+        `Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n` +
+        `We are offering the following undergraduate degree programs:\n` +
+        `- *B.Sc. Software Engineering* (Accredited by PEC - Pakistan Engineering Council)\n` +
+        `- *B.Sc. Software Engineering Technology* (Accredited by NTC - National Technology Council)\n` +
+        `- *B.Sc. Computer Engineering Technology* (Accredited by NTC - National Technology Council)\n\n` +
+        `Are you interested in knowing more?\n\n` +
+        `- Reply *Yes* to know more and check your eligibility\n` +
+        `- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!`;
 
       let currentScheduleTime = new Date(now);
       currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
@@ -839,10 +847,14 @@ export class CampaignService {
       const defaultGreeting = (name) =>
         `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
         `University of Azad Jammu & Kashmir (UAJK)\n\n` +
-        `Assalam-o-Alaikum ${name}! This is an automated message from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK).\n\n` +
-        `Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n` +
-        `- Reply *Yes* to apply\n` +
-        `- Or feel free to ask any question you have!`;
+        `Assalam-o-Alaikum ${name}! Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n` +
+        `We are offering the following undergraduate degree programs:\n` +
+        `- *B.Sc. Software Engineering* (Accredited by PEC - Pakistan Engineering Council)\n` +
+        `- *B.Sc. Software Engineering Technology* (Accredited by NTC - National Technology Council)\n` +
+        `- *B.Sc. Computer Engineering Technology* (Accredited by NTC - National Technology Council)\n\n` +
+        `Are you interested in knowing more?\n\n` +
+        `- Reply *Yes* to know more and check your eligibility\n` +
+        `- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!`;
 
       const greetingText = customGreeting && customGreeting.trim()
         ? customGreeting.replace(/{name}/gi, fullName)

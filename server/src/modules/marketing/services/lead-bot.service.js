@@ -36,11 +36,13 @@ export class LeadBotService {
     const affirmatives = [
       'yes', 'yup', 'yeah', 'yep', 'han', 'jee', 'ji', 'sure', 'interested',
       'y', 'ha', 'bilkul', 'zaroor', 'in', 'ok', 'okay', 'yes please', '1',
-      'apply', 'want to apply', 'i want to apply', 'interested in applying'
+      'apply', 'want to apply', 'i want to apply', 'interested in applying',
+      'know more', 'want to know more', 'more info', 'tell me more', 'interested in knowing more'
     ];
     return (
       affirmatives.includes(clean) ||
-      /^(yes|han|ji|yep|yup|interested|definitely)\b/i.test(clean)
+      /^(yes|han|ji|yep|yup|interested|definitely)\b/i.test(clean) ||
+      /\b(know more|tell me more|more details|more info)\b/i.test(clean)
     );
   }
 
@@ -103,14 +105,20 @@ export class LeadBotService {
 
   /**
    * Parses obtained marks and total marks or percentage from user input
-   * e.g. "420/550", "850/1100", "75%", "850", "450 out of 550"
+   * e.g. "890/1100", "420/550", "850 out of 1100", "750/900", "500", "900", "60%"
    */
   static parseMarks(text) {
     if (!text) return null;
     const clean = text.trim().replace(/,/g, '');
 
-    // Pattern 1: Ratio format like 420/550, 850/1100, 420 out of 550, 550/500
-    const ratioMatch = clean.match(/(\d{1,4})\s*(?:\/|\bout\s+of\b)\s*(\d{1,4})/i);
+    // Guard: Do not treat phone numbers or CNIC as marks
+    const digitsOnly = clean.replace(/\D/g, '');
+    if (digitsOnly.length >= 7 && !clean.includes('/') && !clean.toLowerCase().includes('out of')) {
+      return null;
+    }
+
+    // Pattern 1: Ratio format like 890/1100, 420/550, 420 out of 550, 750/900, 800/1000
+    const ratioMatch = clean.match(/(\d{1,5})\s*(?:\/|\bout\s+of\b)\s*(\d{1,5})/i);
     if (ratioMatch) {
       const obtained = parseFloat(ratioMatch[1]);
       const total = parseFloat(ratioMatch[2]);
@@ -131,15 +139,6 @@ export class LeadBotService {
         };
       }
 
-      // Total marks in Intermediate (FSc/ICS) must be 550 (Part 1) or 1100 (Part 2)
-      if (total !== 550 && total !== 1100) {
-        return {
-          error: 'INVALID_TOTAL_MARKS',
-          obtained: Math.round(obtained),
-          total: Math.round(total),
-        };
-      }
-
       return {
         obtained: Math.round(obtained),
         total: Math.round(total),
@@ -147,7 +146,7 @@ export class LeadBotService {
       };
     }
 
-    // Pattern 2: Percentage format like 75%, 75.5%, 100%, 120%
+    // Pattern 2: Percentage format like 60%, 75%, 75.5%, 100%, 120%
     const percentMatch = clean.match(/(?:^|[^\d])(\d{1,3}(?:\.\d+)?)\s*%/);
     if (percentMatch) {
       const pct = parseFloat(percentMatch[1]);
@@ -159,8 +158,8 @@ export class LeadBotService {
       }
       if (pct >= 0 && pct <= 100) {
         return {
-          obtained: Math.round(pct * 11),
-          total: 1100,
+          isPartial: true,
+          type: 'PERCENTAGE_ONLY',
           percentage: pct,
         };
       }
@@ -172,20 +171,45 @@ export class LeadBotService {
       return null;
     }
 
-    // Pattern 3: Bare number
-    const numMatch = clean.match(/\b(\d{2,4})\b/);
+    // Pattern 3: Bare number like 500, 900
+    const numMatch = clean.match(/\b(\d{2,5})\b/);
     if (numMatch) {
       const num = parseInt(numMatch[1], 10);
-      if (num > 1100) {
+      if (num >= 50 && num <= 5000) {
         return {
-          error: 'MARKS_EXCEEDS_MAX',
+          isPartial: true,
+          type: 'OBTAINED_ONLY',
           obtained: num,
         };
       }
-      if (num >= 100 && num <= 550) {
-        return { obtained: num, total: 550, percentage: (num / 550) * 100 };
-      } else if (num > 550 && num <= 1100) {
-        return { obtained: num, total: 1100, percentage: (num / 1100) * 100 };
+    }
+
+    return null;
+  }
+
+  /**
+   * Parses total marks when a user responds with just total marks (e.g. "1100", "550", "total 1100", "out of 1100")
+   */
+  static parseTotalMarks(text) {
+    if (!text) return null;
+    const clean = text.trim().replace(/,/g, '');
+
+    // If ratio like "890/1100" is sent, parseMarks handles it
+    if (/\//.test(clean)) return null;
+
+    // Pattern 1: Explicit keywords e.g. "total 1100", "total is 1100", "out of 1100", "kul marks 1100"
+    const keywordMatch = clean.match(/(?:total(?:\s+marks)?|out\s+of|kul(?:\s+number|\s+marks)?)\s*(?:is|hain|are|:|=)?\s*(\d{2,5})/i);
+    if (keywordMatch) {
+      const total = parseInt(keywordMatch[1], 10);
+      return total > 0 ? total : null;
+    }
+
+    // Pattern 2: Standalone number e.g. "1100", "550", "1100 total", "it was 1100"
+    const numMatch = clean.match(/\b(\d{2,5})\b/);
+    if (numMatch) {
+      const total = parseInt(numMatch[1], 10);
+      if (total >= 50 && total <= 5000) {
+        return total;
       }
     }
 
@@ -202,7 +226,10 @@ export class LeadBotService {
       case CONVERSATION_STATE.AWAITING_FATHER_NAME:
         return "Could you please tell me your *Father's Name*?";
       case CONVERSATION_STATE.AWAITING_MARKS:
-        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)";
+        if (lead.fsc_marks) {
+          return "Could you please let us know your *Total Marks* (e.g. out of *1100* or *550*)?";
+        }
+        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
       case CONVERSATION_STATE.AWAITING_MATHS:
         return "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
       case CONVERSATION_STATE.AWAITING_CNIC:
@@ -300,9 +327,13 @@ export class LeadBotService {
         "*DEPARTMENT OF SOFTWARE ENGINEERING*\n" +
         "University of Azad Jammu & Kashmir (UAJK)\n\n" +
         "Assalam-o-Alaikum! Welcome to the Department of Software Engineering at UAJK (Chehla Campus).\n\n" +
-        "Are you interested in applying here? Or would you like some information first regarding programs, eligibility, fee structure, or hostel facilities?\n\n" +
-        "- Reply *Yes* to register your admission interest\n" +
-        "- Or feel free to ask any question you have!";
+        "We are offering the following undergraduate degree programs:\n" +
+        "- *B.Sc. Software Engineering* (Accredited by PEC - Pakistan Engineering Council)\n" +
+        "- *B.Sc. Software Engineering Technology* (Accredited by NTC - National Technology Council)\n" +
+        "- *B.Sc. Computer Engineering Technology* (Accredited by NTC - National Technology Council)\n\n" +
+        "Are you interested in knowing more?\n\n" +
+        "- Reply *Yes* to know more and check your eligibility\n" +
+        "- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!";
 
       // If new unsolicited lead
       if (!leads.length) {
@@ -318,7 +349,7 @@ export class LeadBotService {
           const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, []);
           const reply =
             `${aiAnswer}\n\n` +
-            `Would you like to register your admission interest with us for Fall 2026? (Reply *Yes* to begin registration)`;
+            `Are you interested in knowing more? (Reply *Yes* to check your eligibility, or feel free to ask any other questions)`;
 
           await LeadBotService.saveTurnAndQueueReply(
             connection,
@@ -335,6 +366,71 @@ export class LeadBotService {
 
           await connection.commit();
           return { reply, leadId: newLeadId, state: CONVERSATION_STATE.AWAITING_INTEREST };
+        }
+
+        // If the very first message has marks (e.g. 890/1100, 500, 900, 60%)
+        const firstMsgMarks = LeadBotService.parseMarks(messageBody);
+        if (firstMsgMarks) {
+          if (firstMsgMarks.error) {
+            let reply = "Please provide your valid marks as obtained/total (for example: *890/1100* or *420/550*).";
+            if (firstMsgMarks.error === 'OBTAINED_EXCEEDS_TOTAL') {
+              reply = `The obtained marks (*${firstMsgMarks.obtained}*) cannot exceed total marks (*${firstMsgMarks.total}*).\n\nPlease provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+            } else if (firstMsgMarks.error === 'PERCENTAGE_EXCEEDS_100') {
+              reply = `Percentage (*${firstMsgMarks.percentage}%*) cannot exceed 100%.\n\nPlease provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+            }
+            await LeadBotService.saveTurnAndQueueReply(
+              connection, newLeadId, fromPhone, messageBody, reply,
+              CONVERSATION_STATE.AWAITING_MARKS, [], rawTimestamp, {}, { queueReply }
+            );
+            await connection.commit();
+            return { reply, leadId: newLeadId, state: CONVERSATION_STATE.AWAITING_MARKS };
+          } else if (firstMsgMarks.isPartial) {
+            let reply = '';
+            if (firstMsgMarks.type === 'OBTAINED_ONLY') {
+              reply = `Noted: *${firstMsgMarks.obtained}* marks. Could you please also let us know your *Total Marks*?\n*(For example: out of 1100, 550, or whatever your total was)*`;
+            } else {
+              reply = `Noted: *${firstMsgMarks.percentage}%*. Could you please also let us know your obtained and total marks?\n*(For example: 660/1100 or 330/550, or what was your total score?)*`;
+            }
+            await LeadBotService.saveTurnAndQueueReply(
+              connection, newLeadId, fromPhone, messageBody, reply,
+              CONVERSATION_STATE.AWAITING_MARKS, [], rawTimestamp,
+              { fscMarks: firstMsgMarks.type === 'OBTAINED_ONLY' ? firstMsgMarks.obtained : null },
+              { queueReply }
+            );
+            await connection.commit();
+            return { reply, leadId: newLeadId, state: CONVERSATION_STATE.AWAITING_MARKS };
+          } else {
+            const pct = firstMsgMarks.percentage;
+            if (pct < 50.0) {
+              const reply =
+                `Thank you for sharing your marks. The minimum requirement for Engineering & Technology programs at UAJK is 50% (your score: ${pct.toFixed(1)}%).\n\n` +
+                `Unfortunately, you do not meet the minimum threshold for SE, SET, or CET. If you wish to learn about other programs or have questions, feel free to ask anytime!`;
+              await LeadBotService.saveTurnAndQueueReply(
+                connection, newLeadId, fromPhone, messageBody, reply,
+                CONVERSATION_STATE.NOT_INTERESTED, [], rawTimestamp,
+                {
+                  fscMarks: firstMsgMarks.obtained,
+                  eligibilityStatus: ELIGIBILITY_STATUS.INELIGIBLE,
+                  ineligibilityReason: INELIGIBILITY_REASON.BELOW_MINIMUM_MARKS_50,
+                  eligibleFor: PROGRAM_ELIGIBILITY.NONE,
+                },
+                { queueReply }
+              );
+              await connection.commit();
+              return { reply, leadId: newLeadId, state: CONVERSATION_STATE.NOT_INTERESTED };
+            } else {
+              const elg = pct >= 60.0 ? PROGRAM_ELIGIBILITY.SE_SET_CET : PROGRAM_ELIGIBILITY.SET_CET;
+              const reply = `Thank you! Noted: *${pct.toFixed(1)}%* marks (${firstMsgMarks.obtained}/${firstMsgMarks.total}).\n\nTo check your program eligibility and register your admission inquiry, what is your *Full Name*?`;
+              await LeadBotService.saveTurnAndQueueReply(
+                connection, newLeadId, fromPhone, messageBody, reply,
+                CONVERSATION_STATE.AWAITING_NAME, [], rawTimestamp,
+                { fscMarks: firstMsgMarks.obtained, eligibleFor: elg },
+                { queueReply }
+              );
+              await connection.commit();
+              return { reply, leadId: newLeadId, state: CONVERSATION_STATE.AWAITING_NAME };
+            }
+          }
         }
 
         // Standard welcome greeting
@@ -388,9 +484,100 @@ export class LeadBotService {
         case CONVERSATION_STATE.IDLE:
         case CONVERSATION_STATE.GREETING_SENT:
         case CONVERSATION_STATE.AWAITING_INTEREST: {
+          const marksInMsg = LeadBotService.parseMarks(messageBody);
+
+          // If student explicitly says No / not interested
+          if (LeadBotService.isNegative(messageBody)) {
+            nextState = CONVERSATION_STATE.NOT_INTERESTED;
+            replyText =
+              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
+              "If you ever have any questions about university programs, eligibility, or courses, please feel free to ask anytime!";
+            qualificationChanged = true;
+            isEligible = false;
+            ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
+          }
+          // If student writes marks in the first question (e.g. 890/1100, 800/1000, 500, 900, 60%)
+          else if (marksInMsg) {
+            if (marksInMsg.error) {
+              if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
+                replyText =
+                  `The obtained marks (*${marksInMsg.obtained}*) cannot exceed total marks (*${marksInMsg.total}*).\n\n` +
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+              } else if (marksInMsg.error === 'PERCENTAGE_EXCEEDS_100') {
+                replyText =
+                  `Percentage (*${marksInMsg.percentage}%*) cannot exceed 100%.\n\n` +
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+              } else {
+                replyText =
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+              }
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            } else if (marksInMsg.isPartial) {
+              if (marksInMsg.type === 'OBTAINED_ONLY') {
+                marksObtained = marksInMsg.obtained;
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText =
+                  `Noted: *${marksInMsg.obtained}* marks. Could you please also let us know your *Total Marks*?\n` +
+                  `*(For example: out of 1100, 550, or whatever your total was)*`;
+              } else if (marksInMsg.type === 'PERCENTAGE_ONLY') {
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText =
+                  `Noted: *${marksInMsg.percentage}%*. Could you please also let us know your obtained and total marks?\n` +
+                  `*(For example: 660/1100 or 330/550, or what was your total score?)*`;
+              }
+            } else {
+              // Full ratio in first question (e.g. 890/1100, 800/1000)
+              marksObtained = marksInMsg.obtained;
+
+              const cleanMsg = messageBody.toLowerCase();
+              if (
+                cleanMsg.includes('pre-medical') ||
+                cleanMsg.includes('pre medical') ||
+                cleanMsg.includes('pre-med') ||
+                cleanMsg.includes('medical')
+              ) {
+                priorDegree = 'Pre-Medical';
+                hasMaths = false;
+              } else if (cleanMsg.includes('ics')) {
+                priorDegree = 'ICS';
+                hasMaths = true;
+              } else if (cleanMsg.includes('pre-eng')) {
+                priorDegree = 'FSc Pre-Engineering';
+                hasMaths = true;
+              } else if (cleanMsg.includes('dae')) {
+                priorDegree = 'DAE';
+                hasMaths = true;
+              }
+
+              if (marksInMsg.percentage < 50.0) {
+                nextState = CONVERSATION_STATE.NOT_INTERESTED;
+                qualificationChanged = true;
+                isEligible = false;
+                ineligibilityReason = INELIGIBILITY_REASON.BELOW_MINIMUM_MARKS_50;
+                eligibleFor = PROGRAM_ELIGIBILITY.NONE;
+                replyText =
+                  `Thank you for sharing your marks. The minimum requirement for Engineering & Technology programs at UAJK is 50% (your score: ${marksInMsg.percentage.toFixed(1)}%).\n\n` +
+                  `Unfortunately, you do not meet the minimum threshold for SE, SET, or CET. If you wish to learn about other programs or have questions, feel free to ask anytime!`;
+              } else {
+                eligibleFor = marksInMsg.percentage >= 60.0 ? PROGRAM_ELIGIBILITY.SE_SET_CET : PROGRAM_ELIGIBILITY.SET_CET;
+
+                const hasKnownName =
+                  fullName &&
+                  fullName.trim() &&
+                  !fullName.toLowerCase().includes('prospective applicant');
+
+                if (hasKnownName) {
+                  nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                  replyText = `Thank you, *${fullName}*! Noted: *${marksInMsg.percentage.toFixed(1)}%* marks (${marksInMsg.obtained}/${marksInMsg.total}).\n\nTo check your program eligibility and register your inquiry, what is your *Father's Name*?`;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_NAME;
+                  replyText = `Thank you! Noted: *${marksInMsg.percentage.toFixed(1)}%* marks (${marksInMsg.obtained}/${marksInMsg.total}).\n\nTo check your program eligibility and register your inquiry, what is your *Full Name*?`;
+                }
+              }
+            }
+          }
           // Case 1: Student says Yes / interested
-          if (LeadBotService.isAffirmative(messageBody)) {
-            // Check if full name is already known (e.g. from campaign import)
+          else if (LeadBotService.isAffirmative(messageBody)) {
             const hasKnownName =
               fullName &&
               fullName.trim() &&
@@ -404,22 +591,12 @@ export class LeadBotService {
               replyText = "Great! Let's get your admission inquiry registered. What is your *Full Name*?";
             }
           }
-          // Case 2: Student says No / not interested
-          else if (LeadBotService.isNegative(messageBody)) {
-            nextState = CONVERSATION_STATE.NOT_INTERESTED;
-            replyText =
-              "Thank you for letting us know! We completely understand and respect your decision. Best of luck with your future studies and career!\n\n" +
-              "If you ever have any questions about university programs, eligibility, or courses, please feel free to ask anytime!";
-            qualificationChanged = true;
-            isEligible = false;
-            ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
-          }
           // Case 3: Student asks a question or random inquiry
           else if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `Would you like to register your admission interest for the Department of Software Engineering? (Reply *Yes* to start registration)`;
+              `Are you interested in knowing more? (Reply *Yes* to check your eligibility, or feel free to ask any other questions)`;
             nextState = CONVERSATION_STATE.AWAITING_INTEREST;
           }
           // Student sends a greeting
@@ -430,7 +607,8 @@ export class LeadBotService {
           // Fallback clarification
           else {
             replyText =
-              "Assalam-o-Alaikum! Please reply with *Yes* if you are interested in applying, or feel free to ask any question about UAJK Software Engineering admissions.";
+              "Assalam-o-Alaikum! We are offering B.Sc. Software Engineering (PEC accredited), SET (NTC accredited), and CET (NTC accredited).\n\n" +
+              "Are you interested in knowing more? Reply with *Yes* to check your eligibility, or feel free to ask any question you have!";
             nextState = CONVERSATION_STATE.AWAITING_INTEREST;
           }
           break;
@@ -468,6 +646,16 @@ export class LeadBotService {
                 marks: marksObtained,
                 isUpdated: true,
               });
+            } else if (fatherName && marksObtained) {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText =
+                `Thank you, *${fullName}*!\n\n` +
+                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+            } else if (fatherName) {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Thank you, *${fullName}*! What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
+                `*(Please provide obtained and total marks, e.g. 890/1100 or 420/550)*`;
             } else {
               nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
               replyText = `Thank you, *${fullName}*! What is your *Father's Name*?`;
@@ -513,11 +701,16 @@ export class LeadBotService {
                 marks: marksObtained,
                 isUpdated: true,
               });
+            } else if (marksObtained) {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText =
+                `Thank you, *${fullName}*!\n\n` +
+                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
             } else {
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
               replyText =
                 `Noted. What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
-                `*(For example: 420/550, 850/1100, or 75%)*`;
+                `*(Please provide obtained and total marks, e.g. 890/1100 or 420/550)*`;
             }
           } else {
             replyText =
@@ -543,43 +736,134 @@ export class LeadBotService {
             break;
           }
 
-          const parsed = LeadBotService.parseMarks(messageBody);
+          const lastOutbound = history.filter((h) => h.direction === 'OUTBOUND').slice(-1)[0]?.text || '';
+          const wasAskedTotalMarks =
+            lastOutbound.includes('Total Marks') ||
+            lastOutbound.includes('total marks');
 
-          // If user provided mathematically invalid marks (e.g. 550/500, >100%, 420/900, or >1100)
+          const parsed = LeadBotService.parseMarks(messageBody);
+          const parsedTotalOnly = wasAskedTotalMarks ? LeadBotService.parseTotalMarks(messageBody) : null;
+
+          // If student was asked for total marks, and replied with just the total number (e.g. "1100", "550", "1000", "total 1100")
+          if (wasAskedTotalMarks && parsedTotalOnly && (!parsed || parsed.isPartial)) {
+            const total = parsedTotalOnly;
+            let obtained = lead.fsc_marks || null;
+            let percentage = null;
+
+            if (obtained !== null && obtained !== undefined) {
+              if (obtained > total) {
+                replyText =
+                  `The obtained marks (*${obtained}*) cannot exceed total marks (*${total}*).\n\n` +
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                break;
+              }
+              percentage = (obtained / total) * 100;
+            } else {
+              const lastInbound = history.filter((h) => h.direction === 'INBOUND').slice(-1)[0]?.text || '';
+              const pctMatch = lastInbound.match(/(\d{1,3}(?:\.\d+)?)\s*%/);
+              if (pctMatch) {
+                const pct = parseFloat(pctMatch[1]);
+                obtained = Math.round((pct / 100) * total);
+                percentage = pct;
+              }
+            }
+
+            if (obtained !== null && percentage !== null) {
+              marksObtained = obtained;
+
+              if (percentage < 50.0) {
+                nextState = CONVERSATION_STATE.NOT_INTERESTED;
+                qualificationChanged = true;
+                isEligible = false;
+                ineligibilityReason = INELIGIBILITY_REASON.BELOW_MINIMUM_MARKS_50;
+                eligibleFor = PROGRAM_ELIGIBILITY.NONE;
+                replyText =
+                  `Thank you for sharing your marks. The minimum requirement for Engineering & Technology programs at UAJK is 50% (your score: ${percentage.toFixed(1)}%).\n\n` +
+                  `Unfortunately, you do not meet the minimum threshold for SE, SET, or CET. If you wish to learn about other programs or have questions, feel free to ask anytime!`;
+              } else {
+                eligibleFor = percentage >= 60.0 ? PROGRAM_ELIGIBILITY.SE_SET_CET : PROGRAM_ELIGIBILITY.SET_CET;
+
+                const hasKnownName =
+                  fullName &&
+                  fullName.trim() &&
+                  !fullName.toLowerCase().includes('prospective applicant');
+
+                if (!hasKnownName) {
+                  nextState = CONVERSATION_STATE.AWAITING_NAME;
+                  replyText = `Thank you! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\nTo continue your admission registration, what is your *Full Name*?`;
+                } else if (!fatherName) {
+                  nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                  replyText = `Thank you, *${fullName}*! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\nWhat is your *Father's Name*?`;
+                } else if (cnic && email && (hasMaths !== null || lead.has_maths !== null)) {
+                  nextState = CONVERSATION_STATE.QUALIFIED;
+                  qualificationChanged = true;
+                  isEligible = true;
+                  replyText = LeadBotService.formatConfirmationMessage({
+                    fullName,
+                    fatherName,
+                    cnic,
+                    email,
+                    marks: marksObtained,
+                    isUpdated: true,
+                  });
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                  replyText =
+                    `Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\n` +
+                    `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+                }
+              }
+              break;
+            }
+          }
+
+          // If user provided mathematically invalid marks
           if (parsed?.error) {
-            if (parsed.error === 'INVALID_TOTAL_MARKS') {
-              replyText =
-                `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
-                `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
-            } else if (parsed.error === 'OBTAINED_EXCEEDS_TOTAL') {
+            if (parsed.error === 'OBTAINED_EXCEEDS_TOTAL') {
               replyText =
                 `The obtained marks (*${parsed.obtained}*) cannot exceed total marks (*${parsed.total}*).\n\n` +
-                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+                `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
             } else if (parsed.error === 'PERCENTAGE_EXCEEDS_100') {
               replyText =
                 `Percentage (*${parsed.percentage}%*) cannot exceed 100%.\n\n` +
-                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
-            } else if (parsed.error === 'MARKS_EXCEEDS_MAX') {
+                `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+            } else if (parsed.error === 'INVALID_TOTAL') {
               replyText =
-                `The marks you entered (*${parsed.obtained}*) exceed standard intermediate total marks (1100).\n\n` +
-                `Please provide your marks in the format obtained/total (for example: *420/550* or *850/1100*).`;
+                `Total marks must be greater than zero.\n\n` +
+                `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
             } else {
               replyText =
-                `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
+                `Please provide your valid marks as obtained/total (for example: *890/1100* or *420/550*).`;
             }
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
+          } else if (parsed?.isPartial) {
+            // Student wrote 500, 900, or 60%
+            if (parsed.type === 'OBTAINED_ONLY') {
+              marksObtained = parsed.obtained;
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Noted: *${parsed.obtained}* marks. Could you please also let us know your *Total Marks*?\n` +
+                `*(For example: out of 1100, 550, or whatever your total was)*`;
+            } else if (parsed.type === 'PERCENTAGE_ONLY') {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Noted: *${parsed.percentage}%*. Could you please also let us know your obtained and total marks?\n` +
+                `*(For example: 660/1100 or 330/550, or what was your total score?)*`;
+            }
           } else if (!parsed && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To check your program eligibility:* What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)`;
+              `*To check your program eligibility:* What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *890/1100* or *420/550*)`;
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
           } else if (!parsed) {
             replyText =
-              "We couldn't quite read your marks. Please provide your obtained and total marks (for example: *420/550* or *850/1100* or *75%*).\n\n" +
+              "We couldn't quite read your marks. Please provide your obtained and total marks (for example: *890/1100* or *420/550*).\n\n" +
               "If you have a question about eligibility or fees, feel free to ask!";
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
           } else {
+            // Full ratio parsed (e.g. 890/1100 or a different total)
             marksObtained = parsed.obtained;
 
             // Check if study group was mentioned alongside marks
@@ -614,17 +898,24 @@ export class LeadBotService {
                 `Thank you for sharing your marks. The minimum requirement for Engineering & Technology programs at UAJK is 50% (your score: ${parsed.percentage.toFixed(1)}%).\n\n` +
                 `Unfortunately, you do not meet the minimum threshold for SE, SET, or CET. If you wish to learn about other programs or have questions, feel free to ask anytime!`;
             } else {
-              // Record eligible programs silently in the backend:
-              // >= 60% -> SE, SET, CET
-              // 50% - 59.9% -> SET, CET
               if (parsed.percentage >= 60.0) {
                 eligibleFor = PROGRAM_ELIGIBILITY.SE_SET_CET;
               } else {
                 eligibleFor = PROGRAM_ELIGIBILITY.SET_CET;
               }
 
-              // If candidate already completed other details (e.g. updating marks after qualification)
-              if (cnic && email && fatherName && (hasMaths !== null || lead.has_maths !== null)) {
+              const hasKnownName =
+                fullName &&
+                fullName.trim() &&
+                !fullName.toLowerCase().includes('prospective applicant');
+
+              if (!hasKnownName) {
+                nextState = CONVERSATION_STATE.AWAITING_NAME;
+                replyText = `Thank you! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\nTo continue your admission registration, what is your *Full Name*?`;
+              } else if (!fatherName) {
+                nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                replyText = `Thank you, *${fullName}*! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\nWhat is your *Father's Name*?`;
+              } else if (cnic && email && (hasMaths !== null || lead.has_maths !== null)) {
                 nextState = CONVERSATION_STATE.QUALIFIED;
                 qualificationChanged = true;
                 isEligible = true;
@@ -639,7 +930,7 @@ export class LeadBotService {
               } else {
                 nextState = CONVERSATION_STATE.AWAITING_MATHS;
                 replyText =
-                  `Noted: *${parsed.percentage.toFixed(1)}%* marks.\n\n` +
+                  `Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\n` +
                   `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
               }
             }
@@ -898,23 +1189,32 @@ export class LeadBotService {
               /\b(out of|\/)\b/i.test(clean))
           ) {
             if (marksInMsg.error) {
-              if (marksInMsg.error === 'INVALID_TOTAL_MARKS') {
-                replyText =
-                  `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
-                  `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
-              } else if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
+              if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
                 replyText =
                   `The obtained marks (*${marksInMsg.obtained}*) cannot exceed total marks (*${marksInMsg.total}*).\n\n` +
-                  `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
               } else if (marksInMsg.error === 'PERCENTAGE_EXCEEDS_100') {
                 replyText =
                   `Percentage (*${marksInMsg.percentage}%*) cannot exceed 100%.\n\n` +
-                  `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+                  `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
               } else {
                 replyText =
-                  `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
+                  `Please provide your valid marks as obtained/total (for example: *890/1100* or *420/550*).`;
               }
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            } else if (marksInMsg.isPartial) {
+              if (marksInMsg.type === 'OBTAINED_ONLY') {
+                marksObtained = marksInMsg.obtained;
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText =
+                  `Noted: *${marksInMsg.obtained}* marks. Could you please also let us know your *Total Marks*?\n` +
+                  `*(For example: out of 1100, 550, or whatever your total was)*`;
+              } else if (marksInMsg.type === 'PERCENTAGE_ONLY') {
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText =
+                  `Noted: *${marksInMsg.percentage}%*. Could you please also let us know your obtained and total marks?\n` +
+                  `*(For example: 660/1100 or 330/550, or what was your total score?)*`;
+              }
             } else if (marksInMsg.percentage < 50.0) {
               marksObtained = marksInMsg.obtained;
               nextState = CONVERSATION_STATE.NOT_INTERESTED;
@@ -1065,7 +1365,7 @@ export class LeadBotService {
             /\b(mark|marks|score|fsc)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
           ) {
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            replyText = "No problem! What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *420/550* or *850/1100*)";
+            replyText = "No problem! What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
             break;
           }
 
@@ -1150,26 +1450,41 @@ export class LeadBotService {
         case CONVERSATION_STATE.NOT_INTERESTED: {
           const marksInMsg = LeadBotService.parseMarks(messageBody);
 
-          // If candidate sent invalid marks format (e.g. total != 550 and != 1100, or obtained > total)
           if (marksInMsg?.error) {
-            if (marksInMsg.error === 'INVALID_TOTAL_MARKS') {
-              replyText =
-                `Total marks for Intermediate (FSc/ICS) can only be *550* (Part 1) or *1100* (Part 2 / Full).\n\n` +
-                `Please provide your valid marks as obtained/total (for example: *420/550* or *850/1100*).`;
-            } else if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
+            if (marksInMsg.error === 'OBTAINED_EXCEEDS_TOTAL') {
               replyText =
                 `The obtained marks (*${marksInMsg.obtained}*) cannot exceed total marks (*${marksInMsg.total}*).\n\n` +
-                `Please provide your valid obtained and total marks (for example: *420/550* or *850/1100*).`;
+                `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
+            } else if (marksInMsg.error === 'PERCENTAGE_EXCEEDS_100') {
+              replyText =
+                `Percentage (*${marksInMsg.percentage}%*) cannot exceed 100%.\n\n` +
+                `Please provide your valid obtained and total marks (for example: *890/1100* or *420/550*).`;
             } else {
               replyText =
-                `Total marks must be either *550* or *1100*. Please provide your valid marks (for example: *420/550* or *850/1100*).`;
+                `Please provide your valid marks as obtained/total (for example: *890/1100* or *420/550*).`;
             }
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
             break;
           }
 
+          if (marksInMsg?.isPartial) {
+            if (marksInMsg.type === 'OBTAINED_ONLY') {
+              marksObtained = marksInMsg.obtained;
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Noted: *${marksInMsg.obtained}* marks. Could you please also let us know your *Total Marks*?\n` +
+                `*(For example: out of 1100, 550, or whatever your total was)*`;
+            } else {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText =
+                `Noted: *${marksInMsg.percentage}%*. Could you please also let us know your obtained and total marks?\n` +
+                `*(For example: 660/1100 or 330/550, or what was your total score?)*`;
+            }
+            break;
+          }
+
           // If candidate previously disqualified updates their marks to >= 50%
-          if (marksInMsg && !marksInMsg.error && marksInMsg.percentage >= 50.0) {
+          if (marksInMsg && !marksInMsg.error && !marksInMsg.isPartial && marksInMsg.percentage >= 50.0) {
             marksObtained = marksInMsg.obtained;
             isEligible = true;
             ineligibilityReason = null;
@@ -1188,16 +1503,16 @@ export class LeadBotService {
             } else {
               nextState = CONVERSATION_STATE.AWAITING_MATHS;
               replyText =
-                `Updated your marks to *${marksInMsg.percentage.toFixed(1)}%* (${marksObtained}).\n\n` +
+                `Updated your marks to *${marksInMsg.percentage.toFixed(1)}%* (${marksObtained}/${marksInMsg.total}).\n\n` +
                 `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
             }
           } else if (LeadBotService.isCorrectionIntent(messageBody)) {
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            replyText = "No problem at all! Let's update your marks. What were your obtained marks in FSc / ICS? (Total marks can only be *550* or *1100*, e.g. *420/550* or *850/1100*).";
+            replyText = "No problem at all! Let's update your marks. What was your score in FSc / ICS / DAE? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*).";
           } else if (LeadBotService.isAffirmative(messageBody)) {
             if (fullName) {
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
-              replyText = `Welcome back ${fullName}! What was your score in FSc / ICS? (e.g. *420/550* or *850/1100*).`;
+              replyText = `Welcome back ${fullName}! What was your score in FSc / ICS / DAE? (e.g. *890/1100* or *420/550*).`;
             } else {
               nextState = CONVERSATION_STATE.AWAITING_NAME;
               replyText = "Welcome back! Let's get your admission inquiry registered. What is your *Full Name*?";

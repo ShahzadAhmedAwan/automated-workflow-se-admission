@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import zlib from 'node:zlib';
 import './setup-test-env.js';
 
 import { MeritPolicyService } from '../src/modules/merit/services/merit-policy.service.js';
@@ -617,4 +618,164 @@ test('MeritSnapshotService: generates snapshot, enforces Super Admin lock, and e
   assert.ok(dispatchedOutbox[0].payload.messageText.includes('84.500%'));
   // Ensure no emojis in the selection notice
   assert.doesNotMatch(dispatchedOutbox[0].payload.messageText, /[\u{1F300}-\u{1F6FF}]/u);
+});
+
+test('GazetteStreamParserService: parses SEET entrance test gazette format with alphanumeric roll and CNIC', () => {
+  const seetGazetteText = `
+    UNIVERSITY OF AZAD JAMMU & KASHMIR
+    FACULTY OF ENGINEERING & TECHNOLOGY
+    STATE ENGINEERING ENTRY TEST (SEET 2026) OFFICIAL GAZETTE
+    
+    1. SEET26-P2-UAJK-19  82203-4145016-9  MUHAMMAD OSAID MIR  FAYYAZ AHMED MIR  46  PASS
+    2. SEET26-P2-UAJK-20  82101-1234567-1  SHEIKH HASEEB UR REHMAN  ABDUL REHMAN  85  PASS
+    3. 40921  82101-7654321-3  ZAINAB BIBI  68  PASS
+    4. 40922  82101-9999999-9  HAMZA TARIQ  32  FAIL
+  `;
+
+  const records = GazetteStreamParserService.parseGazetteText(seetGazetteText);
+  assert.equal(records.length, 4);
+
+  // Alphanumeric SEET roll
+  assert.equal(records[0].rollNo, 'SEET26-P2-UAJK-19');
+  assert.equal(records[0].cnic, '82203-4145016-9');
+  assert.equal(records[0].candidateName, 'MUHAMMAD OSAID MIR');
+  assert.equal(records[0].fatherName, 'FAYYAZ AHMED MIR');
+  assert.equal(records[0].marksObtained, 46);
+  assert.equal(records[0].totalMarks, 100);
+  assert.equal(records[0].status, 'PASS');
+
+  // Second SEET candidate
+  assert.equal(records[1].rollNo, 'SEET26-P2-UAJK-20');
+  assert.equal(records[1].cnic, '82101-1234567-1');
+  assert.equal(records[1].marksObtained, 85);
+  assert.equal(records[1].totalMarks, 100);
+  assert.equal(records[1].status, 'PASS');
+
+  // Numeric roll
+  assert.equal(records[2].rollNo, '40921');
+  assert.equal(records[2].marksObtained, 68);
+  assert.equal(records[2].totalMarks, 100);
+  assert.equal(records[2].status, 'PASS');
+
+  // Candidate below 40% threshold
+  assert.equal(records[3].rollNo, '40922');
+  assert.equal(records[3].marksObtained, 32);
+  assert.equal(records[3].totalMarks, 100);
+  assert.equal(records[3].status, 'FAIL');
+});
+
+test('GazetteStreamParserService.processGazetteBuffer: searches and backfills students with pending SEET scores', async () => {
+  // Construct a realistic PDF buffer in memory containing SEET test gazette lines
+  const gazetteContent = [
+    'BT /F1 12 Tf (UNIVERSITY OF AZAD JAMMU & KASHMIR - SEET 2026 GAZETTE) Tj ET',
+    'BT /F1 10 Tf (SEET26-P2-UAJK-19) Tj ( 82203-4145016-9 ) Tj (MUHAMMAD OSAID MIR) Tj ( 46 ) Tj (PASS) Tj ET',
+    'BT /F1 10 Tf (SEET26-P2-UAJK-20) Tj ( 82101-1234567-1 ) Tj (SHEIKH HASEEB UR REHMAN) Tj ( 85 ) Tj (PASS) Tj ET',
+  ].join('\n');
+
+  const compressedStream = zlib.deflateSync(Buffer.from(gazetteContent, 'latin1'));
+  const testPdf = Buffer.concat([
+    Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Page /Length ' + compressedStream.length + ' /Filter /FlateDecode >>\nstream\n'),
+    compressedStream,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+
+  const pendingStudentsList = [
+    {
+      id: 101,
+      application_no: 'APP-2026-101',
+      full_name: 'Muhammad Osaid Mir',
+      father_name: 'Fayyaz Ahmed Mir',
+      cnic: '82203-4145016-9',
+      fsc_roll_no: '540101',
+      entry_test_roll_no: 'SEET26-P2-UAJK-19',
+      entry_test_marks: null, // PENDING
+      overall_status: 'VERIFIED',
+    },
+    {
+      id: 102,
+      application_no: 'APP-2026-102',
+      full_name: 'Sheikh Haseeb Ur Rehman',
+      father_name: 'Abdul Rehman',
+      cnic: '82101-1234567-1',
+      fsc_roll_no: '540102',
+      entry_test_roll_no: null,
+      entry_test_marks: 0, // PENDING
+      overall_status: 'VERIFIED',
+    },
+    {
+      id: 103,
+      application_no: 'APP-2026-103',
+      full_name: 'Kashif Ali',
+      father_name: 'Muhammad Ali',
+      cnic: '82301-5555555-5',
+      fsc_roll_no: '540103',
+      entry_test_roll_no: null,
+      entry_test_marks: null, // PENDING - NOT in this gazette
+      overall_status: 'VERIFIED',
+    },
+  ];
+
+  const executedUpdates = [];
+  const insertedOfficial = [];
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('remainingCount')) {
+        return [[{ remainingCount: 1 }]];
+      }
+      if (sql.includes('FROM adm_students')) {
+        return [pendingStudentsList];
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('INSERT INTO mrt_official_results')) {
+        insertedOfficial.push(params);
+        return [{ insertId: insertedOfficial.length }];
+      }
+      if (sql.includes('UPDATE adm_students')) {
+        executedUpdates.push({ sql, params });
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    },
+    async getConnection() {
+      return {
+        query: mockDb.query,
+        execute: mockDb.execute,
+        async beginTransaction() {},
+        async commit() {},
+        async rollback() {},
+        release() {},
+      };
+    },
+  };
+
+  const result = await GazetteStreamParserService.processGazetteBuffer(
+    testPdf,
+    { boardOrTestName: 'UAJK_SEET_TEST', academicYear: '2026' },
+    mockDb
+  );
+
+  assert.equal(result.totalExtracted, 2);
+  assert.equal(result.matchedStudents, 2);
+  assert.equal(result.matchedPendingStudents, 2);
+  assert.equal(result.remainingPending, 1);
+  assert.equal(result.matchedDetails.length, 2);
+
+  // Student 101 update assertions
+  const update101 = executedUpdates.find((u) => u.params[2] === 101);
+  assert.ok(update101, 'Student 101 should be updated');
+  assert.equal(update101.params[0], 46); // entry_test_marks
+  assert.equal(update101.params[1], 'SEET26-P2-UAJK-19'); // entry_test_roll_no
+
+  // Student 102 update assertions
+  const update102 = executedUpdates.find((u) => u.params[2] === 102);
+  assert.ok(update102, 'Student 102 should be updated');
+  assert.equal(update102.params[0], 85); // entry_test_marks
+  assert.equal(update102.params[1], 'SEET26-P2-UAJK-20'); // entry_test_roll_no
+
+  // Student 103 was not in the gazette and must NOT be updated
+  const update103 = executedUpdates.find((u) => u.params[2] === 103);
+  assert.equal(update103, undefined, 'Student 103 was not in gazette and must remain pending');
 });

@@ -93,13 +93,13 @@ export class MeritController {
     }
   }
 
-  // Gazette PDF Ingestion
+  // SEET Gazette PDF Ingestion & Pending Score Sync
   static async uploadGazette(req, res, next) {
     try {
       if (!req.file || !req.file.buffer) {
-        return res.status(400).json({ error: 'A PDF gazette file is required under the "file" field.' });
+        return res.status(400).json({ error: 'An official SEET entrance test PDF gazette file is required under the "file" field.' });
       }
-      const { boardOrTestName = 'OFFICIAL_BOARD', academicYear = '2026' } = req.body || {};
+      const { boardOrTestName = 'UAJK_SEET_TEST', academicYear = '2026' } = req.body || {};
       const result = await GazetteStreamParserService.processGazetteBuffer(req.file.buffer, {
         boardOrTestName,
         academicYear,

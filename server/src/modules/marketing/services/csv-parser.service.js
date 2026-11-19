@@ -33,17 +33,35 @@ export function normalizePhoneNumber(raw) {
  */
 function mapHeaderToField(header) {
   const clean = String(header).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (['name', 'fullname', 'studentname', 'applicantname', 'candidate'].includes(clean)) {
+  if (['name', 'fullname', 'studentname', 'applicantname', 'candidate', 'student'].includes(clean)) {
     return 'fullName';
   }
-  if (['phone', 'phonenumber', 'contact', 'contactnumber', 'mobile', 'cell', 'whatsapp'].includes(clean)) {
+  if (['phone', 'phonenumber', 'contact', 'contactnumber', 'mobile', 'cell', 'whatsapp', 'number'].includes(clean)) {
     return 'phone';
   }
-  if (['city', 'location', 'district', 'town'].includes(clean)) {
+  if (['fathername', 'father', 'guardian', 'guardianname', 'parentname'].includes(clean)) {
+    return 'fatherName';
+  }
+  if (['cnic', 'bform', 'idcard', 'nationalid', 'identity', 'cnicno'].includes(clean)) {
+    return 'cnic';
+  }
+  if (['email', 'emailaddress', 'mail'].includes(clean)) {
+    return 'email';
+  }
+  if (['city', 'location', 'district', 'town', 'address'].includes(clean)) {
     return 'city';
   }
-  if (['priordegree', 'education', 'degree', 'qualification', 'lasteducation', 'group'].includes(clean)) {
+  if (['priordegree', 'education', 'degree', 'qualification', 'lasteducation', 'group', 'intergroup'].includes(clean)) {
     return 'priorDegree';
+  }
+  if (['fscmarks', 'marks', 'score', 'obtainedmarks', 'intermediate', 'fscscore', 'intermarks'].includes(clean)) {
+    return 'fscMarks';
+  }
+  if (['hasmaths', 'maths', 'mathematics', 'math'].includes(clean)) {
+    return 'hasMaths';
+  }
+  if (['eligiblefor', 'program', 'preferredprogram', 'desiredprogram', 'appliedfor'].includes(clean)) {
+    return 'eligibleFor';
   }
   return null;
 }
@@ -81,6 +99,25 @@ export async function parseAndPreviewLeads(inputSource, { previewLimit = 10, dbC
     const rawPhone = record.phone || '';
     const rawCity = record.city || '';
     const rawDegree = record.priorDegree || '';
+    const rawFather = record.fatherName || '';
+    const rawCnic = record.cnic ? String(record.cnic).trim() : '';
+    const rawEmail = record.email ? String(record.email).trim() : '';
+    const rawProgram = record.eligibleFor ? String(record.eligibleFor).trim() : '';
+    
+    let parsedMarks = null;
+    if (record.fscMarks !== undefined && record.fscMarks !== null && String(record.fscMarks).trim() !== '') {
+      const num = Number(record.fscMarks);
+      if (!Number.isNaN(num) && num >= 0 && num <= 1100) {
+        parsedMarks = Math.round(num);
+      }
+    }
+
+    let parsedMaths = null;
+    if (record.hasMaths !== undefined && record.hasMaths !== null && String(record.hasMaths).trim() !== '') {
+      const mStr = String(record.hasMaths).trim().toLowerCase();
+      if (['yes', 'y', 'true', '1'].includes(mStr)) parsedMaths = true;
+      else if (['no', 'n', 'false', '0'].includes(mStr)) parsedMaths = false;
+    }
 
     const normalizedPhone = normalizePhoneNumber(rawPhone);
 
@@ -89,10 +126,16 @@ export async function parseAndPreviewLeads(inputSource, { previewLimit = 10, dbC
       if (previewRows.length < previewLimit) {
         previewRows.push({
           fullName: rawName,
+          fatherName: rawFather || null,
           phoneRaw: rawPhone,
           phoneNormalized: null,
+          cnic: rawCnic || null,
+          email: rawEmail || null,
           city: rawCity,
           priorDegree: rawDegree,
+          fscMarks: parsedMarks,
+          hasMaths: parsedMaths,
+          eligibleFor: rawProgram || null,
           status: 'INVALID_PHONE',
         });
       }
@@ -104,10 +147,16 @@ export async function parseAndPreviewLeads(inputSource, { previewLimit = 10, dbC
       if (previewRows.length < previewLimit) {
         previewRows.push({
           fullName: rawName,
+          fatherName: rawFather || null,
           phoneRaw: rawPhone,
           phoneNormalized: normalizedPhone,
+          cnic: rawCnic || null,
+          email: rawEmail || null,
           city: rawCity,
           priorDegree: rawDegree,
+          fscMarks: parsedMarks,
+          hasMaths: parsedMaths,
+          eligibleFor: rawProgram || null,
           status: 'DUPLICATE_IN_FILE',
         });
       }
@@ -117,10 +166,16 @@ export async function parseAndPreviewLeads(inputSource, { previewLimit = 10, dbC
 
     const leadItem = {
       fullName: rawName,
+      fatherName: rawFather || null,
       phoneRaw: rawPhone,
       phoneNormalized: normalizedPhone,
+      cnic: rawCnic || null,
+      email: rawEmail || null,
       city: rawCity,
       priorDegree: rawDegree,
+      fscMarks: parsedMarks,
+      hasMaths: parsedMaths,
+      eligibleFor: rawProgram || null,
       status: 'VALID',
     };
 

@@ -109,18 +109,26 @@ export class CampaignService {
           values.push(
             campaignId,
             lead.fullName,
+            lead.fatherName || null,
             lead.phoneRaw,
             lead.phoneNormalized,
+            lead.cnic || null,
+            lead.email || null,
             lead.city || null,
             lead.priorDegree || null,
+            lead.fscMarks !== undefined && lead.fscMarks !== null ? lead.fscMarks : null,
+            lead.hasMaths !== undefined && lead.hasMaths !== null ? (lead.hasMaths ? 1 : 0) : null,
+            lead.eligibleFor || null,
             CONVERSATION_STATE.IDLE
           );
-          return '(?, ?, ?, ?, ?, ?, ?)';
+          return '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         });
 
         await connection.query(
-          `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, city, prior_degree, conversation_state)
-           VALUES ${placeholders.join(', ')}`,
+          `INSERT INTO mkt_leads (
+             campaign_id, full_name, father_name, phone_raw, phone_normalized,
+             cnic, email, city, prior_degree, fsc_marks, has_maths, eligible_for, conversation_state
+           ) VALUES ${placeholders.join(', ')}`,
           values
         );
         insertedCount += batch.length;
@@ -139,6 +147,325 @@ export class CampaignService {
     } finally {
       connection.release();
     }
+  }
+
+  /**
+   * List all student leads across campaigns with full profile data, filters, and linked admissions info
+   */
+  static async listLeads({ campaignId, status, conversationState, search, limit = 50, offset = 0 } = {}, db = pool) {
+    const whereClauses = [];
+    const params = [];
+
+    if (campaignId) {
+      whereClauses.push('l.campaign_id = ?');
+      params.push(Number(campaignId));
+    }
+    if (status) {
+      whereClauses.push('l.eligibility_status = ?');
+      params.push(status);
+    }
+    if (conversationState) {
+      whereClauses.push('l.conversation_state = ?');
+      params.push(conversationState);
+    }
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      whereClauses.push('(l.full_name LIKE ? OR l.father_name LIKE ? OR l.phone_normalized LIKE ? OR l.phone_raw LIKE ? OR l.cnic LIKE ? OR l.email LIKE ? OR l.city LIKE ?)');
+      params.push(q, q, q, q, q, q, q);
+    }
+
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const safeLimit = Math.max(1, Math.min(200, Math.trunc(Number(limit) || 50)));
+    const safeOffset = Math.max(0, Math.min(1_000_000, Math.trunc(Number(offset) || 0)));
+
+    const [rows] = await db.query(
+      `SELECT l.id, l.campaign_id, c.name AS campaign_name, l.full_name, l.father_name,
+              l.phone_raw, l.phone_normalized, l.cnic, l.email, l.city, l.prior_degree,
+              l.fsc_marks, l.has_maths, l.eligible_for, l.eligibility_status, l.ineligibility_reason,
+              l.conversation_state, l.last_interaction_at, l.created_at, l.updated_at,
+              s.id AS student_id, s.application_no, s.overall_status AS admissions_status
+       FROM mkt_leads l
+       LEFT JOIN mkt_campaigns c ON c.id = l.campaign_id
+       LEFT JOIN adm_students s ON (s.lead_id = l.id OR s.phone_normalized = l.phone_normalized)
+       ${whereSql}
+       ORDER BY l.id DESC
+       LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+      params
+    );
+
+    const [countRows] = await db.query(
+      `SELECT COUNT(*) AS total FROM mkt_leads l ${whereSql}`,
+      params
+    );
+
+    const [summaryRows] = await db.query(
+      `SELECT 
+         COUNT(*) AS total_leads,
+         SUM(CASE WHEN eligibility_status = 'ELIGIBLE' OR conversation_state = 'QUALIFIED' THEN 1 ELSE 0 END) AS qualified_count,
+         SUM(CASE WHEN eligibility_status = 'INELIGIBLE' OR conversation_state = 'NOT_INTERESTED' THEN 1 ELSE 0 END) AS ineligible_count,
+         SUM(CASE WHEN eligibility_status = 'PENDING' AND conversation_state != 'QUALIFIED' AND conversation_state != 'NOT_INTERESTED' THEN 1 ELSE 0 END) AS pending_count
+       FROM mkt_leads`
+    );
+
+    const summary = {
+      total: Number(summaryRows[0]?.total_leads || 0),
+      qualified: Number(summaryRows[0]?.qualified_count || 0),
+      ineligible: Number(summaryRows[0]?.ineligible_count || 0),
+      pending: Number(summaryRows[0]?.pending_count || 0),
+    };
+
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        campaignId: r.campaign_id,
+        campaignName: r.campaign_name || 'Unassigned / Direct',
+        fullName: r.full_name,
+        fatherName: r.father_name,
+        phoneRaw: r.phone_raw,
+        phoneNormalized: r.phone_normalized,
+        cnic: r.cnic,
+        email: r.email,
+        city: r.city,
+        priorDegree: r.prior_degree,
+        fscMarks: r.fsc_marks,
+        hasMaths: r.has_maths === null ? null : Boolean(r.has_maths),
+        eligibleFor: r.eligible_for,
+        eligibilityStatus: r.eligibility_status,
+        ineligibilityReason: r.ineligibility_reason,
+        conversationState: r.conversation_state,
+        lastInteractionAt: r.last_interaction_at,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        admissionsStudentId: r.student_id || null,
+        admissionsAppNo: r.application_no || null,
+        admissionsStatus: r.admissions_status || null,
+      })),
+      total: Number(countRows[0]?.total || 0),
+      limit: safeLimit,
+      offset: safeOffset,
+      summary,
+    };
+  }
+
+  /**
+   * Get single lead details with chat history
+   */
+  static async getLeadById(leadId, db = pool) {
+    const [rows] = await db.query(
+      `SELECT l.id, l.campaign_id, c.name AS campaign_name, l.full_name, l.father_name,
+              l.phone_raw, l.phone_normalized, l.cnic, l.email, l.city, l.prior_degree,
+              l.fsc_marks, l.has_maths, l.eligible_for, l.eligibility_status, l.ineligibility_reason,
+              l.conversation_state, l.chat_history, l.last_interaction_at, l.created_at, l.updated_at,
+              s.id AS student_id, s.application_no, s.overall_status AS admissions_status
+       FROM mkt_leads l
+       LEFT JOIN mkt_campaigns c ON c.id = l.campaign_id
+       LEFT JOIN adm_students s ON (s.lead_id = l.id OR s.phone_normalized = l.phone_normalized)
+       WHERE l.id = ?`,
+      [Number(leadId)]
+    );
+    if (!rows.length) {
+      throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+    }
+    const r = rows[0];
+    return {
+      id: r.id,
+      campaignId: r.campaign_id,
+      campaignName: r.campaign_name || 'Unassigned / Direct',
+      fullName: r.full_name,
+      fatherName: r.father_name,
+      phoneRaw: r.phone_raw,
+      phoneNormalized: r.phone_normalized,
+      cnic: r.cnic,
+      email: r.email,
+      city: r.city,
+      priorDegree: r.prior_degree,
+      fscMarks: r.fsc_marks,
+      hasMaths: r.has_maths === null ? null : Boolean(r.has_maths),
+      eligibleFor: r.eligible_for,
+      eligibilityStatus: r.eligibility_status,
+      ineligibilityReason: r.ineligibility_reason,
+      conversationState: r.conversation_state,
+      chatHistory: typeof r.chat_history === 'string' ? JSON.parse(r.chat_history) : r.chat_history || [],
+      lastInteractionAt: r.last_interaction_at,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      admissionsStudentId: r.student_id || null,
+      admissionsAppNo: r.application_no || null,
+      admissionsStatus: r.admissions_status || null,
+    };
+  }
+
+  /**
+   * Update student lead information from UI and sync with admissions if linked
+   */
+  static async updateLead(leadId, updates, actorId = null, db = pool) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [existing] = await connection.query(
+        `SELECT * FROM mkt_leads WHERE id = ? FOR UPDATE`,
+        [Number(leadId)]
+      );
+      if (!existing.length) {
+        throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+      }
+      const cur = existing[0];
+
+      const fields = [];
+      const values = [];
+
+      if (updates.fullName !== undefined) {
+        fields.push('full_name = ?');
+        values.push(updates.fullName);
+      }
+      if (updates.fatherName !== undefined) {
+        fields.push('father_name = ?');
+        values.push(updates.fatherName || null);
+      }
+      if (updates.phone !== undefined) {
+        const norm = normalizePhoneNumber(updates.phone);
+        if (!norm) {
+          throw new AppError(400, 'INVALID_PHONE', 'Invalid mobile phone number format.');
+        }
+        fields.push('phone_raw = ?', 'phone_normalized = ?');
+        values.push(updates.phone, norm);
+      }
+      if (updates.cnic !== undefined) {
+        fields.push('cnic = ?');
+        values.push(updates.cnic || null);
+      }
+      if (updates.email !== undefined) {
+        fields.push('email = ?');
+        values.push(updates.email || null);
+      }
+      if (updates.city !== undefined) {
+        fields.push('city = ?');
+        values.push(updates.city || null);
+      }
+      if (updates.priorDegree !== undefined) {
+        fields.push('prior_degree = ?');
+        values.push(updates.priorDegree || null);
+      }
+      if (updates.fscMarks !== undefined) {
+        fields.push('fsc_marks = ?');
+        values.push(updates.fscMarks !== null ? Number(updates.fscMarks) : null);
+      }
+      if (updates.hasMaths !== undefined) {
+        fields.push('has_maths = ?');
+        values.push(updates.hasMaths !== null ? (updates.hasMaths ? 1 : 0) : null);
+      }
+      if (updates.eligibleFor !== undefined) {
+        fields.push('eligible_for = ?');
+        values.push(updates.eligibleFor || null);
+      }
+      if (updates.eligibilityStatus !== undefined) {
+        fields.push('eligibility_status = ?');
+        values.push(updates.eligibilityStatus);
+      }
+      if (updates.ineligibilityReason !== undefined) {
+        fields.push('ineligibility_reason = ?');
+        values.push(updates.ineligibilityReason || null);
+      }
+      if (updates.conversationState !== undefined) {
+        fields.push('conversation_state = ?');
+        values.push(updates.conversationState);
+      }
+
+      if (fields.length > 0) {
+        values.push(Number(leadId));
+        await connection.query(
+          `UPDATE mkt_leads SET ${fields.join(', ')} WHERE id = ?`,
+          values
+        );
+      }
+
+      // Sync with adm_students if student record exists
+      const normPhone = updates.phone ? normalizePhoneNumber(updates.phone) : cur.phone_normalized;
+      const [studentRows] = await connection.query(
+        `SELECT id FROM adm_students WHERE lead_id = ? OR phone_normalized = ? LIMIT 1`,
+        [Number(leadId), cur.phone_normalized]
+      );
+
+      const resolvedFullName = updates.fullName !== undefined ? updates.fullName : cur.full_name;
+      const resolvedFatherName = updates.fatherName !== undefined ? updates.fatherName : cur.father_name;
+      const resolvedCnic = updates.cnic !== undefined ? updates.cnic : cur.cnic;
+      const resolvedEmail = updates.email !== undefined ? updates.email : cur.email;
+      const resolvedCity = updates.city !== undefined ? updates.city : cur.city;
+      const resolvedPriorDegree = updates.priorDegree !== undefined ? updates.priorDegree : cur.prior_degree;
+      const resolvedFscMarks = updates.fscMarks !== undefined ? updates.fscMarks : cur.fsc_marks;
+      const resolvedEligibleFor = updates.eligibleFor !== undefined ? updates.eligibleFor : cur.eligible_for;
+
+      if (studentRows.length > 0) {
+        await connection.query(
+          `UPDATE adm_students
+           SET full_name = ?,
+               father_name = COALESCE(?, father_name),
+               phone_normalized = ?,
+               cnic = COALESCE(?, cnic),
+               email = COALESCE(?, email),
+               city = COALESCE(?, city),
+               prior_degree = COALESCE(?, prior_degree),
+               eligible_for = COALESCE(?, eligible_for),
+               fsc_obtained_marks = COALESCE(?, fsc_obtained_marks)
+           WHERE id = ?`,
+          [
+            resolvedFullName,
+            resolvedFatherName,
+            normPhone,
+            resolvedCnic,
+            resolvedEmail,
+            resolvedCity,
+            resolvedPriorDegree,
+            resolvedEligibleFor,
+            resolvedFscMarks,
+            studentRows[0].id,
+          ]
+        );
+      } else if (
+        (updates.conversationState === 'QUALIFIED' || updates.eligibilityStatus === 'ELIGIBLE') &&
+        (cur.conversation_state !== 'QUALIFIED' && cur.eligibility_status !== 'ELIGIBLE')
+      ) {
+        // Auto-provision candidate record in adm_students if newly qualified
+        await connection.query(
+          `INSERT INTO adm_students
+             (lead_id, full_name, father_name, phone_normalized, cnic, email, city, prior_degree, eligible_for, fsc_obtained_marks, overall_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DOCS_REQUESTED')
+           ON DUPLICATE KEY UPDATE overall_status = VALUES(overall_status)`,
+          [
+            Number(leadId),
+            resolvedFullName,
+            resolvedFatherName,
+            normPhone,
+            resolvedCnic,
+            resolvedEmail,
+            resolvedCity,
+            resolvedPriorDegree,
+            resolvedEligibleFor,
+            resolvedFscMarks,
+          ]
+        );
+      }
+
+      await connection.commit();
+      return await CampaignService.getLeadById(leadId, db);
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  static async deleteLead(leadId, db = pool) {
+    const [result] = await db.query(
+      `DELETE FROM mkt_leads WHERE id = ?`,
+      [Number(leadId)]
+    );
+    if (!result.affectedRows) {
+      throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+    }
+    return { success: true, leadId: Number(leadId) };
   }
 
   /**

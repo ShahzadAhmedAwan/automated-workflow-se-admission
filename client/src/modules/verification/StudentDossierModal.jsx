@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
-import { Button, StatusBadge } from '../../core/ui/primitives.jsx';
+import { Button, StatusBadge, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
 import { IconDocumentCheck, IconShield } from '../../core/icons/Icons.jsx';
 
 export function StudentDossierModal({ studentId, isOpen, onClose, onActionComplete }) {
@@ -14,6 +14,11 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
   const [reviewNotes, setReviewNotes] = useState('');
   const [searchingGazetteDocId, setSearchingGazetteDocId] = useState(null);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
+
+  // Production-grade inline feedback & modal states
+  const [notice, setNotice] = useState(null); // { type: 'error' | 'success' | 'warning' | 'info', message: string, detail?: string }
+  const [confirmModal, setConfirmModal] = useState(null); // { isOpen, title, message, confirmLabel, tone, onConfirm }
+  const [promptModal, setPromptModal] = useState(null); // { isOpen, title, message, placeholder, initialValue, presets, confirmLabel, onConfirm }
 
   async function loadDossier(silent = false) {
     if (!studentId || !isOpen) return;
@@ -31,8 +36,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
       }
     } catch (err) {
       if (!silent) {
-        alert(err.message || 'Could not load student verification dossier.');
-        onClose();
+        setNotice({ type: 'error', message: 'Could not load student verification dossier.', detail: err.message });
       }
     } finally {
       if (!silent) setLoading(false);
@@ -41,16 +45,25 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
   async function handleSearchGazette(documentId) {
     setSearchingGazetteDocId(documentId);
+    setNotice(null);
     try {
       const result = await verificationApi.searchGazette(documentId);
       if (result.portalVerification?.isVerified) {
-        alert(`Gazette Match Found! Candidate Roll #${result.gazetteResult?.rollNumber}: ${result.gazetteResult?.obtainedMarks} Marks (${result.gazetteResult?.status})`);
+        setNotice({
+          type: 'success',
+          message: 'Gazette Match Found!',
+          detail: `Candidate Roll #${result.gazetteResult?.rollNumber}: ${result.gazetteResult?.obtainedMarks} Marks (${result.gazetteResult?.status})`,
+        });
       } else {
-        alert(result.portalVerification?.reason || 'Candidate roll number not found in gazette PDF.');
+        setNotice({
+          type: 'warning',
+          message: 'Gazette Search Notice',
+          detail: result.portalVerification?.reason || 'Candidate roll number not found in gazette PDF.',
+        });
       }
       await loadDossier(true);
     } catch (err) {
-      alert(err.message || 'Gazette search failed.');
+      setNotice({ type: 'error', message: 'Gazette search failed.', detail: err.message });
     } finally {
       setSearchingGazetteDocId(null);
     }
@@ -76,50 +89,63 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
   if (!isOpen) return null;
 
   async function handleApprove() {
-    if (!selectedDocumentId) return alert('Select a document to review.');
-    if (!reviewNotes.trim()) return alert('Add a short note describing the evidence you checked.');
-    if (!confirm('Record this document as verified? The candidate is marked complete only after all required documents are verified.')) return;
-    try {
-      setActionLoading(true);
-      const result = await verificationApi.executeReviewAction(studentId, {
-        action: 'APPROVE',
-        studentId,
-        documentId: Number(selectedDocumentId),
-        reviewMethod,
-        notes: reviewNotes.trim(),
-      });
-      alert(result.overall_status === 'VERIFIED'
-        ? 'Document reviewed. Candidate verification is complete.'
-        : 'Document reviewed. The candidate remains in review until all required documents are complete.');
-      onActionComplete?.();
-      onClose();
-    } catch (err) {
-      alert(err.message || 'Failed to approve candidate.');
-    } finally {
-      setActionLoading(false);
+    if (!selectedDocumentId) {
+      setNotice({ type: 'warning', message: 'Select Document', detail: 'Select a document to review before approving.' });
+      return;
     }
+    if (!reviewNotes.trim()) {
+      setNotice({ type: 'warning', message: 'Add Review Note', detail: 'Add a short note describing the evidence you checked.' });
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Approve Document Verification',
+      message: 'Record this document as officially verified? The candidate status updates to VERIFIED once all required documents are complete.',
+      confirmLabel: 'Approve Document',
+      tone: 'primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setActionLoading(true);
+          const result = await verificationApi.executeReviewAction(studentId, {
+            action: 'APPROVE',
+            studentId,
+            documentId: Number(selectedDocumentId),
+            reviewMethod,
+            notes: reviewNotes.trim(),
+          });
+          onActionComplete?.();
+          onClose();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Failed to approve candidate.', detail: err.message });
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   }
 
   async function handleOverride() {
-    if (!selectedDocumentId || !reviewNotes.trim()) return alert('Select a document and add a verification note.');
+    if (!selectedDocumentId || !reviewNotes.trim()) {
+      setNotice({ type: 'warning', message: 'Missing Information', detail: 'Select a document and add a verification note.' });
+      return;
+    }
     try {
       setActionLoading(true);
       const result = await verificationApi.executeReviewAction(studentId, {
         action: 'OVERRIDE_MARKS',
         studentId,
-          documentId: Number(selectedDocumentId),
-          reviewMethod,
+        documentId: Number(selectedDocumentId),
+        reviewMethod,
         fscObtainedMarks: overrideMarks.fsc ? Number(overrideMarks.fsc) : undefined,
         matricObtainedMarks: overrideMarks.matric ? Number(overrideMarks.matric) : undefined,
-          notes: reviewNotes.trim(),
+        notes: reviewNotes.trim(),
       });
-      alert(result.overall_status === 'VERIFIED'
-        ? 'Marks saved. Candidate verification is complete.'
-        : 'Marks saved. The candidate remains in review until all documents are complete.');
       onActionComplete?.();
       onClose();
     } catch (err) {
-      alert(err.message || 'Failed to override marks.');
+      setNotice({ type: 'error', message: 'Failed to override marks.', detail: err.message });
     } finally {
       setActionLoading(false);
     }
@@ -131,73 +157,122 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
     const label = isFsc ? 'FSc' : 'Matric';
     const currentDeclared = isFsc ? student?.fsc_obtained_marks : student?.matric_obtained_marks;
 
-    if (!confirm(`Override candidate ${label} marks from ${currentDeclared || 'unspecified'} to ${marks} as verified from ${sourceLabel}?`)) {
-      return;
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: `Apply ${label} Marks Override`,
+      message: `Override candidate declared ${label} marks from ${currentDeclared || 'unspecified'} to ${marks} as verified from ${sourceLabel}?`,
+      confirmLabel: 'Apply Score Override',
+      tone: 'primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setActionLoading(true);
+          const notes = `Adjusted ${label} marks to ${marks} as confirmed by official ${sourceLabel}`;
+          const result = await verificationApi.executeReviewAction(studentId, {
+            action: 'OVERRIDE_MARKS',
+            studentId,
+            documentId: Number(documentId),
+            reviewMethod: sourceLabel.toLowerCase().includes('gazette') ? 'STAFF_GAZETTE' : 'STAFF_DOCUMENT',
+            fscObtainedMarks: isFsc ? Number(marks) : (student?.fsc_obtained_marks ? Number(student.fsc_obtained_marks) : undefined),
+            matricObtainedMarks: !isFsc ? Number(marks) : (student?.matric_obtained_marks ? Number(student.matric_obtained_marks) : undefined),
+            notes,
+          });
 
-    try {
-      setActionLoading(true);
-      const notes = `Adjusted ${label} marks to ${marks} as confirmed by official ${sourceLabel}`;
-      const result = await verificationApi.executeReviewAction(studentId, {
-        action: 'OVERRIDE_MARKS',
-        studentId,
-        documentId: Number(documentId),
-        reviewMethod: sourceLabel.toLowerCase().includes('gazette') ? 'STAFF_GAZETTE' : 'STAFF_DOCUMENT',
-        fscObtainedMarks: isFsc ? Number(marks) : (student?.fsc_obtained_marks ? Number(student.fsc_obtained_marks) : undefined),
-        matricObtainedMarks: !isFsc ? Number(marks) : (student?.matric_obtained_marks ? Number(student.matric_obtained_marks) : undefined),
-        notes,
-      });
-
-      alert(`Candidate ${label} marks updated to ${marks} / 1100.${result.overall_status === 'VERIFIED' ? ' Candidate is officially VERIFIED.' : ''}`);
-      await loadDossier(true);
-      onActionComplete?.();
-    } catch (err) {
-      alert(err.message || 'Failed to override marks.');
-    } finally {
-      setActionLoading(false);
-    }
+          setNotice({
+            type: 'success',
+            message: `${label} Marks Updated to ${marks} / 1100`,
+            detail: result.overall_status === 'VERIFIED' ? 'Candidate is now officially VERIFIED.' : 'Updated in student dossier.',
+          });
+          await loadDossier(true);
+          onActionComplete?.();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Failed to override marks.', detail: err.message });
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   }
 
   async function handleRejectReissue() {
-    if (!selectedDocumentId) return alert('Select the document that needs a replacement.');
-    const reason = prompt('Enter the reason to send to the student:', 'The uploaded document could not be verified. Please upload a clearer copy.');
-    if (!reason) return;
-
-    try {
-      setActionLoading(true);
-      await verificationApi.executeReviewAction(studentId, {
-        action: 'REJECT_AND_REISSUE',
-        studentId,
-        documentId: Number(selectedDocumentId),
-        reviewMethod,
-        notes: reason,
-      });
-      alert('Token reissued and notification queued.');
-      onActionComplete?.();
-      onClose();
-    } catch (err) {
-      alert(err.message || 'Failed to reissue token.');
-    } finally {
-      setActionLoading(false);
+    if (!selectedDocumentId) {
+      setNotice({ type: 'warning', message: 'Select Document', detail: 'Select the document that needs a replacement upload.' });
+      return;
     }
 
+    setPromptModal({
+      isOpen: true,
+      title: 'Reject Document & Reissue Upload Link',
+      message: 'Enter the exact reason to be sent to the applicant via automated WhatsApp/SMS notification:',
+      placeholder: 'e.g. Uploaded document scan is blurry or unreadable. Please upload a clear photo or PDF scan.',
+      initialValue: 'The uploaded document could not be verified. Please upload a clearer copy.',
+      confirmLabel: 'Send Rejection & Reissue Link',
+      presets: [
+        'Blurry or unreadable photo/scan',
+        'Wrong document type uploaded',
+        'Missing board seal or controller signature',
+        'FSc Part-I result card instead of Complete Certificate',
+      ],
+      onConfirm: async (reason) => {
+        setPromptModal(null);
+        try {
+          setActionLoading(true);
+          await verificationApi.executeReviewAction(studentId, {
+            action: 'REJECT_AND_REISSUE',
+            studentId,
+            documentId: Number(selectedDocumentId),
+            reviewMethod,
+            notes: reason,
+          });
+          onActionComplete?.();
+          onClose();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Failed to reissue token.', detail: err.message });
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   }
 
   async function handleMarkDiscrepancy() {
-    if (!selectedDocumentId) return alert('Select a document to review.');
-    const discrepancyReason = prompt('Describe the discrepancy for the review record:');
-    if (!discrepancyReason?.trim()) return;
-    try {
-      setActionLoading(true);
-      await verificationApi.executeReviewAction(studentId, { action: 'MARK_DISCREPANCY', studentId, documentId: Number(selectedDocumentId), reviewMethod, discrepancyReason: discrepancyReason.trim() });
-      alert('Discrepancy recorded for staff review.');
-      onActionComplete?.();
-      onClose();
-    } catch (err) {
-      alert(err.message || 'Failed to record discrepancy.');
-    } finally {
-      setActionLoading(false);
+    if (!selectedDocumentId) {
+      setNotice({ type: 'warning', message: 'Select Document', detail: 'Select a document to review.' });
+      return;
     }
+
+    setPromptModal({
+      isOpen: true,
+      title: 'Record Audit Discrepancy',
+      message: 'Describe the discrepancy for the staff review record:',
+      placeholder: 'e.g. Declared FSc marks do not match marksheet score.',
+      initialValue: '',
+      confirmLabel: 'Record Discrepancy',
+      presets: [
+        'Candidate declared score does not match uploaded transcript',
+        'Name spelling mismatch between CNIC and Board Marksheet',
+        'Roll number could not be found in board records',
+      ],
+      onConfirm: async (discrepancyReason) => {
+        setPromptModal(null);
+        try {
+          setActionLoading(true);
+          await verificationApi.executeReviewAction(studentId, {
+            action: 'MARK_DISCREPANCY',
+            studentId,
+            documentId: Number(selectedDocumentId),
+            reviewMethod,
+            discrepancyReason: discrepancyReason.trim(),
+          });
+          onActionComplete?.();
+          onClose();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Failed to record discrepancy.', detail: err.message });
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   }
 
   const student = dossier?.student;
@@ -215,7 +290,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       tab?.close();
-      alert(error.message || 'Could not open the board gazette.');
+      setNotice({ type: 'error', message: 'Could not open board gazette.', detail: error.message });
     }
   }
 
@@ -230,13 +305,13 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
       window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
     } catch (error) {
       tab?.close();
-      alert(error.message || 'Could not open the candidate document.');
+      setNotice({ type: 'error', message: 'Could not open candidate document.', detail: error.message });
     }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs">
-      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+      <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -275,6 +350,12 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-6">
+          {notice && (
+            <div className="mb-4">
+              <ToastBanner notice={notice} onDismiss={() => setNotice(null)} />
+            </div>
+          )}
+
           {loading ? (
             <div className="grid place-content-center py-16 text-slate-400">
               <span className="mx-auto size-7 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
@@ -317,6 +398,64 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                   </div>
                 )}
               </div>
+
+              {/* Merit Engine Gatekeeping & Mandatory Documents Checklist */}
+              {(() => {
+                const mandatoryDocsConfig = [
+                  { type: 'CNIC_FRONT', label: 'CNIC Front / B-Form' },
+                  { type: 'FSC_MARKSHEET', label: 'FSc / HSSC Marksheet' },
+                  { type: 'MATRIC_MARKSHEET', label: 'Matric / SSC Marksheet' },
+                ];
+                const matchedDocTypes = new Set(
+                  documents
+                    .filter((d) => d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED')
+                    .map((d) => d.doc_type)
+                );
+                const isCandidateOverallVerified = student?.overall_status === 'VERIFIED';
+
+                return (
+                  <div className={`rounded-xl p-4 text-xs border ${
+                    isCandidateOverallVerified
+                      ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
+                      : 'border-amber-200 bg-amber-50/70 text-amber-900'
+                  }`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-bold flex items-center gap-1.5">
+                        {isCandidateOverallVerified ? '✓ Qualified for Module 4 Merit Calculations' : '⚠ Action Required for Module 4 Merit Ranking'}
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        isCandidateOverallVerified ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        Overall Status: {student?.overall_status}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 mb-2.5 text-[11px] leading-relaxed">
+                      {isCandidateOverallVerified
+                        ? 'All 3 mandatory admission documents have been verified. This candidate is officially verified and actively included in Module 4 Merit Engine calculations.'
+                        : 'Module 4 (Merit Engine) strictly calculates candidates whose overall status is VERIFIED. All 3 mandatory documents below must be verified before the candidate enters Module 4 rankings:'}
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200/60">
+                      {mandatoryDocsConfig.map((m) => {
+                        const isDone = matchedDocTypes.has(m.type);
+                        return (
+                          <span
+                            key={m.type}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-semibold border ${
+                              isDone
+                                ? 'border-emerald-200 bg-white text-emerald-800 shadow-2xs'
+                                : 'border-amber-300 bg-white text-amber-900 shadow-2xs'
+                            }`}
+                          >
+                            <span>{isDone ? '✓' : '○'}</span>
+                            <span>{m.label}</span>
+                            <span className="text-[10px] opacity-75">({isDone ? 'Verified' : 'Pending'})</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
               {student?.verified_by_name && (
                 <p className="m-0 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                   Verified by <strong>{student.verified_by_name}</strong>
@@ -326,9 +465,23 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
               {/* Discrepancy Note banner if any */}
               {student?.discrepancy_notes && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900">
-                  <strong className="font-semibold">Audit Discrepancy History:</strong>
-                  <pre className="mt-1 whitespace-pre-wrap font-sans text-[11px] text-amber-800">{student.discrepancy_notes}</pre>
+                <div
+                  className={`rounded-lg p-3 text-xs ${
+                    student?.overall_status === 'VERIFIED'
+                      ? 'border border-slate-200 bg-slate-50 text-slate-700'
+                      : 'border border-amber-200 bg-amber-50/60 text-amber-900'
+                  }`}
+                >
+                  <strong className="font-semibold">
+                    {student?.overall_status === 'VERIFIED' ? 'Historical Audit Log (Staff Resolved):' : 'Audit Discrepancy History:'}
+                  </strong>
+                  <pre
+                    className={`mt-1 whitespace-pre-wrap font-sans text-[11px] ${
+                      student?.overall_status === 'VERIFIED' ? 'text-slate-600' : 'text-amber-800'
+                    }`}
+                  >
+                    {student.discrepancy_notes}
+                  </pre>
                 </div>
               )}
 
@@ -943,6 +1096,36 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
           </div>
         </div>
       </div>
+
+      {/* Production Confirm Dialog */}
+      {confirmModal && (
+        <ConfirmDialog
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel={confirmModal.confirmLabel}
+          tone={confirmModal.tone}
+          loading={actionLoading}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
+
+      {/* Production Prompt Dialog */}
+      {promptModal && (
+        <PromptDialog
+          isOpen={promptModal.isOpen}
+          title={promptModal.title}
+          message={promptModal.message}
+          placeholder={promptModal.placeholder}
+          initialValue={promptModal.initialValue}
+          confirmLabel={promptModal.confirmLabel}
+          presets={promptModal.presets}
+          loading={actionLoading}
+          onConfirm={promptModal.onConfirm}
+          onCancel={() => setPromptModal(null)}
+        />
+      )}
     </div>
   );
 }

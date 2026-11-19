@@ -1,11 +1,14 @@
 import { pool } from '../../../core/db/pool.js';
 import { AppError } from '../../../core/errors/app-error.js';
+import { ensureMeritSchema } from './merit-schema.service.js';
 
 export class MeritPolicyService {
   /**
    * Retrieves the currently active policy for a program (default: 'SE')
    */
   static async getActivePolicy(programCode = 'SE', db = pool) {
+    await ensureMeritSchema(db);
+
     const [rows] = await db.query(
       `SELECT id, name, version, is_active, program_code, matric_weightage, fsc_weightage,
               entry_test_weightage, tie_breaker_rules, quota_definitions, created_by, created_at, updated_at
@@ -39,6 +42,8 @@ export class MeritPolicyService {
    * List all policies
    */
   static async listPolicies(db = pool) {
+    await ensureMeritSchema(db);
+
     const [rows] = await db.query(
       `SELECT id, name, version, is_active, program_code, matric_weightage, fsc_weightage,
               entry_test_weightage, tie_breaker_rules, quota_definitions, created_by, created_at, updated_at
@@ -53,6 +58,8 @@ export class MeritPolicyService {
    * Get single policy by ID
    */
   static async getPolicyById(policyId, db = pool) {
+    await ensureMeritSchema(db);
+
     const [rows] = await db.query(
       `SELECT id, name, version, is_active, program_code, matric_weightage, fsc_weightage,
               entry_test_weightage, tie_breaker_rules, quota_definitions, created_by, created_at, updated_at

@@ -28,6 +28,7 @@ export const verificationApi = {
   async fetchReviewQueue(params = {}) {
     const query = new URLSearchParams();
     if (params.status) query.set('status', params.status);
+    if (params.search) query.set('search', params.search);
     if (params.limit) query.set('limit', params.limit);
     if (params.offset) query.set('offset', params.offset);
 

@@ -1,24 +1,33 @@
+import { useState, useEffect } from 'react';
+import { IconClose, IconAlertTriangle, IconCheck } from '../icons/Icons.jsx';
+
 const buttonVariants = {
-  primary: 'border border-transparent bg-blue-700 text-white hover:bg-blue-800',
-  subtle: 'border border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800',
+  primary: 'border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-2xs hover:shadow-xs active:scale-[0.99]',
+  subtle: 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shadow-2xs active:scale-[0.99]',
+  danger: 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 active:scale-[0.99]',
+  success: 'border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs active:scale-[0.99]',
 };
 
 const buttonSizes = {
-  sm: 'min-h-8 px-3 text-[11px]',
-  md: 'min-h-10 px-4 text-xs',
+  sm: 'min-h-8 px-3 text-[11px] rounded-lg',
+  md: 'min-h-9 px-4 text-xs rounded-lg',
+  lg: 'min-h-11 px-5 text-sm rounded-xl',
 };
 
 const badgeTones = {
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  neutral: 'border-slate-200 bg-slate-100 text-slate-600',
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  neutral: 'border-slate-200 bg-slate-100 text-slate-700',
   danger: 'border-rose-200 bg-rose-50 text-rose-700',
+  warning: 'border-amber-200 bg-amber-50 text-amber-900',
+  info: 'border-blue-200 bg-blue-50 text-blue-800',
+  indigo: 'border-indigo-200 bg-indigo-50 text-indigo-800',
 };
 
 export function Button({ variant = 'primary', size = 'md', className = '', type = 'button', children, ...props }) {
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:cursor-wait disabled:opacity-60 ${buttonVariants[variant] || buttonVariants.primary} ${buttonSizes[size] || buttonSizes.md} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 font-semibold transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer ${buttonVariants[variant] || buttonVariants.primary} ${buttonSizes[size] || buttonSizes.md} ${className}`}
       {...props}
     >
       {children}
@@ -28,7 +37,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
 
 export function SectionTabs({ tabs, value, onChange, label }) {
   return (
-    <nav className="flex gap-7 overflow-x-auto border-b border-slate-200" role="tablist" aria-label={label}>
+    <nav className="flex gap-6 overflow-x-auto border-b border-slate-200 scrollbar-none" role="tablist" aria-label={label}>
       {tabs.map((tab) => {
         const active = value === tab.id;
         return (
@@ -38,9 +47,14 @@ export function SectionTabs({ tabs, value, onChange, label }) {
             role="tab"
             aria-selected={active}
             onClick={() => onChange(tab.id)}
-            className={`min-h-12 shrink-0 border-b-2 px-1 text-[13px] transition-colors ${active ? 'border-blue-600 font-semibold text-blue-800' : 'border-transparent font-medium text-slate-500 hover:text-slate-800'}`}
+            className={`relative min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-all duration-150 cursor-pointer ${active ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
           >
-            {tab.label}
+            <span>{tab.label}</span>
+            {tab.count !== undefined && (
+              <span className={`ml-2 rounded-full px-1.5 py-0.2 text-[10px] font-bold ${active ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                {tab.count}
+              </span>
+            )}
           </button>
         );
       })}
@@ -49,13 +63,29 @@ export function SectionTabs({ tabs, value, onChange, label }) {
 }
 
 export function MetricStrip({ items, label }) {
+  const colClass = items.length === 4
+    ? 'grid-cols-2 lg:grid-cols-4'
+    : items.length === 2
+      ? 'grid-cols-1 sm:grid-cols-2'
+      : 'grid-cols-1 sm:grid-cols-3';
+
+  const getToneClass = (tone) => {
+    switch (tone) {
+      case 'blue': return 'text-blue-700';
+      case 'amber': return 'text-amber-600';
+      case 'rose': return 'text-rose-600';
+      case 'emerald': return 'text-emerald-700';
+      default: return 'text-slate-900';
+    }
+  };
+
   return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_2px_8px_rgba(20,30,50,0.035)]" aria-label={label}>
-      <div className="grid grid-cols-1 divide-y divide-slate-100 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+    <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs" aria-label={label}>
+      <div className={`grid ${colClass} divide-y divide-slate-100 sm:divide-x sm:divide-y-0`}>
         {items.map((item) => (
-          <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-3.5 sm:min-h-[76px] sm:px-6">
+          <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-4 sm:min-h-[74px] sm:px-6">
             <span className="text-xs font-medium text-slate-600">{item.label}</span>
-            <strong className={`text-[23px] font-semibold leading-none tracking-[-.035em] tabular-nums ${item.tone === 'blue' ? 'text-blue-700' : 'text-slate-900'}`}>
+            <strong className={`text-2xl font-bold leading-none tracking-tight tabular-nums ${getToneClass(item.tone)}`}>
               {item.value}
             </strong>
           </div>
@@ -67,11 +97,11 @@ export function MetricStrip({ items, label }) {
 
 export function WorkspacePanel({ title, description, actions, children, className = '' }) {
   return (
-    <section className={`min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_2px_8px_rgba(20,30,50,0.04)] ${className}`}>
-      <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+    <section className={`min-w-0 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs ${className}`}>
+      <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 sm:px-6 bg-slate-50/40">
         <div className="min-w-0">
-          <h2 className="m-0 text-[15px] font-semibold tracking-[-.01em] text-slate-900">{title}</h2>
-          {description && <p className="mb-0 mt-1 text-xs text-slate-500">{description}</p>}
+          <h2 className="m-0 text-sm font-semibold text-slate-900">{title}</h2>
+          {description && <p className="mb-0 mt-0.5 text-xs text-slate-500">{description}</p>}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </header>
@@ -109,5 +139,210 @@ export function StatusBadge({ tone = 'neutral', children, className = '' }) {
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-bold leading-none ${badgeTones[tone] || badgeTones.neutral} ${className}`}>
       {children}
     </span>
+  );
+}
+
+/**
+ * Production-grade alert and toast banner.
+ */
+export function ToastBanner({ notice, onDismiss }) {
+  if (!notice || !notice.message) return null;
+
+  const styles = {
+    error: 'border-rose-200 bg-rose-50 text-rose-800',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-900',
+    info: 'border-blue-200 bg-blue-50 text-blue-900',
+  };
+
+  const currentStyle = styles[notice.type] || styles.info;
+
+  return (
+    <div className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-xs shadow-xs transition-all ${currentStyle}`}>
+      <div className="flex items-start gap-2.5">
+        {notice.type === 'error' || notice.type === 'warning' ? (
+          <IconAlertTriangle className="size-4 shrink-0 mt-0.5" />
+        ) : notice.type === 'success' ? (
+          <IconCheck className="size-4 shrink-0 mt-0.5 text-emerald-600" />
+        ) : (
+          <span className="size-2 rounded-full bg-blue-500 shrink-0 mt-1.5" />
+        )}
+        <div className="space-y-0.5">
+          <div className="font-semibold">{notice.message}</div>
+          {notice.detail && <div className="text-[11px] opacity-90">{notice.detail}</div>}
+        </div>
+      </div>
+      {onDismiss && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="shrink-0 p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+          aria-label="Dismiss alert"
+        >
+          <IconClose className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Production-grade modal confirmation dialog replacing window.confirm().
+ */
+export function ConfirmDialog({
+  isOpen,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  tone = 'danger',
+  onConfirm,
+  onCancel,
+  loading = false,
+  children,
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
+        <div className="flex items-center gap-3">
+          <span
+            className={`grid size-10 shrink-0 place-items-center rounded-xl ${
+              tone === 'danger'
+                ? 'bg-rose-100 text-rose-700'
+                : tone === 'warning'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-blue-100 text-blue-700'
+            }`}
+          >
+            <IconAlertTriangle className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-slate-900 leading-snug">{title}</h3>
+            {message && <p className="text-xs text-slate-500 mt-1">{message}</p>}
+          </div>
+        </div>
+
+        {children && <div className="text-xs text-slate-600">{children}</div>}
+
+        <div className="pt-2 flex justify-end gap-2.5 border-t border-slate-100">
+          <Button variant="subtle" size="sm" onClick={onCancel} disabled={loading}>
+            {cancelLabel}
+          </Button>
+          <Button
+            variant={tone === 'danger' ? 'danger' : 'primary'}
+            size="sm"
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? 'Processing…' : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Production-grade input prompt dialog replacing window.prompt().
+ */
+export function PromptDialog({
+  isOpen,
+  title,
+  message,
+  placeholder = '',
+  initialValue = '',
+  confirmLabel = 'Submit',
+  cancelLabel = 'Cancel',
+  presets = [],
+  onConfirm,
+  onCancel,
+  loading = false,
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [validationError, setValidationError] = useState('');
+
+  useEffect(() => {
+    setValue(initialValue);
+    setValidationError('');
+  }, [isOpen, initialValue]);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e) => {
+    e?.preventDefault();
+    if (!value.trim()) {
+      setValidationError('Please provide a response before submitting.');
+      return;
+    }
+    onConfirm(value.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h3 className="text-sm font-bold text-slate-900 leading-snug">{title}</h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+          >
+            <IconClose className="size-4" />
+          </button>
+        </div>
+
+        {message && <p className="text-xs text-slate-600 leading-relaxed">{message}</p>}
+
+        {presets.length > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Quick Suggestions:</span>
+            <div className="flex flex-wrap gap-1.5">
+              {presets.map((preset, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setValue(preset);
+                    setValidationError('');
+                  }}
+                  className="rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700 transition cursor-pointer"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <textarea
+            required
+            rows={3}
+            placeholder={placeholder}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (validationError) setValidationError('');
+            }}
+            className="w-full rounded-lg border border-slate-300 p-3 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+          />
+
+          {validationError && (
+            <p className="text-xs text-rose-600 font-semibold">{validationError}</p>
+          )}
+
+          <div className="pt-2 flex justify-end gap-2.5 border-t border-slate-100">
+            <Button variant="subtle" size="sm" onClick={onCancel} disabled={loading}>
+              {cancelLabel}
+            </Button>
+            <Button variant="primary" size="sm" type="submit" disabled={loading || !value.trim()}>
+              {loading ? 'Submitting…' : confirmLabel}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

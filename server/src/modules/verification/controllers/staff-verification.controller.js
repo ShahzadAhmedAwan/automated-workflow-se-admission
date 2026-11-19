@@ -89,8 +89,8 @@ export class StaffVerificationController {
    */
   static async listReviewQueue(req, res, next) {
     try {
-      const { limit = 50, offset = 0, status } = req.query;
-      const queue = await AdmissionIntakeService.listManualReviewQueue({ limit, offset, status });
+      const { limit = 50, offset = 0, status, search } = req.query;
+      const queue = await AdmissionIntakeService.listManualReviewQueue({ limit, offset, status, search });
       res.json({ status: 'success', data: queue });
     } catch (err) {
       next(err);

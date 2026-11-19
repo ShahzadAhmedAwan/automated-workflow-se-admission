@@ -395,6 +395,87 @@ test('MeritEngineService: Strict Gatekeeping (only VERIFIED candidates calculate
   assert.equal(calc.entries[0].decisionStatus, DECISION_STATUS.SELECTED);
 });
 
+test('MeritEngineService: candidate without SEET test or below 40% cutoff remains WAITLISTED', async () => {
+  const pendingTestStudent = {
+    id: 5,
+    application_no: 'APP-05',
+    full_name: 'Sheikh Haseeb Ur Rehman',
+    matric_obtained_marks: 616,
+    matric_total_marks: 1100,
+    fsc_obtained_marks: 740,
+    fsc_total_marks: 1100,
+    entry_test_marks: 0,
+    entry_test_total: 100,
+    overall_status: 'VERIFIED',
+  };
+
+  const mockDbPending = {
+    async query(sql) {
+      if (sql.includes('FROM mrt_policies')) {
+        return [[
+          {
+            id: 1,
+            name: 'B.Sc. Software Engineering - Fall 2026',
+            version: '1.0',
+            is_active: 1,
+            program_code: 'SE',
+            matric_weightage: 10.00,
+            fsc_weightage: 40.00,
+            entry_test_weightage: 50.00,
+            tie_breaker_rules: JSON.stringify(['ENTRY_TEST', 'FSC', 'MATRIC', 'AGE']),
+            quota_definitions: JSON.stringify([
+              { code: 'OPEN_MERIT', title: 'Open Merit', seats: 70 },
+            ]),
+          },
+        ]];
+      }
+      return [[pendingTestStudent]];
+    },
+  };
+
+  const calcPending = await MeritEngineService.runCalculation({ policyId: 1 }, mockDbPending);
+  assert.equal(calcPending.totalCandidates, 1);
+  assert.equal(calcPending.selectedCount, 0);
+  assert.equal(calcPending.waitlistedCount, 1);
+  assert.equal(calcPending.entries[0].decisionStatus, DECISION_STATUS.WAITLISTED);
+  assert.equal(calcPending.entries[0].ineligibilityReason, 'SEET entry test score pending / unrecorded');
+
+  // Once SEET score is scraped (e.g. 65 / 100)
+  const scrapedStudent = {
+    ...pendingTestStudent,
+    entry_test_marks: 65,
+  };
+  const mockDbScraped = {
+    async query(sql) {
+      if (sql.includes('FROM mrt_policies')) {
+        return [[
+          {
+            id: 1,
+            name: 'B.Sc. Software Engineering - Fall 2026',
+            version: '1.0',
+            is_active: 1,
+            program_code: 'SE',
+            matric_weightage: 10.00,
+            fsc_weightage: 40.00,
+            entry_test_weightage: 50.00,
+            tie_breaker_rules: JSON.stringify(['ENTRY_TEST', 'FSC', 'MATRIC', 'AGE']),
+            quota_definitions: JSON.stringify([
+              { code: 'OPEN_MERIT', title: 'Open Merit', seats: 70 },
+            ]),
+          },
+        ]];
+      }
+      return [[scrapedStudent]];
+    },
+  };
+
+  const calcScraped = await MeritEngineService.runCalculation({ policyId: 1 }, mockDbScraped);
+  assert.equal(calcScraped.selectedCount, 1);
+  assert.equal(calcScraped.waitlistedCount, 0);
+  assert.equal(calcScraped.entries[0].decisionStatus, DECISION_STATUS.SELECTED);
+  assert.ok(calcScraped.entries[0].aggregateScore >= 40.0);
+});
+
 test('MeritSnapshotService: generates snapshot, enforces Super Admin lock, and exports CSV', async () => {
   const mockEntries = [
     {

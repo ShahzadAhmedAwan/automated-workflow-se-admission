@@ -19,6 +19,38 @@ export const marketingApi = {
     return res.data;
   },
 
+  async listLeads({ campaignId, status, conversationState, search, limit = 50, offset = 0 } = {}) {
+    const params = new URLSearchParams();
+    if (campaignId) params.append('campaignId', campaignId);
+    if (status) params.append('status', status);
+    if (conversationState) params.append('conversationState', conversationState);
+    if (search) params.append('search', search);
+    params.append('limit', limit);
+    params.append('offset', offset);
+    const res = await apiRequest(`/marketing/leads?${params.toString()}`, {}, true);
+    return res.data;
+  },
+
+  async getLead(id) {
+    const res = await apiRequest(`/marketing/leads/${id}`, {}, true);
+    return res.data;
+  },
+
+  async updateLead(id, updates) {
+    const res = await apiRequest(`/marketing/leads/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }, true);
+    return res.data;
+  },
+
+  async deleteLead(id) {
+    const res = await apiRequest(`/marketing/leads/${id}`, {
+      method: 'DELETE',
+    }, true);
+    return res.data;
+  },
+
   async previewCsv(file) {
     const formData = new FormData();
     formData.append('file', file);

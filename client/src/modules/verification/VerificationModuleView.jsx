@@ -1,23 +1,46 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { StudentDossierModal } from './StudentDossierModal.jsx';
-import { Button, StatusBadge } from '../../core/ui/primitives.jsx';
-import { IconDocumentCheck } from '../../core/icons/Icons.jsx';
+import { Button, StatusBadge, MetricStrip, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
+import {
+  IconDocumentCheck,
+  IconSearch,
+  IconRefresh,
+  IconAlertTriangle,
+  IconCheck,
+  IconPencil,
+  IconSend,
+  IconUsers,
+} from '../../core/icons/Icons.jsx';
 import { useAuth } from '../auth/AuthProvider.jsx';
 import { BoardSourcesPanel } from './BoardSourcesPanel.jsx';
 
 export function VerificationModuleView() {
   const { user } = useAuth();
   const canManageSources = user?.permissions?.includes('verification.sources.manage');
-  const [activeTab, setActiveTab] = useState('queue'); // 'queue', 'import', 'reissue'
+  const [activeTab, setActiveTab] = useState('queue'); // 'queue', 'import', 'reissue', 'sources'
   const [queue, setQueue] = useState([]);
-  const [queueSummary, setQueueSummary] = useState({ NEEDS_MANUAL_REVIEW: 0, UNDER_REVIEW: 0, DOCS_REQUESTED: 0, VERIFIED: 0 });
+  const [queueSummary, setQueueSummary] = useState({
+    NEEDS_MANUAL_REVIEW: 0,
+    UNDER_REVIEW: 0,
+    DOCS_REQUESTED: 0,
+    VERIFIED: 0,
+    PROBLEMS_ONLY: 0,
+  });
   const [queueTotal, setQueueTotal] = useState(0);
   const [queuePage, setQueuePage] = useState(0);
-  const pageSize = 25;
+  const pageSize = 20;
   const [loading, setLoading] = useState(false);
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState(''); // Default to All candidates for clean overview
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState(null);
+  const [expandedDocs, setExpandedDocs] = useState({});
+  const [density, setDensity] = useState('compact'); // Default to clean compact table
+
+  // Production-grade feedback and dialog states
+  const [notice, setNotice] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
+  const [promptModal, setPromptModal] = useState(null);
 
   // Import State
   const [importFile, setImportFile] = useState(null);
@@ -33,7 +56,6 @@ export function VerificationModuleView() {
   const [reissueResult, setReissueResult] = useState(null);
   const [reissuing, setReissuing] = useState(false);
   const [autoDispatching, setAutoDispatching] = useState(false);
-  const [autoDispatchResult, setAutoDispatchResult] = useState(null);
 
   const selectedCandidate = queue.find(
     (c) => String(c.studentId) === String(reissueForm.studentId) || (c.leadId && String(c.leadId) === String(reissueForm.studentId))
@@ -46,14 +68,27 @@ export function VerificationModuleView() {
   async function loadQueue() {
     try {
       setLoading(true);
-      const data = await verificationApi.fetchReviewQueue({ status: filterStatus || undefined, limit: pageSize, offset: queuePage * pageSize });
+      const data = await verificationApi.fetchReviewQueue({
+        status: filterStatus || undefined,
+        search: searchQuery.trim() || undefined,
+        limit: pageSize,
+        offset: queuePage * pageSize,
+      });
       const lastPage = Math.max(0, Math.ceil((data.total || 0) / pageSize) - 1);
       if (queuePage > lastPage) {
         setQueuePage(lastPage);
         return;
       }
       setQueue(data.items || []);
-      setQueueSummary(data.summary || { NEEDS_MANUAL_REVIEW: 0, UNDER_REVIEW: 0, DOCS_REQUESTED: 0, VERIFIED: 0 });
+      setQueueSummary(
+        data.summary || {
+          NEEDS_MANUAL_REVIEW: 0,
+          UNDER_REVIEW: 0,
+          DOCS_REQUESTED: 0,
+          VERIFIED: 0,
+          PROBLEMS_ONLY: 0,
+        }
+      );
       setQueueTotal(data.total || 0);
     } catch (err) {
       console.error('Failed to load verification queue:', err);
@@ -62,16 +97,43 @@ export function VerificationModuleView() {
     }
   }
 
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    setQueuePage(0);
+    loadQueue();
+  }
+
+  function toggleDocExpand(studentId) {
+    setExpandedDocs((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
+  }
+
   async function handleEditPhone(studentId, currentPhone) {
-    const newPhone = prompt('Enter candidate mobile phone number (e.g. 923001234567 or 03001234567):', currentPhone);
-    if (!newPhone || newPhone.trim() === currentPhone) return;
-    try {
-      await verificationApi.updatePhone(studentId, newPhone.trim());
-      alert('Phone number updated successfully.');
-      loadQueue();
-    } catch (err) {
-      alert(err.message || 'Failed to update phone number.');
-    }
+    setPromptModal({
+      isOpen: true,
+      title: 'Update Candidate Contact Number',
+      message: 'Enter verified WhatsApp mobile phone number for applicant communications:',
+      placeholder: 'e.g. 03001234567 or 923001234567',
+      initialValue: currentPhone || '',
+      confirmLabel: 'Save Phone Number',
+      onConfirm: async (newPhone) => {
+        setPromptModal(null);
+        if (!newPhone || newPhone.trim() === currentPhone) return;
+        try {
+          await verificationApi.updatePhone(studentId, newPhone.trim());
+          setNotice({
+            type: 'success',
+            message: 'Phone Number Updated',
+            detail: `Synchronized candidate phone to ${newPhone.trim()}`,
+          });
+          loadQueue();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Failed to update phone number.', detail: err.message });
+        }
+      },
+    });
   }
 
   async function handleQuickGenerateToken(student) {
@@ -87,35 +149,42 @@ export function VerificationModuleView() {
         expiresInHours: 48,
       });
       navigator.clipboard.writeText(res.uploadUrl);
-      alert(`Document upload link generated for (${missingDocs.join(', ')}):\n${res.uploadUrl}\n\n(Copied to clipboard and dispatched to applicant)`);
+      setNotice({
+        type: 'success',
+        message: 'Upload Link Generated & Copied to Clipboard!',
+        detail: `Generated token for (${missingDocs.join(', ')}). URL: ${res.uploadUrl}`,
+      });
       loadQueue();
     } catch (err) {
-      alert(err.message || 'Failed to generate token.');
+      setNotice({ type: 'error', message: 'Failed to generate token.', detail: err.message });
     }
   }
 
   async function handleAutoDispatchMissing() {
-    const confirmed = window.confirm(
-      'Dispatch document upload requests to all candidates with pending mandatory documents?\n\n' +
-      'Process overview:\n' +
-      '1. Identify candidates with incomplete or unverified documents.\n' +
-      '2. Generate secure single-use intake tokens for their pending documents.\n' +
-      '3. Transmit the personalized link to each candidate via WhatsApp.'
-    );
-    if (!confirmed) return;
-
-    try {
-      setAutoDispatching(true);
-      setAutoDispatchResult(null);
-      const res = await verificationApi.autoDispatchMissing({ expiresInHours: 48 });
-      setAutoDispatchResult(res);
-      alert(`Batch dispatch complete. Requests sent to ${res.dispatched} candidate(s).`);
-      loadQueue();
-    } catch (err) {
-      alert(err.message || 'Batch request dispatch failed.');
-    } finally {
-      setAutoDispatching(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Batch Dispatch Document Upload Requests',
+      message: 'Dispatch document upload requests to all candidates with pending mandatory documents? Single-use secure upload tokens will be created and sent via automated WhatsApp outreach.',
+      confirmLabel: 'Dispatch Batch Requests',
+      tone: 'primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          setAutoDispatching(true);
+          const res = await verificationApi.autoDispatchMissing({ expiresInHours: 48 });
+          setNotice({
+            type: 'success',
+            message: 'Batch Dispatch Complete',
+            detail: `Requests sent to ${res.dispatched} candidate(s) with pending documents.`,
+          });
+          loadQueue();
+        } catch (err) {
+          setNotice({ type: 'error', message: 'Batch request dispatch failed.', detail: err.message });
+        } finally {
+          setAutoDispatching(false);
+        }
+      },
+    });
   }
 
   async function handleImportSubmit(e) {
@@ -128,8 +197,14 @@ export function VerificationModuleView() {
       const res = await verificationApi.importDiscrepancyCsv(importFile);
       setImportResult(res);
       setImportFile(null);
+      setNotice({
+        type: 'success',
+        message: 'Discrepancy CSV Imported Successfully',
+        detail: `Processed discrepancy records from file.`,
+      });
+      loadQueue();
     } catch (err) {
-      alert(err.message || 'Discrepancy import failed.');
+      setNotice({ type: 'error', message: 'Discrepancy import failed.', detail: err.message });
     } finally {
       setImporting(false);
     }
@@ -148,8 +223,14 @@ export function VerificationModuleView() {
         expiresInHours: Number(reissueForm.expiresInHours) || 48,
       });
       setReissueResult(res);
+      setNotice({
+        type: 'success',
+        message: 'Upload Link Reissued',
+        detail: `Link generated for candidate #${res.studentId || reissueForm.studentId}.`,
+      });
+      loadQueue();
     } catch (err) {
-      alert(err.message || 'Token reissue failed.');
+      setNotice({ type: 'error', message: 'Token reissue failed.', detail: err.message });
     } finally {
       setReissuing(false);
     }
@@ -157,30 +238,52 @@ export function VerificationModuleView() {
 
   const totalPages = Math.max(1, Math.ceil(queueTotal / pageSize));
 
+  // Determine problem count for badge
+  const problemCount = queueSummary.PROBLEMS_ONLY || queueSummary.NEEDS_MANUAL_REVIEW || 0;
+
   return (
-    <div className="space-y-5">
-      {/* Compact queue summary */}
-      <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3" aria-label="Verification summary">
-        {[
-          { label: 'Needs review', value: queueSummary.NEEDS_MANUAL_REVIEW, tone: 'text-amber-700' },
-          { label: 'Under review', value: queueSummary.UNDER_REVIEW + queueSummary.DOCS_REQUESTED, tone: 'text-blue-700' },
-          { label: 'Verified', value: queueSummary.VERIFIED, tone: 'text-slate-900' },
-        ].map((metric, index) => (
-          <div key={metric.label} className={`flex items-center justify-between gap-4 px-5 py-3.5 ${index > 0 ? 'border-t border-slate-100 sm:border-l sm:border-t-0' : ''}`}>
-            <span className="text-xs font-medium text-slate-600">{metric.label}</span>
-            <strong className={`text-xl font-semibold tabular-nums ${metric.tone}`}>{metric.value}</strong>
-          </div>
-        ))}
-      </section>
+    <div className="space-y-6">
+      {notice && (
+        <ToastBanner notice={notice} onDismiss={() => setNotice(null)} />
+      )}
+
+      {/* High-level Queue KPI Strip */}
+      <MetricStrip
+        label="Verification summary"
+        items={[
+          {
+            label: 'Documents with Problems',
+            value: problemCount,
+            tone: problemCount > 0 ? 'amber' : 'neutral',
+          },
+          {
+            label: 'Needs Manual Review',
+            value: queueSummary.NEEDS_MANUAL_REVIEW,
+            tone: 'rose',
+          },
+          {
+            label: 'Under Review / Intake',
+            value: (queueSummary.UNDER_REVIEW || 0) + (queueSummary.DOCS_REQUESTED || 0),
+            tone: 'blue',
+          },
+          {
+            label: 'Fully Verified',
+            value: queueSummary.VERIFIED,
+            tone: 'emerald',
+          },
+        ]}
+      />
 
       {/* Navigation Tabs */}
-      <div className="flex gap-5 overflow-x-auto border-b border-slate-200 sm:gap-7" role="tablist" aria-label="Document verification">
+      <div className="flex gap-6 overflow-x-auto border-b border-slate-200" role="tablist" aria-label="Document verification">
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'queue'}
           onClick={() => setActiveTab('queue')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-semibold transition-colors ${activeTab === 'queue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
+            activeTab === 'queue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
         >
           Verification Queue
         </button>
@@ -189,18 +292,22 @@ export function VerificationModuleView() {
           role="tab"
           aria-selected={activeTab === 'import'}
           onClick={() => setActiveTab('import')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-semibold transition-colors ${activeTab === 'import' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
+            activeTab === 'import' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
         >
-          Import discrepancies
+          Import Discrepancies (CSV)
         </button>
         <button
           type="button"
           role="tab"
           aria-selected={activeTab === 'reissue'}
           onClick={() => setActiveTab('reissue')}
-          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-semibold transition-colors ${activeTab === 'reissue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
+            activeTab === 'reissue' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
         >
-          Reissue upload link
+          Reissue Upload Link
         </button>
         {canManageSources && (
           <button
@@ -208,202 +315,545 @@ export function VerificationModuleView() {
             role="tab"
             aria-selected={activeTab === 'sources'}
             onClick={() => setActiveTab('sources')}
-            className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-semibold transition-colors ${activeTab === 'sources' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+            className={`min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-colors ${
+              activeTab === 'sources' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
           >
-            Board sources
+            Board Sources & Gazettes
           </button>
         )}
       </div>
 
-      {/* Tab 1: Review Queue */}
+      {/* Tab 1: Review Queue with Spacious Layout & Problem Filter */}
       {activeTab === 'queue' && (
-        <section role="tabpanel" aria-label="Verification queue" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_2px_8px_rgba(20,30,50,0.035)]">
-          {/* Filter Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => { setFilterStatus(''); setQueuePage(0); }}
-                className={`rounded-md px-3 py-2 font-medium transition ${!filterStatus ? 'bg-blue-50 text-blue-800 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
-              >
-                All Active ({queueTotal})
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFilterStatus('NEEDS_MANUAL_REVIEW'); setQueuePage(0); }}
-                className={`rounded-md px-3 py-2 font-medium transition ${filterStatus === 'NEEDS_MANUAL_REVIEW' ? 'bg-amber-50 text-amber-900 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
-              >
-                Needs Review
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFilterStatus('UNDER_REVIEW'); setQueuePage(0); }}
-                className={`rounded-md px-3 py-2 font-medium transition ${filterStatus === 'UNDER_REVIEW' ? 'bg-blue-50 text-blue-800 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
-              >
-                Under Review
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFilterStatus('VERIFIED'); setQueuePage(0); }}
-                className={`rounded-md px-3 py-2 font-medium transition ${filterStatus === 'VERIFIED' ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}
-              >
-                Verified
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={handleAutoDispatchMissing}
-                disabled={autoDispatching || loading}
-                className="bg-blue-600 text-white hover:bg-blue-700 text-xs shadow-xs"
-              >
-                {autoDispatching ? 'Dispatching requests…' : 'Batch Request Documents'}
-              </Button>
-              <Button size="sm" variant="subtle" onClick={loadQueue} disabled={loading} className="border border-slate-200 bg-white">
-                Refresh
-              </Button>
+        <section role="tabpanel" aria-label="Verification queue" className="space-y-4">
+          {/* Filter Bar with Dedicated "Has Problem" filter */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-xs">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              {/* Filter Pills */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {/* 1. FILTER FOR STUDENTS THAT HAVE A PROBLEM */}
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus('PROBLEMS_ONLY'); setQueuePage(0); }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 font-bold transition shadow-2xs cursor-pointer ${
+                    filterStatus === 'PROBLEMS_ONLY'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  <IconAlertTriangle className="size-3.5" />
+                  <span>Problems Only</span>
+                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${filterStatus === 'PROBLEMS_ONLY' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'}`}>
+                    {problemCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus(''); setQueuePage(0); }}
+                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
+                    !filterStatus
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  All Candidates ({queueTotal})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus('NEEDS_MANUAL_REVIEW'); setQueuePage(0); }}
+                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
+                    filterStatus === 'NEEDS_MANUAL_REVIEW'
+                      ? 'bg-rose-700 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Needs Review ({queueSummary.NEEDS_MANUAL_REVIEW || 0})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus('UNDER_REVIEW'); setQueuePage(0); }}
+                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
+                    filterStatus === 'UNDER_REVIEW'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Under Review ({queueSummary.UNDER_REVIEW || 0})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus('VERIFIED'); setQueuePage(0); }}
+                  className={`rounded-lg px-3 py-2 font-semibold transition cursor-pointer ${
+                    filterStatus === 'VERIFIED'
+                      ? 'bg-emerald-700 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Verified ({queueSummary.VERIFIED || 0})
+                </button>
+              </div>
+
+              {/* Search and Density Toggle */}
+              <div className="flex flex-wrap items-center gap-3">
+                <form onSubmit={handleSearchSubmit} className="relative min-w-[220px]">
+                  <IconSearch className="pointer-events-none absolute left-3 top-2.5 size-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search candidate, phone, CNIC…"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-9 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none"
+                  />
+                </form>
+
+                <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setDensity('spacious')}
+                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'spacious' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Spacious
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDensity('compact')}
+                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'compact' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                  >
+                    Compact
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={handleAutoDispatchMissing}
+                    disabled={autoDispatching || loading}
+                    className="bg-blue-600 text-white hover:bg-blue-700 text-xs shadow-xs"
+                  >
+                    {autoDispatching ? 'Dispatching…' : 'Batch Request Missing'}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={loadQueue}
+                    disabled={loading}
+                    className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                    title="Refresh queue"
+                  >
+                    <IconRefresh className="size-4" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Queue Table */}
+          {/* Queue Cards / Table */}
           {loading ? (
-            <div className="py-12 text-center text-xs text-slate-500">Loading candidates…</div>
-          ) : queue.length === 0 ? (
-            <div className="grid min-h-44 place-content-center justify-items-center px-5 py-8 text-center">
-              <span className="grid size-10 place-items-center rounded-full bg-blue-50 text-blue-700"><IconDocumentCheck className="size-5" /></span>
-              <p className="mb-0 mt-3 text-sm font-semibold text-slate-800">Queue is clear</p>
-              <p className="mb-0 mt-1 text-xs text-slate-500">No candidates match this view.</p>
+            <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-xs text-slate-500 shadow-xs">
+              <span className="size-6 animate-spin rounded-full border-2 border-blue-100 border-t-blue-600 inline-block mb-3" />
+              <p className="m-0">Loading verification records…</p>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-100 px-4 sm:px-5">
-              {queue.map((item) => (
-                <div key={item.studentId} className="flex flex-wrap items-center justify-between gap-4 py-3.5 hover:bg-slate-50/50">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <strong className="text-xs font-bold text-slate-900">{item.fullName}</strong>
-                      <span className="font-mono text-[10px] text-slate-500 font-medium">
-                        (Candidate #{item.studentId}{item.leadId ? ` | Lead #${item.leadId}` : ''})
-                      </span>
-                      {item.applicationNo && (
-                        <span className="font-mono text-[10px] text-slate-400">[{item.applicationNo}]</span>
-                      )}
-                      {item.eligibleFor && (
-                        <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-                          {item.eligibleFor}
-                        </span>
-                      )}
-                      <StatusBadge
-                        tone={
-                          item.overallStatus === 'VERIFIED'
-                            ? 'success'
-                            : item.overallStatus === 'NEEDS_MANUAL_REVIEW'
-                              ? 'danger'
-                              : 'neutral'
-                        }
-                      >
-                        {item.overallStatus}
-                      </StatusBadge>
+          ) : queue.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-xs">
+              <span className="grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700 mx-auto">
+                <IconDocumentCheck className="size-6" />
+              </span>
+              <h4 className="mt-3 text-base font-bold text-slate-900">
+                {filterStatus === 'PROBLEMS_ONLY' ? 'No document problems found' : 'Queue is clear'}
+              </h4>
+              <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                {filterStatus === 'PROBLEMS_ONLY'
+                  ? 'All candidate documents in this queue are verified or waiting normal review with no reported discrepancies.'
+                  : 'No candidates match the selected filter.'}
+              </p>
+              {filterStatus && (
+                <button
+                  type="button"
+                  onClick={() => { setFilterStatus(''); setQueuePage(0); }}
+                  className="mt-3 text-xs font-semibold text-blue-700 hover:underline cursor-pointer"
+                >
+                  View all active candidates →
+                </button>
+              )}
+            </div>
+          ) : density === 'spacious' ? (
+            /* ================= SPACIOUS CARD VIEW (Room to breathe, no clutter) ================= */
+            <div className="space-y-4">
+              {queue.map((item) => {
+                const isExpanded = Boolean(expandedDocs[item.studentId]);
+                const docKeys = [
+                  { key: 'CNIC_FRONT', label: 'CNIC Front' },
+                  { key: 'CNIC_BACK', label: 'CNIC Back' },
+                  { key: 'FSC_MARKSHEET', label: 'FSc Marksheet' },
+                  { key: 'MATRIC_MARKSHEET', label: 'Matric Marksheet' },
+                  { key: 'DOMICILE', label: 'Domicile Certificate' },
+                ];
+                const verifiedDocsCount = docKeys.filter((d) => item.verifiedDocuments?.[d.key]?.isVerified).length;
+                const hasItemProblem = item.overallStatus !== 'VERIFIED' && Boolean(
+                  item.overallStatus === 'NEEDS_MANUAL_REVIEW' ||
+                  item.hasProblem ||
+                  (item.discrepancyNotes && item.discrepancyNotes.trim()) ||
+                  (item.problemDocs && item.problemDocs.length > 0)
+                );
+
+                return (
+                  <div
+                    key={item.studentId}
+                    className={`rounded-2xl border bg-white p-6 shadow-xs transition-all hover:shadow-sm ${
+                      hasItemProblem
+                        ? 'border-amber-300 ring-1 ring-amber-100'
+                        : 'border-slate-200/90'
+                    }`}
+                  >
+                    {/* Header Row: Candidate Identity, Badges, Status, and Primary Review Action */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                            {item.fullName}
+                          </h3>
+                          {item.fatherName && (
+                            <span className="text-xs text-slate-500 font-medium">
+                              (S/O {item.fatherName})
+                            </span>
+                          )}
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-mono font-medium text-slate-600">
+                            Candidate #{item.studentId}
+                          </span>
+                          {item.leadId && (
+                            <span className="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-mono font-semibold text-blue-700">
+                              Lead #{item.leadId}
+                            </span>
+                          )}
+                          {item.applicationNo && (
+                            <span className="rounded-md bg-slate-50 border border-slate-200 px-2 py-0.5 text-[11px] font-mono text-slate-600">
+                              App: {item.applicationNo}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {item.eligibleFor && (
+                            <span className="rounded-md bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 border border-indigo-100">
+                              {item.eligibleFor}
+                            </span>
+                          )}
+                          <StatusBadge
+                            tone={
+                              item.overallStatus === 'VERIFIED'
+                                ? 'success'
+                                : item.overallStatus === 'NEEDS_MANUAL_REVIEW'
+                                  ? 'danger'
+                                  : 'neutral'
+                            }
+                          >
+                            {item.overallStatus}
+                          </StatusBadge>
+                        </div>
+                      </div>
+
+                      {/* Primary Action Button */}
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <Button
+                          size="md"
+                          variant="primary"
+                          onClick={() => setSelectedStudentId(item.studentId)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-xs"
+                        >
+                          Review Dossier & Decide
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-4 text-[11px] text-slate-500">
-                      <span>
-                        Phone: <strong>{item.phoneNormalized}</strong>
+
+                    {/* Dedicated Problem Callout Banner if Issue Exists */}
+                    {hasItemProblem && (
+                      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs">
+                        <div className="flex items-start gap-3">
+                          <IconAlertTriangle className="size-4 shrink-0 text-amber-700 mt-0.5" />
+                          <div className="space-y-1">
+                            <strong className="text-amber-900 font-bold block">
+                              Attention Required: Document Discrepancy or Review Flag
+                            </strong>
+                            <div className="text-amber-800 leading-relaxed font-sans">
+                              {item.discrepancyNotes ||
+                                (item.problemDocs?.length
+                                  ? `Problem detected in: ${item.problemDocs.map((d) => `${d.type} (${d.status})`).join(', ')}`
+                                  : 'Candidate has been escalated for manual review inspection.')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Spacious Candidate Attributes Grid */}
+                    <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                      <div className="rounded-xl bg-slate-50/70 p-3.5 border border-slate-100">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                          Phone / WhatsApp
+                        </span>
+                        <div className="mt-1 font-mono font-bold text-slate-900">
+                          {item.phoneNormalized}
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleEditPhone(item.studentId, item.phoneNormalized)}
-                          className="ml-1.5 text-blue-600 hover:underline text-[10px] cursor-pointer"
+                          className="mt-1 text-[11px] font-medium text-blue-600 hover:underline cursor-pointer inline-flex items-center gap-1"
                         >
-                          [Edit]
+                          <IconPencil className="size-3" />
+                          <span>Edit phone</span>
                         </button>
-                      </span>
-                      {item.email && <span>Email: <strong className="text-slate-700">{item.email}</strong></span>}
-                      {item.city && <span>City: <strong className="text-slate-700">{item.city}</strong></span>}
-                      <span>FSc Marks: <strong>{item.fscObtainedMarks || '—'} / 1100</strong></span>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50/70 p-3.5 border border-slate-100">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                          Email Address
+                        </span>
+                        <div className="mt-1 truncate font-medium text-slate-900" title={item.email || 'None'}>
+                          {item.email || <span className="text-slate-400 italic">No email</span>}
+                        </div>
+                        <span className="mt-1 text-[11px] text-slate-400 block">
+                          {item.city || 'Location unrecorded'}
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50/70 p-3.5 border border-slate-100">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                          FSc / Intermediate Score
+                        </span>
+                        <div className="mt-1 font-mono font-bold text-slate-900">
+                          {item.fscObtainedMarks ? `${item.fscObtainedMarks} / 1100` : '—'}
+                        </div>
+                        <span className="mt-1 text-[11px] text-slate-500 block">
+                          {item.priorDegree || 'Group Unspecified'}
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50/70 p-3.5 border border-slate-100">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                          Document Verification Progress
+                        </span>
+                        <div className="mt-1 flex items-center gap-2">
+                          <strong className="text-slate-900 font-bold">
+                            {verifiedDocsCount} of {docKeys.length} verified
+                          </strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleDocExpand(item.studentId)}
+                          className="mt-1 text-[11px] font-semibold text-blue-700 hover:underline cursor-pointer"
+                        >
+                          {isExpanded ? 'Hide documents ▲' : 'Show checklist ▼'}
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Document Verification Status Pills / Checklist */}
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-                      {[
-                        { key: 'CNIC_FRONT', label: 'CNIC Front' },
-                        { key: 'CNIC_BACK', label: 'CNIC Back' },
-                        { key: 'FSC_MARKSHEET', label: 'FSc Marksheet' },
-                        { key: 'MATRIC_MARKSHEET', label: 'Matric Marksheet' },
-                        { key: 'DOMICILE', label: 'Domicile' },
-                      ].map((docDef) => {
-                        const verifiedInfo = item.verifiedDocuments?.[docDef.key];
-                        const isVerified = verifiedInfo?.isVerified;
-                        const hasUploaded = Boolean(verifiedInfo);
+                    {/* Expandable Document Checklist */}
+                    {isExpanded && (
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/40 p-4">
+                        <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-600 mb-2.5">
+                          Document Checklist & Status
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                          {docKeys.map((docDef) => {
+                            const verifiedInfo = item.verifiedDocuments?.[docDef.key];
+                            const isVerified = verifiedInfo?.isVerified;
+                            const hasUploaded = Boolean(verifiedInfo);
+                            const hasIssue = ['DISCREPANCY', 'REJECTED', 'MANUAL_REVIEW'].includes(verifiedInfo?.status);
 
-                        return (
-                          <span
-                            key={docDef.key}
-                            title={`${docDef.label}: ${isVerified ? 'Verified' : hasUploaded ? verifiedInfo.status : 'Not Uploaded'}`}
-                            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-medium border ${
-                              isVerified
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                : hasUploaded
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                                  : 'bg-slate-50 text-slate-400 border-slate-200'
-                            }`}
-                          >
-                            <span className="font-bold">
-                              {isVerified ? '✓' : hasUploaded ? '●' : '○'}
-                            </span>
-                            <span>{docDef.label}</span>
-                            {isVerified && <span className="text-[9px] font-semibold text-emerald-600">(Verified)</span>}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    {item.discrepancyNotes && (
-                      <p className="mt-1 max-w-xl truncate text-[10px] text-amber-700">
-                        {item.discrepancyNotes.split('\n').filter(Boolean).pop()}
-                      </p>
+                            return (
+                              <div
+                                key={docDef.key}
+                                className={`flex items-center justify-between rounded-lg border p-2.5 text-xs transition ${
+                                  isVerified
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                                    : hasIssue
+                                      ? 'bg-rose-50 border-rose-200 text-rose-900'
+                                      : hasUploaded
+                                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                        : 'bg-white border-slate-200 text-slate-500'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold">
+                                    {isVerified ? '✓' : hasIssue ? '✕' : hasUploaded ? '●' : '○'}
+                                  </span>
+                                  <span className="font-semibold">{docDef.label}</span>
+                                </div>
+                                <span className="font-mono text-[10px] font-bold">
+                                  {isVerified ? 'Verified' : verifiedInfo?.status || 'Missing'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     )}
-                  </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleQuickGenerateToken(item)}
-                      title={item.missingDocuments?.length ? `Request: ${item.missingDocuments.join(', ')}` : 'Generate fresh link'}
-                      className="rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-800 transition hover:bg-blue-100 cursor-pointer"
-                    >
-                      {item.missingDocuments?.length ? `Request Missing (${item.missingDocuments.length})` : 'Generate Link'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReissueForm({
-                          studentId: item.studentId,
-                          docTypes: item.missingDocuments?.length ? item.missingDocuments : ['FSC_MARKSHEET'],
-                          expiresInHours: 48,
-                        });
-                        setActiveTab('reissue');
-                      }}
-                      className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-100 cursor-pointer"
-                    >
-                      Customize
-                    </button>
-                    <Button
-                      size="sm"
-                      variant="subtle"
-                      onClick={() => setSelectedStudentId(item.studentId)}
-                    >
-                      Review Dossier
-                    </Button>
+                    {/* Card Action Footer */}
+                    <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-[11px] text-slate-500">
+                        {item.missingDocuments?.length ? (
+                          <span>
+                            Pending required documents:{' '}
+                            <strong className="text-amber-700">
+                              {item.missingDocuments.join(', ')}
+                            </strong>
+                          </span>
+                        ) : (
+                          <span className="text-emerald-700 font-medium">
+                            All mandatory documents verified
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {item.missingDocuments?.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickGenerateToken(item)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 transition hover:bg-blue-100 cursor-pointer"
+                          >
+                            <IconSend className="size-3.5" />
+                            <span>Request Missing ({item.missingDocuments.length})</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReissueForm({
+                              studentId: item.studentId,
+                              docTypes: item.missingDocuments?.length ? item.missingDocuments : ['FSC_MARKSHEET'],
+                              expiresInHours: 48,
+                            });
+                            setActiveTab('reissue');
+                          }}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                        >
+                          Customize Link
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+          ) : (
+            /* ================= COMPACT TABLE VIEW ================= */
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+              <table className="w-full text-left text-xs text-slate-700">
+                <thead className="border-b border-slate-100 bg-[#f8fafc] text-[11px] font-semibold uppercase tracking-[.05em] text-slate-600">
+                  <tr>
+                    <th className="px-5 py-3.5">Candidate Details</th>
+                    <th className="px-4 py-3.5">Contact</th>
+                    <th className="px-4 py-3.5">Academic Score</th>
+                    <th className="px-4 py-3.5">Program</th>
+                    <th className="px-4 py-3.5">Status</th>
+                    <th className="px-4 py-3.5 text-center">Verified Docs</th>
+                    <th className="px-5 py-3.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {queue.map((item) => (
+                    <tr key={item.studentId} className="hover:bg-slate-50/70 transition">
+                      <td className="px-5 py-3.5">
+                        <div className="font-bold text-slate-900">{item.fullName}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {item.fatherName ? `S/O ${item.fatherName} · ` : ''}
+                          CNIC: <span className="font-mono text-slate-700">{item.cnic || '—'}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 font-mono text-slate-800">
+                        {item.phoneNormalized || item.phoneRaw}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-mono font-semibold text-slate-800">
+                          {item.fscObtainedMarks ? `${item.fscObtainedMarks} / 1100` : '—'}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {item.priorDegree || 'Group Unspecified'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {item.eligibleFor ? (
+                          <span className="inline-block rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 border border-indigo-100">
+                            {item.eligibleFor}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-[10px] italic">General Candidate</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex flex-col gap-1">
+                          <StatusBadge
+                            tone={
+                              item.overallStatus === 'VERIFIED'
+                                ? 'success'
+                                : item.overallStatus === 'NEEDS_MANUAL_REVIEW'
+                                  ? 'danger'
+                                  : 'neutral'
+                            }
+                          >
+                            {item.overallStatus}
+                          </StatusBadge>
+                          {item.overallStatus !== 'VERIFIED' && item.discrepancyNotes && (
+                            <span className="text-[10px] text-amber-700 truncate max-w-[180px]" title={item.discrepancyNotes}>
+                              {item.discrepancyNotes.split('\n').filter(Boolean).pop()}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
+                          {Object.values(item.verifiedDocuments || {}).filter((d) => d.isVerified).length} / 5
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-right">
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          onClick={() => setSelectedStudentId(item.studentId)}
+                        >
+                          Review Dossier
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
+
+          {/* Pagination Controls */}
           {queueTotal > pageSize && (
-            <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 sm:px-5">
-              <p className="m-0 text-xs text-slate-500">Showing {queuePage * pageSize + 1}–{Math.min((queuePage + 1) * pageSize, queueTotal)} of {queueTotal}</p>
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3.5 shadow-xs">
+              <p className="m-0 text-xs text-slate-500">
+                Showing {queuePage * pageSize + 1}–{Math.min((queuePage + 1) * pageSize, queueTotal)} of {queueTotal} candidates
+              </p>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="subtle" disabled={queuePage === 0 || loading} onClick={() => setQueuePage((current) => Math.max(0, current - 1))}>Previous</Button>
-                <span className="text-xs tabular-nums text-slate-600">Page {queuePage + 1} of {totalPages}</span>
-                <Button size="sm" variant="subtle" disabled={queuePage + 1 >= totalPages || loading} onClick={() => setQueuePage((current) => Math.min(totalPages - 1, current + 1))}>Next</Button>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  disabled={queuePage === 0 || loading}
+                  onClick={() => setQueuePage((current) => Math.max(0, current - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs tabular-nums text-slate-600 font-mono">
+                  Page {queuePage + 1} of {totalPages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  disabled={queuePage + 1 >= totalPages || loading}
+                  onClick={() => setQueuePage((current) => Math.min(totalPages - 1, current + 1))}
+                >
+                  Next
+                </Button>
               </div>
             </div>
           )}
@@ -412,12 +862,14 @@ export function VerificationModuleView() {
 
       {/* Tab 2: Discrepancy Ingest */}
       {activeTab === 'import' && (
-        <section role="tabpanel" aria-label="Import discrepancies" className="max-w-3xl rounded-lg border border-slate-200 bg-white p-5 shadow-[0_2px_8px_rgba(20,30,50,0.035)] sm:p-6">
-          <h2 className="m-0 text-base font-semibold text-slate-900">Import discrepancies</h2>
-          <p className="mb-0 mt-1 text-xs text-slate-500">Upload a CSV of applicants with missing or mismatched documents.</p>
+        <section role="tabpanel" aria-label="Import discrepancies" className="max-w-3xl rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+          <h2 className="m-0 text-base font-bold text-slate-900">Import Discrepancies CSV</h2>
+          <p className="mb-0 mt-1 text-xs text-slate-500">
+            Upload an administrative discrepancy spreadsheet of applicants with missing or mismatched documents.
+          </p>
 
           <form onSubmit={handleImportSubmit} className="mt-5 space-y-4">
-            <div className="rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center">
+            <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center">
               <input
                 type="file"
                 id="discrepancy-file"
@@ -430,7 +882,7 @@ export function VerificationModuleView() {
                   {importFile ? importFile.name : 'Select or drop discrepancy CSV file'}
                 </span>
                 <p className="mb-0 mt-2 text-[11px] text-slate-500">
-                  Include application number, name, phone, and document issues.
+                  Include application number, student name, phone number, and document issues.
                 </p>
               </label>
             </div>
@@ -441,8 +893,8 @@ export function VerificationModuleView() {
           </form>
 
           {importResult && (
-            <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-xs">
-                <strong className="text-emerald-900">Import complete</strong>
+            <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs">
+              <strong className="text-emerald-900">Import complete</strong>
               <div className="mt-2 grid grid-cols-3 gap-2 text-emerald-800">
                 <div>Total Records: <strong>{importResult.total}</strong></div>
                 <div>Created: <strong>{importResult.created}</strong></div>
@@ -455,12 +907,12 @@ export function VerificationModuleView() {
 
       {/* Tab 3: Reissue Token */}
       {activeTab === 'reissue' && (
-        <section role="tabpanel" aria-label="Reissue upload link" className="max-w-3xl rounded-lg border border-slate-200 bg-white p-5 shadow-[0_2px_8px_rgba(20,30,50,0.035)] sm:p-6">
+        <section role="tabpanel" aria-label="Reissue upload link" className="max-w-3xl rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
-              <h2 className="m-0 text-base font-semibold text-slate-900">Reissue Upload Link & Request Missing Documents</h2>
+              <h2 className="m-0 text-base font-bold text-slate-900">Reissue Upload Link & Request Missing Documents</h2>
               <p className="mb-0 mt-1 text-xs text-slate-500">
-                Identify which documents are missing for any candidate, pre-fill their request, and send a customized upload link to their WhatsApp.
+                Generate a single-use tokenized link for missing documents and send it directly to the applicant's WhatsApp.
               </p>
             </div>
             <Button
@@ -474,8 +926,8 @@ export function VerificationModuleView() {
             </Button>
           </div>
 
-          {/* Candidate Selection Dropdown and Quick Picks */}
-          <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50/40 p-4 text-xs">
+          {/* Candidate Selection Dropdown */}
+          <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50/40 p-4 text-xs">
             <label className="block font-semibold text-blue-950 mb-1.5">
               Select Candidate to inspect missing documents:
             </label>
@@ -490,54 +942,20 @@ export function VerificationModuleView() {
                   docTypes: c?.missingDocuments?.length ? c.missingDocuments : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'],
                 }));
               }}
-              className="w-full rounded border border-blue-300 bg-white p-2.5 text-xs font-medium text-slate-800 shadow-2xs focus:border-blue-500 focus:outline-hidden"
+              className="w-full rounded-lg border border-blue-300 bg-white p-2.5 text-xs font-medium text-slate-800 shadow-2xs focus:border-blue-500 focus:outline-hidden"
             >
-              <option value="">-- Choose Candidate ({queue.length} in queue) --</option>
+              <option value="">-- Choose Candidate ({queue.length} in current view) --</option>
               {queue.map((c) => (
                 <option key={c.studentId} value={c.studentId}>
-                  #{c.studentId} {c.fullName} {c.leadId ? `(Lead #${c.leadId})` : ''} — {c.missingDocuments?.length || 0} Missing Doc(s): {c.missingDocuments?.map(d => d.replace(/_/g, ' ')).join(', ') || 'All Verified'}
+                  #{c.studentId} {c.fullName} {c.leadId ? `(Lead #${c.leadId})` : ''} — {c.missingDocuments?.length || 0} Missing Doc(s): {c.missingDocuments?.map((d) => d.replace(/_/g, ' ')).join(', ') || 'All Verified'}
                 </option>
               ))}
             </select>
-
-            {/* Quick Candidate Buttons */}
-            {queue.length > 0 && (
-              <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium text-slate-600">Quick select:</span>
-                {queue.map((c) => {
-                  const isSelected = String(reissueForm.studentId) === String(c.studentId) || (c.leadId && String(reissueForm.studentId) === String(c.leadId));
-                  const missingCount = c.missingDocuments?.length || 0;
-                  return (
-                    <button
-                      key={c.studentId}
-                      type="button"
-                      onClick={() => {
-                        setReissueForm({
-                          studentId: c.studentId,
-                          docTypes: c.missingDocuments?.length ? c.missingDocuments : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'],
-                          expiresInHours: 48,
-                        });
-                      }}
-                      className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <strong>#{c.studentId} {c.fullName}</strong>
-                      <span className={`rounded px-1.5 py-0.2 text-[10px] font-bold ${isSelected ? 'bg-blue-700 text-white' : 'bg-amber-100 text-amber-800'}`}>
-                        {missingCount} missing
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
           </div>
 
-          {/* Selected Candidate Detailed Inspection Dossier Card */}
-          {selectedCandidate ? (
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 text-xs shadow-xs">
+          {/* Selected Candidate Info Card */}
+          {selectedCandidate && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5 text-xs shadow-xs">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <span className="rounded bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800">
@@ -553,7 +971,6 @@ export function VerificationModuleView() {
                 </div>
               </div>
 
-              {/* Per-Document Breakdown */}
               <div className="mt-3">
                 <span className="text-[11px] font-semibold text-slate-700">Verification Status by Document:</span>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -571,7 +988,7 @@ export function VerificationModuleView() {
                     return (
                       <div
                         key={docDef.key}
-                        className={`flex items-center justify-between rounded-md border p-2 text-[11px] ${
+                        className={`flex items-center justify-between rounded-lg border p-2.5 text-[11px] ${
                           isVerified
                             ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
                             : docDef.mandatory
@@ -597,7 +1014,7 @@ export function VerificationModuleView() {
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
                 <span className="text-[11px] text-slate-600">
                   Pending required documents:{' '}
                   <strong className="text-amber-700">
@@ -616,15 +1033,11 @@ export function VerificationModuleView() {
                         : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'],
                     }));
                   }}
-                  className="rounded bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 border border-blue-200 hover:bg-blue-100 cursor-pointer"
+                  className="rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 border border-blue-200 hover:bg-blue-100 cursor-pointer"
                 >
                   Select Missing Documents
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
-              Select a candidate above or enter an ID below to inspect verification status.
             </div>
           )}
 
@@ -645,18 +1058,15 @@ export function VerificationModuleView() {
                   }));
                 }}
                 placeholder="e.g. 1 or 14"
-                className="mt-1 w-full rounded border border-slate-300 p-2 text-xs"
+                className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-xs"
               />
-              <p className="mb-0 mt-1 text-[11px] text-slate-500">
-                You can enter Candidate ID (#1) or Lead ID (#14). The system automatically links both.
-              </p>
             </div>
 
             <div>
               <label className="block font-semibold text-slate-700 mb-1.5">
                 Required Document Types to Include in Link:
               </label>
-              <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
                 {[
                   { id: 'FSC_MARKSHEET', label: 'FSc / HSSC Marksheet', mandatory: true },
                   { id: 'MATRIC_MARKSHEET', label: 'Matric / SSC Marksheet', mandatory: true },
@@ -668,7 +1078,7 @@ export function VerificationModuleView() {
                   const isMissing = selectedCandidate?.missingDocuments?.includes(item.id);
 
                   return (
-                    <label key={item.id} className="flex items-center justify-between rounded p-1 hover:bg-white cursor-pointer">
+                    <label key={item.id} className="flex items-center justify-between rounded-lg p-1.5 hover:bg-white cursor-pointer">
                       <div className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -684,7 +1094,7 @@ export function VerificationModuleView() {
                           }}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
-                        <span className="font-medium text-slate-800">{item.label}</span>
+                        <span className="font-semibold text-slate-800">{item.label}</span>
                       </div>
                       <div>
                         {isVerified ? (
@@ -713,14 +1123,14 @@ export function VerificationModuleView() {
                 max="168"
                 value={reissueForm.expiresInHours}
                 onChange={(e) => setReissueForm((prev) => ({ ...prev, expiresInHours: e.target.value }))}
-                className="mt-1 w-32 rounded border border-slate-300 p-2 text-xs"
+                className="mt-1 w-32 rounded-lg border border-slate-300 p-2 text-xs"
               />
             </div>
 
             <Button
               type="submit"
               disabled={reissuing || !reissueForm.studentId || reissueForm.docTypes.length === 0}
-              className="min-h-10 w-full text-xs font-semibold sm:w-auto sm:px-6 bg-blue-600 text-white hover:bg-blue-700"
+              className="min-h-10 w-full text-xs font-bold sm:w-auto sm:px-6 bg-blue-600 text-white hover:bg-blue-700 rounded-xl"
             >
               {reissuing
                 ? 'Creating and dispatching link…'
@@ -729,20 +1139,20 @@ export function VerificationModuleView() {
           </form>
 
           {reissueResult && (
-            <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-950">
+            <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-950">
               <p className="mb-0 font-bold text-emerald-900">
                 Upload link generated and dispatched to {reissueResult.studentName || 'Candidate'}.
               </p>
               <p className="mb-0 mt-1 text-[11px] text-emerald-800">
-                Target: Candidate #{reissueResult.studentId} | Required: {reissueResult.allowedDocTypes?.map(d => d.replace(/_/g, ' ')).join(', ')}
+                Target: Candidate #{reissueResult.studentId} | Required: {reissueResult.allowedDocTypes?.map((d) => d.replace(/_/g, ' ')).join(', ')}
               </p>
-              <div className="mt-2.5 flex items-center justify-between gap-2 rounded bg-white p-2 border border-emerald-200">
+              <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg bg-white p-2.5 border border-emerald-200">
                 <span className="font-mono text-[11px] truncate text-slate-700">{reissueResult.uploadUrl}</span>
                 <button
                   type="button"
                   onClick={() => {
                     navigator.clipboard.writeText(reissueResult.uploadUrl);
-                    alert('Copied link to clipboard!');
+                    setNotice({ type: 'info', message: 'Upload link copied to clipboard!' });
                   }}
                   className="shrink-0 text-emerald-700 font-bold hover:underline cursor-pointer"
                 >
@@ -763,6 +1173,36 @@ export function VerificationModuleView() {
           isOpen={Boolean(selectedStudentId)}
           onClose={() => setSelectedStudentId(null)}
           onActionComplete={loadQueue}
+        />
+      )}
+
+      {/* Confirmation Dialog */}
+      {confirmModal && (
+        <ConfirmDialog
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel={confirmModal.confirmLabel}
+          tone={confirmModal.tone}
+          loading={autoDispatching}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
+
+      {/* Prompt Dialog */}
+      {promptModal && (
+        <PromptDialog
+          isOpen={promptModal.isOpen}
+          title={promptModal.title}
+          message={promptModal.message}
+          placeholder={promptModal.placeholder}
+          initialValue={promptModal.initialValue}
+          confirmLabel={promptModal.confirmLabel}
+          presets={promptModal.presets}
+          loading={loading}
+          onConfirm={promptModal.onConfirm}
+          onCancel={() => setPromptModal(null)}
         />
       )}
     </div>

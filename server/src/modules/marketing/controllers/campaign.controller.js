@@ -8,6 +8,8 @@ import {
   triggerCampaignSchema,
   incomingMessageWebhookSchema,
   singleLeadOutreachSchema,
+  updateLeadSchema,
+  listLeadsQuerySchema,
 } from '../marketing.schemas.js';
 import { normalizePhoneNumber } from '../services/csv-parser.service.js';
 
@@ -61,6 +63,48 @@ export class CampaignController {
       const payload = leadImportSchema.parse(req.body);
       const result = await CampaignService.importLeads(payload.campaignId, payload.leads);
       res.status(201).json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async listLeads(req, res, next) {
+    try {
+      const query = listLeadsQuerySchema.parse(req.query);
+      const result = await CampaignService.listLeads(query);
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async getLead(req, res, next) {
+    try {
+      const result = await CampaignService.getLeadById(Number(req.params.id));
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updateLead(req, res, next) {
+    try {
+      const payload = updateLeadSchema.parse(req.body);
+      const result = await CampaignService.updateLead(
+        Number(req.params.id),
+        payload,
+        req.user?.id || null
+      );
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async deleteLead(req, res, next) {
+    try {
+      const result = await CampaignService.deleteLead(Number(req.params.id));
+      res.json({ status: 'success', data: result });
     } catch (err) {
       next(err);
     }

@@ -24,8 +24,8 @@ export function createApp() {
   const isAllowedOrigin = (origin) => {
     if (!origin) return true;
     if (origin === config.APP_ORIGIN) return true;
-    if (origin === 'http://localhost:5173' || origin === 'http://127.0.0.1:5173') return true;
-    if (/^http:\/\/(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?:\.sslip\.io)?:5173$/.test(origin)) return true;
+    if (origin === 'http://localhost:5173' || origin === 'http://127.0.0.1:5173' || origin === 'http://localhost:5174' || origin === 'http://127.0.0.1:5174') return true;
+    if (/^http:\/\/(?:192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?:\.sslip\.io)?(?::(?:5173|5174))?$/.test(origin)) return true;
     return false;
   };
   app.use(cors({

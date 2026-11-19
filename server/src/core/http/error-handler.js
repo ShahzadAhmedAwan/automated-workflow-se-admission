@@ -14,9 +14,13 @@ export function errorHandler(error, req, res, _next) {
   if (!known && !malformedJson && !payloadTooLarge) {
     console.error(`[${requestId}] ${req.method} ${req.path} failed:`, error);
   }
-  const internalMessage = req.path.endsWith('/auth/login')
-    ? `Sign-in service error. Reference ID: ${requestId}. Check the API server terminal.`
-    : `The request failed on the server. Reference ID: ${requestId}. Check the API server terminal.`;
+  const internalMessage = process.env.NODE_ENV === 'production'
+    ? (req.path.endsWith('/auth/login')
+        ? `Sign-in service error. Reference ID: ${requestId}. Check the API server terminal.`
+        : `The request failed on the server. Reference ID: ${requestId}. Check the API server terminal.`)
+    : (req.path.endsWith('/auth/login')
+        ? `Sign-in service error: ${error?.message || 'Authentication error'}. Reference ID: ${requestId}.`
+        : `Server error: ${error?.message || 'Internal failure'}. Reference ID: ${requestId}.`);
   res.status(status).json({
     error: {
       code: known ? error.code : malformedJson ? 'INVALID_JSON' : payloadTooLarge ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR',

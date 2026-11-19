@@ -7,6 +7,7 @@ import {
   StatusBadge,
   WorkspacePanel,
   Button,
+  ConfirmDialog,
 } from '../../core/ui/primitives.jsx';
 import {
   IconAcademicCap,
@@ -27,6 +28,7 @@ export function MeritModuleView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [confirmModal, setConfirmModal] = useState(null);
 
   // Policies state
   const [activePolicy, setActivePolicy] = useState(null);
@@ -50,6 +52,11 @@ export function MeritModuleView() {
 
   // Snapshots History
   const [snapshots, setSnapshots] = useState([]);
+
+  // Merit Table Filters
+  const [filterStatus, setFilterStatus] = useState('ALL'); // 'ALL' | 'SELECTED' | 'SEET_PENDING' | 'BELOW_MERIT' | 'WAITLISTED'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [quotaFilter, setQuotaFilter] = useState('ALL');
 
   // SEET Scraper & Gazette State
   const [seetMode, setSeetMode] = useState('lookup'); // 'lookup' | 'manual'
@@ -108,11 +115,11 @@ export function MeritModuleView() {
       }
       setSnapshots(snaps || []);
 
-      // If there is an existing snapshot, load the latest
-      if (snaps && snaps.length) {
+      // If there is an existing snapshot with evaluated candidates, load the latest
+      if (snaps && snaps.length && snaps[0].totalCandidates > 0) {
         loadSnapshotDetails(snaps[0].id);
       } else {
-        // Run initial dry run calculation
+        // Run initial live calculation against all currently verified candidates
         runDryRunCalculation();
       }
     } catch (err) {
@@ -144,13 +151,13 @@ export function MeritModuleView() {
       const res = await meritApi.calculateMerit({ isDryRun: true });
       setMeritData({
         snapshot: {
-          snapshotTitle: `${res.policy.name} (Dry Run Preview)`,
+          snapshotTitle: `${res.policy?.name || 'Admission Policy'} (Dry Run Preview)`,
           isLocked: false,
-          totalCandidates: res.totalCandidates,
-          selectedCount: res.selectedCount,
-          waitlistedCount: res.waitlistedCount,
+          totalCandidates: res.totalCandidates || 0,
+          selectedCount: res.selectedCount || 0,
+          waitlistedCount: res.waitlistedCount || 0,
         },
-        entries: res.entries,
+        entries: res.entries || [],
       });
       setCurrentSnapshotId(null);
       setIsLocked(false);
@@ -187,23 +194,30 @@ export function MeritModuleView() {
 
   async function handleLockSnapshot() {
     if (!currentSnapshotId) return;
-    if (!window.confirm('Are you sure you want to lock this merit list? Once locked, it is legally immutable and cannot be modified or overwritten.')) {
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      await meritApi.lockSnapshot(currentSnapshotId);
-      setIsLocked(true);
-      setSuccess('Merit snapshot locked successfully.');
-      await loadSnapshotDetails(currentSnapshotId);
-      const snaps = await meritApi.listSnapshots();
-      setSnapshots(snaps || []);
-    } catch (err) {
-      setError(err.message || 'Failed to lock snapshot.');
-    } finally {
-      setLoading(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Lock Official Merit List',
+      message: 'Are you sure you want to lock this merit list? Once locked, it is legally immutable and cannot be modified or overwritten.',
+      confirmLabel: 'Lock Snapshot (Permanent)',
+      tone: 'danger',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setLoading(true);
+        setError('');
+        try {
+          await meritApi.lockSnapshot(currentSnapshotId);
+          setIsLocked(true);
+          setSuccess('Merit snapshot locked successfully.');
+          await loadSnapshotDetails(currentSnapshotId);
+          const snaps = await meritApi.listSnapshots();
+          setSnapshots(snaps || []);
+        } catch (err) {
+          setError(err.message || 'Failed to lock snapshot.');
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   }
 
   function handleExportCsv() {
@@ -332,19 +346,28 @@ export function MeritModuleView() {
   }
 
   async function handleSyncVerifiedSeet() {
-    if (!window.confirm('Query seet.must.edu.pk for all verified students currently missing test scores?')) return;
-    setSyncingAll(true);
-    setError('');
-    setSyncSummary(null);
-    try {
-      const res = await meritApi.syncVerifiedSeet();
-      setSyncSummary(res);
-      setSuccess(`SEET batch sync finished: ${res.matched} matched, ${res.unmatched} unmatched.`);
-    } catch (err) {
-      setError(err.message || 'Failed to batch sync SEET results.');
-    } finally {
-      setSyncingAll(false);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Batch Sync SEET Portal Scores',
+      message: 'Query seet.must.edu.pk for all verified candidates currently missing admission test scores? Matching test scores will be saved and linked directly to candidate records.',
+      confirmLabel: 'Start Batch Sync',
+      tone: 'primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setSyncingAll(true);
+        setError('');
+        setSyncSummary(null);
+        try {
+          const res = await meritApi.syncVerifiedSeet();
+          setSyncSummary(res);
+          setSuccess(`SEET batch sync finished: ${res.matched} matched, ${res.unmatched} unmatched.`);
+        } catch (err) {
+          setError(err.message || 'Failed to batch sync SEET results.');
+        } finally {
+          setSyncingAll(false);
+        }
+      },
+    });
   }
 
   // Gazette PDF Upload
@@ -397,6 +420,55 @@ export function MeritModuleView() {
     Number(policyForm.fscWeightage || 0) +
     Number(policyForm.entryTestWeightage || 0);
 
+  const allEntries = meritData?.entries || [];
+
+  const totalCount = allEntries.length;
+  const selectedCount = allEntries.filter((e) => e.decisionStatus === 'SELECTED').length;
+  const seetPendingCount = allEntries.filter((e) => Number(e.entryTestScoreUsed || 0) <= 0).length;
+  const belowCutoffCount = allEntries.filter(
+    (e) =>
+      e.decisionStatus !== 'SELECTED' &&
+      (Number(e.aggregateScore || 0) < 40.0 || (e.ineligibilityReason && e.ineligibilityReason.includes('cutoff')))
+  ).length;
+  const waitlistedCount = allEntries.filter((e) => e.decisionStatus === 'WAITLISTED').length;
+
+  const availableQuotas = Array.from(
+    new Set(allEntries.map((e) => e.allocatedQuota || e.quotaCategory || 'OPEN_MERIT'))
+  );
+
+  const filteredEntries = allEntries.filter((entry) => {
+    // 1. Status Filter
+    if (filterStatus === 'SELECTED' && entry.decisionStatus !== 'SELECTED') return false;
+    if (filterStatus === 'SEET_PENDING' && Number(entry.entryTestScoreUsed || 0) > 0) return false;
+    if (
+      filterStatus === 'BELOW_MERIT' &&
+      (entry.decisionStatus === 'SELECTED' ||
+        (Number(entry.aggregateScore || 0) >= 40.0 && !entry.ineligibilityReason?.includes('cutoff')))
+    ) {
+      return false;
+    }
+    if (filterStatus === 'WAITLISTED' && entry.decisionStatus !== 'WAITLISTED') return false;
+
+    // 2. Quota Filter
+    if (quotaFilter !== 'ALL') {
+      const q = entry.allocatedQuota || entry.quotaCategory || 'OPEN_MERIT';
+      if (q !== quotaFilter) return false;
+    }
+
+    // 3. Search Filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchName = entry.fullName?.toLowerCase().includes(q);
+      const matchFather = entry.fatherName?.toLowerCase().includes(q);
+      const matchCnic = entry.cnic?.toLowerCase().includes(q);
+      const matchApp = entry.applicationNo?.toLowerCase().includes(q);
+      const matchId = String(entry.studentId || entry.id).includes(q);
+      if (!matchName && !matchFather && !matchCnic && !matchApp && !matchId) return false;
+    }
+
+    return true;
+  });
+
   return (
     <div className="space-y-5">
       {/* Alerts */}
@@ -427,10 +499,10 @@ export function MeritModuleView() {
         value={activeTab}
         onChange={setActiveTab}
         tabs={[
-          { id: 'calculations', label: 'Merit calculations' },
-          { id: 'seet', label: 'SEET & Gazette sync' },
-          { id: 'policies', label: 'Admission policies' },
-          { id: 'snapshots', label: 'Snapshots history' },
+          { id: 'calculations', label: 'Merit Calculations & Rankings' },
+          { id: 'seet', label: 'SEET & Gazette Test Sync' },
+          { id: 'policies', label: 'Admission Weightage Policies' },
+          { id: 'snapshots', label: 'Snapshot History & Export' },
         ]}
       />
 
@@ -466,7 +538,7 @@ export function MeritModuleView() {
         <div className="space-y-5">
           <WorkspacePanel
             title={meritData?.snapshot?.snapshotTitle || 'Merit Calculations'}
-            description={`${meritData?.entries?.length || 0} verified applicants evaluated (${meritData?.snapshot?.selectedCount || 0} selected, ${meritData?.snapshot?.waitlistedCount || 0} waitlisted)`}
+            description={`${filteredEntries.length} of ${totalCount} verified applicants evaluated (${selectedCount} selected, ${seetPendingCount} SEET pending, ${belowCutoffCount} below cutoff)`}
             actions={(
               <div className="flex flex-wrap items-center gap-2">
                 {snapshots.length > 0 && (
@@ -555,19 +627,211 @@ export function MeritModuleView() {
               </div>
             )}
 
+            {/* Interactive Candidate Filtering Toolbar */}
+            {allEntries.length > 0 && (
+              <div className="border-b border-slate-200 bg-slate-50/80 p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Category Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('ALL')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                        filterStatus === 'ALL'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>All</span>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        filterStatus === 'ALL' ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {totalCount}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('SELECTED')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                        filterStatus === 'SELECTED'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-50'
+                      }`}
+                    >
+                      <span className="inline-block size-1.5 rounded-full bg-emerald-400" />
+                      <span>Selected</span>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        filterStatus === 'SELECTED' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800'
+                      }`}>
+                        {selectedCount}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('SEET_PENDING')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                        filterStatus === 'SEET_PENDING'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-white text-amber-800 border border-amber-200 hover:bg-amber-50'
+                      }`}
+                    >
+                      <span className="inline-block size-1.5 rounded-full bg-amber-400" />
+                      <span>SEET Pending</span>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        filterStatus === 'SEET_PENDING' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {seetPendingCount}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('BELOW_MERIT')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                        filterStatus === 'BELOW_MERIT'
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-white text-rose-800 border border-rose-200 hover:bg-rose-50'
+                      }`}
+                    >
+                      <span className="inline-block size-1.5 rounded-full bg-rose-400" />
+                      <span>Below Merit (&lt; 40%)</span>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        filterStatus === 'BELOW_MERIT' ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-800'
+                      }`}>
+                        {belowCutoffCount}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('WAITLISTED')}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                        filterStatus === 'WAITLISTED'
+                          ? 'bg-slate-700 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>Waitlisted</span>
+                      <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
+                        filterStatus === 'WAITLISTED' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {waitlistedCount}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Quota filter, Search Input, and Reset */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {availableQuotas.length > 1 && (
+                      <select
+                        value={quotaFilter}
+                        onChange={(e) => setQuotaFilter(e.target.value)}
+                        className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700 focus:outline-none focus:border-blue-600 cursor-pointer"
+                      >
+                        <option value="ALL">All Quotas</option>
+                        {availableQuotas.map((q) => (
+                          <option key={q} value={q}>{q.replace(/_/g, ' ')}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search candidate, CNIC, app #…"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="h-8 w-48 sm:w-60 rounded-lg border border-slate-300 bg-white pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                      />
+                      <IconSearch className="size-3.5 absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <IconClose className="size-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {(filterStatus !== 'ALL' || searchQuery || quotaFilter !== 'ALL') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterStatus('ALL');
+                          setSearchQuery('');
+                          setQuotaFilter('ALL');
+                        }}
+                        className="text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer"
+                      >
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Table */}
             {loading || calculating ? (
               <div className="grid min-h-52 place-content-center justify-items-center gap-3 text-sm text-slate-500">
                 <span className="size-6 animate-spin rounded-full border-2 border-blue-100 border-t-blue-600" />
                 <span>Computing weighted merit rankings…</span>
               </div>
-            ) : !meritData?.entries?.length ? (
-              <div className="grid min-h-48 place-content-center justify-items-center p-6 text-center">
-                <IconAcademicCap className="size-10 text-slate-400 mb-2" />
-                <p className="text-sm font-semibold text-slate-800">No verified candidates found</p>
-                <p className="text-xs text-slate-500 max-w-sm mt-1">
-                  Only applicants whose overall status is <strong className="font-semibold text-emerald-700">VERIFIED</strong> in Module 3 are processed by the merit engine.
+            ) : !allEntries.length ? (
+              <div className="grid min-h-56 place-content-center justify-items-center p-8 text-center space-y-3">
+                <IconAcademicCap className="size-12 text-slate-400" />
+                <div>
+                  <p className="text-sm font-bold text-slate-800">
+                    {currentSnapshotId ? 'No Candidates in this Saved Snapshot' : 'No Verified Candidates Found'}
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-md mt-1 leading-relaxed">
+                    {currentSnapshotId
+                      ? 'This snapshot was created earlier when no candidates were verified. Switch to Live Preview to calculate current rankings with newly verified students.'
+                      : 'The merit engine strictly ranks candidates whose overall status is VERIFIED. In Module 3, a candidate becomes VERIFIED only after ALL 3 mandatory documents (CNIC Front, FSc Marksheet, Matric Marksheet) are verified.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={runDryRunCalculation}
+                    disabled={calculating}
+                  >
+                    <IconCalculator className="size-4" />
+                    <span>Run Live Preview Calculation</span>
+                  </Button>
+                </div>
+              </div>
+            ) : !filteredEntries.length ? (
+              <div className="grid min-h-48 place-content-center justify-items-center p-8 text-center space-y-2">
+                <span className="grid size-10 place-items-center rounded-full bg-slate-100 text-slate-500 mx-auto">
+                  <IconSearch className="size-5" />
+                </span>
+                <p className="text-sm font-bold text-slate-800">No Candidates Match Selected Filter</p>
+                <p className="text-xs text-slate-500 max-w-sm">
+                  {filterStatus === 'SEET_PENDING'
+                    ? 'All candidates currently evaluated have had their SEET scores recorded.'
+                    : filterStatus === 'SELECTED'
+                      ? 'No candidate has met both the SEET passing threshold and seat quota cutoff.'
+                      : filterStatus === 'BELOW_MERIT'
+                        ? 'No evaluated candidates are below the 40% merit cutoff.'
+                        : 'No candidate matches the search query or active filter.'}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterStatus('ALL');
+                    setSearchQuery('');
+                    setQuotaFilter('ALL');
+                  }}
+                  className="mt-2 text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  View all {totalCount} evaluated candidates →
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -585,7 +849,7 @@ export function MeritModuleView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {meritData.entries.map((entry) => (
+                    {filteredEntries.map((entry) => (
                       <tr key={entry.studentId || entry.id} className="hover:bg-slate-50/80 transition">
                         <td className="px-4 py-3 text-center font-mono font-bold text-sm">
                           {entry.meritPosition <= 3 ? (
@@ -609,8 +873,14 @@ export function MeritModuleView() {
                         <td className="px-3 py-3 text-center font-mono">
                           {entry.fscScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.fscTotalUsed}</span>
                         </td>
-                        <td className="px-3 py-3 text-center font-mono font-medium text-slate-900">
-                          {entry.entryTestScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.entryTestTotalUsed}</span>
+                        <td className="px-3 py-3 text-center font-mono font-medium">
+                          {entry.entryTestScoreUsed > 0 ? (
+                            <span className="text-slate-900 font-semibold">{entry.entryTestScoreUsed} <span className="text-slate-400 text-[10px]">/{entry.entryTestTotalUsed}</span></span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-sans font-medium text-amber-800 border border-amber-200" title="SEET entry test marks not yet recorded">
+                              0 / 100 (Pending)
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center font-mono text-sm font-bold text-blue-700">
                           {entry.aggregateScore.toFixed(3)}%
@@ -621,9 +891,25 @@ export function MeritModuleView() {
                           </span>
                         </td>
                         <td className="px-3 py-3 text-center">
-                          <StatusBadge tone={entry.decisionStatus === 'SELECTED' ? 'success' : 'neutral'}>
+                          <StatusBadge
+                            tone={
+                              entry.decisionStatus === 'SELECTED'
+                                ? 'success'
+                                : entry.decisionStatus === 'REJECTED'
+                                  ? 'danger'
+                                  : 'neutral'
+                            }
+                          >
                             {entry.decisionStatus}
                           </StatusBadge>
+                          {entry.decisionStatus !== 'SELECTED' && (
+                            <div
+                              className="text-[10px] text-amber-700 font-medium mt-0.5"
+                              title={entry.ineligibilityReason || 'Test score pending or below 40% cutoff'}
+                            >
+                              {entry.entryTestScoreUsed <= 0 ? 'SEET test pending' : 'Below 40% cutoff'}
+                            </div>
+                          )}
                           {entry.tieBreakLevel > 0 && (
                             <div className="text-[10px] text-amber-700 font-medium mt-0.5" title={`Tie resolved at Tier ${entry.tieBreakLevel}`}>
                               Tier {entry.tieBreakLevel} Tie-break
@@ -1254,6 +1540,19 @@ export function MeritModuleView() {
             </form>
           </div>
         </div>
+      )}
+      {/* Confirmation Dialog */}
+      {confirmModal && (
+        <ConfirmDialog
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmLabel={confirmModal.confirmLabel}
+          tone={confirmModal.tone}
+          loading={loading || syncingAll}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   );

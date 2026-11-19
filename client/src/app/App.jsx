@@ -19,16 +19,31 @@ import {
 } from '../core/icons/Icons.jsx';
 
 const navigation = [
-  { id: 'marketing', label: 'Dashboard', icon: IconDashboard },
-  { id: 'verification', label: 'Document verification', icon: IconDocumentCheck },
-  { id: 'merit', label: 'Merit lists', icon: IconAcademicCap },
+  {
+    id: 'marketing',
+    step: '1',
+    label: 'Marketing & Leads',
+    icon: IconDashboard,
+  },
+  {
+    id: 'verification',
+    step: '2',
+    label: 'Document Verification',
+    icon: IconDocumentCheck,
+  },
+  {
+    id: 'merit',
+    step: '3',
+    label: 'Merit & Rankings',
+    icon: IconAcademicCap,
+  },
 ];
 
 export function App() {
   const { status, user, sessionExpired, signOut } = useAuth();
   const [currentNav, setCurrentNav] = useState('marketing');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [waStatus, setWaStatus] = useState({ connected: false, status: 'CHECKING', phone: null });
 
   useEffect(() => {
@@ -84,39 +99,74 @@ export function App() {
         className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-slate-200 bg-white pb-4 transition-all duration-200 ${sidebarCollapsed ? 'w-[256px] px-3 lg:w-[72px] lg:px-2' : 'w-[256px] px-3'} lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full'}`}
         aria-label="Main navigation"
       >
-        <div className={`flex h-[88px] shrink-0 items-center border-b border-slate-100 ${sidebarCollapsed ? 'justify-center px-2' : 'gap-2 px-3'}`}>
-          <a href="#main-content" className={`flex min-w-0 items-center gap-3 no-underline ${sidebarCollapsed ? 'lg:gap-0' : ''}`}>
-            <img src="/department-logo.png" alt="Software Engineering department logo" className="size-12 shrink-0 object-contain" />
-            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''} flex min-w-0 flex-col gap-1`}>
-              <strong className="truncate text-sm font-bold tracking-tight text-slate-900">SE Admissions</strong>
-              <small className="text-[10px] font-semibold uppercase tracking-[.11em] text-slate-500">Staff workspace</small>
+        <div className={`flex h-16 shrink-0 items-center border-b border-slate-100 ${sidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>
+          <a href="#main-content" className={`flex min-w-0 items-center gap-2.5 no-underline ${sidebarCollapsed ? 'lg:gap-0' : ''}`}>
+            <img src="/department-logo.png" alt="Software Engineering department logo" className="size-9 shrink-0 object-contain" />
+            <span className={`${sidebarCollapsed ? 'lg:hidden' : ''} flex min-w-0 flex-col`}>
+              <strong className="truncate text-xs font-bold tracking-tight text-slate-900">SE Admissions</strong>
+              <small className="text-[10px] text-slate-500">Department Portal</small>
             </span>
           </a>
         </div>
 
-        <nav className="flex-1 py-6">
-          <p className={`${sidebarCollapsed ? 'lg:hidden' : ''} mb-2 px-3 text-[11px] font-bold uppercase tracking-[.1em] text-slate-400`}>Workspace</p>
-          {navigation.map(({ id, label, icon: Icon }) => (
+        <nav className="flex-1 px-3 py-4 space-y-1">
+          <p className={`${sidebarCollapsed ? 'lg:hidden' : ''} mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400`}>Admissions Workflow</p>
+          {navigation.map(({ id, step, label }) => (
             <button
               key={id}
               type="button"
               onClick={() => selectNavigation(id)}
-              title={sidebarCollapsed ? label : undefined}
+              title={sidebarCollapsed ? `${step}. ${label}` : undefined}
               aria-label={label}
-              className={`relative my-1 flex min-h-[44px] w-full items-center rounded-md text-left text-sm transition gap-3 px-3 ${sidebarCollapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''} ${currentNav === id ? 'bg-blue-50 font-semibold text-blue-800 before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-r before:bg-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+              className={`relative flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition cursor-pointer text-xs ${
+                sidebarCollapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''
+              } ${
+                currentNav === id
+                  ? 'bg-blue-50 text-blue-700 font-semibold border border-blue-200/80 shadow-2xs'
+                  : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 font-medium border border-transparent'
+              }`}
               aria-current={currentNav === id ? 'page' : undefined}
             >
-              <Icon className={`size-[18px] shrink-0 ${currentNav === id ? 'text-blue-700' : 'text-slate-400'}`} />
-              <span className={sidebarCollapsed ? 'lg:hidden' : ''}>{label}</span>
+              <span
+                className={`flex size-5 shrink-0 items-center justify-center rounded font-mono text-[10px] font-bold transition-colors ${
+                  currentNav === id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {step}
+              </span>
+              <span className={`${sidebarCollapsed ? 'lg:hidden' : ''} truncate text-xs font-medium`}>
+                {label}
+              </span>
             </button>
           ))}
 
           {isSuperAdmin && (
             <>
-              <p className={`${sidebarCollapsed ? 'lg:hidden' : ''} mb-2 mt-8 px-3 text-[11px] font-bold uppercase tracking-[.1em] text-slate-400`}>Administration</p>
-              <button type="button" title={sidebarCollapsed ? 'Staff management' : undefined} aria-label="Staff management" onClick={() => selectNavigation('staff')} className={`relative my-1 flex min-h-[44px] w-full items-center gap-3 rounded-md px-3 text-left text-sm transition ${sidebarCollapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''} ${currentNav === 'staff' ? 'bg-blue-50 font-semibold text-blue-800 before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-r before:bg-blue-600' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`} aria-current={currentNav === 'staff' ? 'page' : undefined}>
-                <IconUsers className="size-[18px] shrink-0 text-slate-400" />
-                <span className={sidebarCollapsed ? 'lg:hidden' : ''}>Staff management</span>
+              <p className={`${sidebarCollapsed ? 'lg:hidden' : ''} mb-2 mt-6 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400`}>Administration</p>
+              <button
+                type="button"
+                title={sidebarCollapsed ? 'Staff Management' : undefined}
+                aria-label="Staff Management"
+                onClick={() => selectNavigation('staff')}
+                className={`relative flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition cursor-pointer text-xs ${
+                  sidebarCollapsed ? 'lg:justify-center lg:gap-0 lg:px-0' : ''
+                } ${
+                  currentNav === 'staff'
+                    ? 'bg-blue-50 text-blue-700 font-semibold border border-blue-200/80 shadow-2xs'
+                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 font-medium border border-transparent'
+                }`}
+                aria-current={currentNav === 'staff' ? 'page' : undefined}
+              >
+                <div
+                  className={`flex size-5 shrink-0 items-center justify-center rounded font-mono text-[10px] font-bold transition-colors ${
+                    currentNav === 'staff' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  <IconUsers className="size-3" />
+                </div>
+                <span className={`${sidebarCollapsed ? 'lg:hidden' : ''} truncate text-xs font-medium`}>
+                  Staff Management
+                </span>
               </button>
             </>
           )}
@@ -146,14 +196,45 @@ export function App() {
       <div className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? 'lg:pl-[72px]' : 'lg:pl-[256px]'}`}>
         <header className="sticky top-0 z-20 flex min-h-[72px] items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 sm:px-7">
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" className="grid size-9 shrink-0 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 lg:hidden" aria-label="Open navigation menu" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>
+            <button
+              type="button"
+              className="grid size-9 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 lg:hidden cursor-pointer"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
               <IconMenu className="size-[18px]" />
             </button>
             <div className="min-w-0">
-              <p className="mb-0 text-[10px] font-bold uppercase tracking-[.12em] text-slate-400">Admissions operations</p>
-              <p className="mb-0 mt-1 truncate text-sm text-slate-600">Welcome back, <strong className="font-semibold text-slate-900">{user.displayName}</strong></p>
+              <p className="mb-0 truncate text-xs text-slate-600">
+                Department Admissions Portal · Signed in as <strong className="font-semibold text-slate-900">{user.displayName}</strong>
+              </p>
             </div>
           </div>
+
+          {/* Institutional Workflow Stepper: One-Click Quick Navigation */}
+          <div className="hidden xl:flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50/80 p-1 text-xs shadow-2xs">
+            {navigation.map(({ id, step, label }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => selectNavigation(id)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition cursor-pointer ${
+                  currentNav === id
+                    ? 'bg-white text-blue-800 shadow-xs border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+              >
+                <span className={`inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                  currentNav === id ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {step}
+                </span>
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
           <div className="flex shrink-0 items-center gap-2.5 sm:gap-4">
             {/* WhatsApp Session Health Badge */}
             {waStatus.connected ? (
@@ -205,54 +286,47 @@ export function App() {
           </div>
         </header>
 
-        <main id="main-content" className="mx-auto w-full max-w-[1520px] px-4 py-6 sm:px-7 sm:py-8 xl:px-9">
+        <main id="main-content" className="mx-auto w-full max-w-[1520px] px-4 py-5 sm:px-7 sm:py-6 xl:px-9">
           {currentNav === 'marketing' && (
             <div>
-              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-blue-700">Department of Software Engineering</p>
-                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Admissions overview</h1>
-                </div>
-              </section>
+              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                  Marketing & Leads
+                </h1>
+              </div>
               <MarketingModuleView />
             </div>
           )}
 
           {currentNav === 'verification' && (
             <div>
-              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-blue-700">Admissions workspace</p>
-                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Document verification</h1>
-                </div>
-                <p className="mb-1 text-xs font-medium text-slate-500">Review applicant documents</p>
-              </section>
+              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                  Document Verification
+                </h1>
+              </div>
               <VerificationModuleView />
             </div>
           )}
 
           {currentNav === 'merit' && (
             <div>
-              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-blue-700">Admissions workspace</p>
-                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Merit engine & snapshots</h1>
-                </div>
-                <p className="mb-1 text-xs font-medium text-slate-500">Official ranking, SEET test sync & snapshots</p>
-              </section>
+              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                  Merit & Rankings
+                </h1>
+              </div>
               <MeritModuleView />
             </div>
           )}
 
           {currentNav === 'staff' && isSuperAdmin && (
             <div>
-              <section className="mb-6 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="mb-1 text-xs font-semibold text-blue-700">Administration</p>
-                  <h1 className="m-0 text-[26px] font-bold leading-tight tracking-[-.025em] text-slate-900 sm:text-[30px]">Staff management</h1>
-                </div>
-                <p className="mb-1 text-xs font-medium text-slate-500">Manage workspace access</p>
-              </section>
+              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                  Staff Management
+                </h1>
+              </div>
               <UserManagementView />
             </div>
           )}

@@ -5,6 +5,7 @@ import { AppError } from '../../../core/errors/app-error.js';
 import { DECISION_STATUS } from '../merit.constants.js';
 import { MeritEngineService } from './merit-engine.service.js';
 import { MeritPolicyService } from './merit-policy.service.js';
+import { ensureMeritSchema } from './merit-schema.service.js';
 
 export class MeritSnapshotService {
   /**
@@ -14,6 +15,8 @@ export class MeritSnapshotService {
     { policyId = null, snapshotTitle = null, iterationNumber = 1, isDryRun = false, userId = null },
     db = pool
   ) {
+    await ensureMeritSchema(db);
+
     // 1. Run engine calculation
     const calcResult = await MeritEngineService.runCalculation({ policyId }, db);
 
@@ -173,6 +176,8 @@ export class MeritSnapshotService {
    * Lists all merit snapshots
    */
   static async listSnapshots(db = pool) {
+    await ensureMeritSchema(db);
+
     const [rows] = await db.query(
       `SELECT s.id, s.policy_id, s.snapshot_title, s.iteration_number, s.is_locked,
               s.total_candidates, s.selected_count, s.waitlisted_count,
@@ -212,6 +217,8 @@ export class MeritSnapshotService {
    * Retrieves full snapshot details with all ranked candidate entries
    */
   static async getSnapshotDetails(snapshotId, db = pool) {
+    await ensureMeritSchema(db);
+
     const [snapRows] = await db.query(
       `SELECT s.id, s.policy_id, s.snapshot_title, s.iteration_number, s.is_locked,
               s.total_candidates, s.selected_count, s.waitlisted_count,

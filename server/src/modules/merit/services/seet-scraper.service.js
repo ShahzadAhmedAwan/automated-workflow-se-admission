@@ -1,6 +1,7 @@
 import { pool } from '../../../core/db/pool.js';
 import { AppError } from '../../../core/errors/app-error.js';
 import { RESULT_SOURCES } from '../merit.constants.js';
+import { ensureMeritSchema } from './merit-schema.service.js';
 
 export class SeetScraperService {
   /**
@@ -444,6 +445,8 @@ export class SeetScraperService {
    * Saves SEET test result into mrt_official_results and backfills adm_students
    */
   static async saveResultAndBackfill(resultPayload, db = pool) {
+    await ensureMeritSchema(db);
+
     const {
       cnic,
       rollNo = null,
@@ -545,6 +548,8 @@ export class SeetScraperService {
    * Scans all VERIFIED candidates without SEET marks and queries the portal
    */
   static async syncVerifiedCandidates(options = {}, db = pool) {
+    await ensureMeritSchema(db);
+
     const [students] = await db.query(
       `SELECT id, cnic, full_name, entry_test_marks
        FROM adm_students

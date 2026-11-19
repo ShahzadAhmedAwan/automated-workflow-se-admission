@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { verificationApi } from './verificationApi.js';
-import { Button } from '../../core/ui/primitives.jsx';
+import { Button, ConfirmDialog } from '../../core/ui/primitives.jsx';
 
 const emptyForm = { boardName: '', boardAliases: '', academicYear: '', sourceType: 'PORTAL_URL', resultUrl: '', gazette: null };
 
@@ -11,6 +11,7 @@ export function BoardSourcesPanel() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [confirmSource, setConfirmSource] = useState(null);
 
   async function loadSources() {
     setLoading(true);
@@ -57,13 +58,21 @@ export function BoardSourcesPanel() {
     } finally { setSaving(false); }
   }
 
-  async function deactivate(source) {
-    if (!confirm(`Turn off the ${source.board_name} ${source.academic_year} source?`)) return;
+  function handleDeactivateClick(source) {
+    setConfirmSource(source);
+  }
+
+  async function confirmDeactivate() {
+    if (!confirmSource) return;
     try {
-      await verificationApi.deactivateBoardSource(source.id);
+      await verificationApi.deactivateBoardSource(confirmSource.id);
       await loadSources();
       setMessage('Board source turned off.');
-    } catch (error) { setMessage(error.message || 'Could not update this board source.'); }
+    } catch (error) {
+      setMessage(error.message || 'Could not update this board source.');
+    } finally {
+      setConfirmSource(null);
+    }
   }
 
   return (
@@ -130,13 +139,26 @@ export function BoardSourcesPanel() {
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button size="sm" variant="subtle" onClick={() => editSource(source)}>Edit</Button>
-                  {source.is_active && <Button size="sm" variant="subtle" onClick={() => deactivate(source)}>Turn off</Button>}
+                  {source.is_active && <Button size="sm" variant="subtle" onClick={() => handleDeactivateClick(source)}>Turn off</Button>}
                 </div>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      {/* Confirmation Dialog */}
+      {confirmSource && (
+        <ConfirmDialog
+          isOpen={Boolean(confirmSource)}
+          title="Turn Off Board Source"
+          message={`Turn off the ${confirmSource.board_name} (${confirmSource.academic_year}) source? It will no longer be queried during candidate document verification.`}
+          confirmLabel="Turn Off Source"
+          tone="warning"
+          onConfirm={confirmDeactivate}
+          onCancel={() => setConfirmSource(null)}
+        />
+      )}
     </div>
   );
 }

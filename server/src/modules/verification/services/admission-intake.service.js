@@ -495,20 +495,31 @@ export class AdmissionIntakeService {
   /**
    * Staff query: List candidates needing review or with discrepancies
    */
-  static async listManualReviewQueue({ limit = 50, offset = 0, status }, db = pool) {
+  static async listManualReviewQueue({ limit = 50, offset = 0, status, search }, db = pool) {
     const allowedStatuses = [
       STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
       STUDENT_OVERALL_STATUS.UNDER_REVIEW,
       STUDENT_OVERALL_STATUS.DOCS_REQUESTED,
       STUDENT_OVERALL_STATUS.VERIFIED,
     ];
-    if (status && !allowedStatuses.includes(status)) {
+    const isProblemFilter = status === 'PROBLEMS_ONLY' || status === 'HAS_PROBLEM';
+    if (status && !allowedStatuses.includes(status) && !isProblemFilter) {
       throw new AppError(400, 'INVALID_QUEUE_STATUS', 'Choose a valid verification queue status.');
     }
     const whereClauses = [];
     const params = [];
 
-    if (status) {
+    if (isProblemFilter) {
+      whereClauses.push(`(
+        s.overall_status = 'NEEDS_MANUAL_REVIEW'
+        OR (s.overall_status != 'VERIFIED' AND s.discrepancy_notes IS NOT NULL AND TRIM(s.discrepancy_notes) != '')
+        OR EXISTS (
+          SELECT 1 FROM adm_student_documents d
+          WHERE d.student_id = s.id
+            AND d.verification_status IN ('DISCREPANCY', 'REJECTED', 'MANUAL_REVIEW')
+        )
+      )`);
+    } else if (status) {
       whereClauses.push('s.overall_status = ?');
       params.push(status);
     } else {
@@ -521,11 +532,23 @@ export class AdmissionIntakeService {
       );
     }
 
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      const numQ = Number(search.trim());
+      if (Number.isInteger(numQ) && numQ > 0) {
+        whereClauses.push('(s.full_name LIKE ? OR s.phone_normalized LIKE ? OR s.cnic LIKE ? OR s.application_no LIKE ? OR s.id = ? OR s.lead_id = ?)');
+        params.push(q, q, q, q, numQ, numQ);
+      } else {
+        whereClauses.push('(s.full_name LIKE ? OR s.phone_normalized LIKE ? OR s.cnic LIKE ? OR s.application_no LIKE ?)');
+        params.push(q, q, q, q);
+      }
+    }
+
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
     const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 25)));
     const safeOffset = Math.max(0, Math.min(1_000_000, Math.trunc(Number(offset) || 0)));
 
-    const [[rows], [countRows], [summaryRows]] = await Promise.all([
+    const [[rows], [countRows], [summaryRows], [problemCountRows]] = await Promise.all([
       db.query(
         `SELECT s.id AS student_id, s.lead_id, s.application_no, s.cnic, s.full_name, s.father_name,
                 s.phone_normalized, s.email, s.city, s.prior_degree, s.eligible_for, s.fsc_obtained_marks, s.fsc_total_marks,
@@ -544,6 +567,16 @@ export class AdmissionIntakeService {
           WHERE overall_status IN (?, ?, ?, ?) GROUP BY overall_status`,
         allowedStatuses
       ),
+      db.query(
+        `SELECT COUNT(*) AS total FROM adm_students s
+         WHERE s.overall_status = 'NEEDS_MANUAL_REVIEW'
+            OR (s.overall_status != 'VERIFIED' AND s.discrepancy_notes IS NOT NULL AND TRIM(s.discrepancy_notes) != '')
+            OR EXISTS (
+              SELECT 1 FROM adm_student_documents d
+              WHERE d.student_id = s.id
+                AND d.verification_status IN ('DISCREPANCY', 'REJECTED', 'MANUAL_REVIEW')
+            )`
+      ),
     ]);
 
     // Fetch document verification breakdown per student
@@ -551,7 +584,7 @@ export class AdmissionIntakeService {
     let docsByStudent = {};
     if (studentIds.length > 0) {
       const [docRows] = await db.query(
-        `SELECT student_id, doc_type, verification_status
+        `SELECT student_id, doc_type, verification_status, review_notes
            FROM adm_student_documents
           WHERE student_id IN (${studentIds.map(() => '?').join(',')})`,
         studentIds
@@ -561,6 +594,7 @@ export class AdmissionIntakeService {
         docsByStudent[d.student_id][d.doc_type] = {
           status: d.verification_status,
           isVerified: d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED',
+          reviewNotes: d.review_notes || null,
         };
       }
     }
@@ -570,6 +604,15 @@ export class AdmissionIntakeService {
       const missingMandatoryDocs = MANDATORY_ADMISSION_DOCUMENTS.filter(
         (docType) => !studentDocs[docType] || !studentDocs[docType].isVerified
       );
+
+      const problemDocs = Object.entries(studentDocs)
+        .filter(([, doc]) => ['DISCREPANCY', 'REJECTED', 'MANUAL_REVIEW'].includes(doc.status))
+        .map(([type, doc]) => ({ type, status: doc.status, notes: doc.reviewNotes }));
+
+      const hasProblem =
+        r.overall_status === STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW ||
+        (r.overall_status !== STUDENT_OVERALL_STATUS.VERIFIED && Boolean(r.discrepancy_notes && r.discrepancy_notes.trim())) ||
+        problemDocs.length > 0;
 
       return {
         studentId: r.student_id,
@@ -592,12 +635,16 @@ export class AdmissionIntakeService {
         documentCount: Number(r.document_count),
         verifiedDocuments: studentDocs,
         missingDocuments: missingMandatoryDocs,
+        hasProblem,
+        problemDocs,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
       };
     });
     const summary = Object.fromEntries(allowedStatuses.map((value) => [value, 0]));
     for (const row of summaryRows) summary[row.overall_status] = Number(row.total);
+    summary.PROBLEMS_ONLY = Number(problemCountRows[0]?.total || 0);
+
     return {
       items,
       total: Number(countRows[0]?.total || 0),
@@ -1327,6 +1374,9 @@ export class AdmissionIntakeService {
 
       const [studentAfter] = await connection.execute(`SELECT overall_status, verified_at, verified_by FROM adm_students WHERE id = ?`, [studentId]);
       await connection.commit();
+      if (studentAfter[0]?.overall_status === STUDENT_OVERALL_STATUS.VERIFIED) {
+        this.triggerAutoSeetLookup(studentId);
+      }
       return { success: true, action, studentId, ...studentAfter[0] };
     } catch (err) {
       await connection.rollback();
@@ -1553,6 +1603,33 @@ export class AdmissionIntakeService {
         fileMime: targetDocument.file_mime,
       },
       connection,
+    });
+  }
+
+  /**
+   * Non-blocking automated SEET entry test lookup when a candidate becomes VERIFIED
+   */
+  static triggerAutoSeetLookup(studentId) {
+    setImmediate(async () => {
+      try {
+        const [rows] = await pool.query(
+          `SELECT id, cnic, full_name, entry_test_marks
+           FROM adm_students
+           WHERE id = ? AND overall_status = 'VERIFIED'
+             AND (entry_test_marks IS NULL OR entry_test_marks = 0)
+             AND cnic IS NOT NULL`,
+          [studentId]
+        );
+        if (rows.length && rows[0].cnic) {
+          const { SeetScraperService } = await import('../../merit/services/seet-scraper.service.js');
+          const result = await SeetScraperService.lookupByCnic(rows[0].cnic, { timeoutMs: 3000 });
+          if (result?.found && result?.data) {
+            await SeetScraperService.saveResultAndBackfill(result.data, pool);
+          }
+        }
+      } catch (err) {
+        // Non-blocking auto-lookup: logs silently if university portal is temporarily unreachable
+      }
     });
   }
 }

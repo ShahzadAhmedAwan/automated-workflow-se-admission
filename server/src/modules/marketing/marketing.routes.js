@@ -40,6 +40,35 @@ marketingRoutes.get(
   CampaignController.getCampaign
 );
 
+// Lead management endpoints (View all students, edit in UI, details)
+marketingRoutes.get(
+  '/leads',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.listLeads
+);
+
+marketingRoutes.get(
+  '/leads/:id',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.getLead
+);
+
+marketingRoutes.patch(
+  '/leads/:id',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.updateLead
+);
+
+marketingRoutes.delete(
+  '/leads/:id',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.deleteLead
+);
+
 // Two-stage bulk ingestion
 marketingRoutes.post(
   '/leads/preview',

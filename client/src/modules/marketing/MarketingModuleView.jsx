@@ -11,6 +11,7 @@ import {
   IconDownload,
   IconPencil,
   IconUsers,
+  IconTrash,
 } from '../../core/icons/Icons.jsx';
 import { MetricStrip, SectionTabs, StatusBadge, WorkspacePanel, ConfirmDialog } from '../../core/ui/primitives.jsx';
 
@@ -240,6 +241,27 @@ export function MarketingModuleView() {
           loadCampaigns();
         } catch (err) {
           setError(err.message || 'Failed to remove lead.');
+        }
+      },
+    });
+  }
+
+  async function handleDeleteCampaign(campaign) {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Campaign',
+      message: `Are you sure you want to delete campaign "${campaign.name}"? This will remove the campaign and all associated student leads.`,
+      confirmLabel: 'Delete Campaign',
+      tone: 'danger',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await marketingApi.deleteCampaign(campaign.id);
+          setSuccess(`Campaign "${campaign.name}" deleted successfully.`);
+          loadCampaigns();
+          loadLeads();
+        } catch (err) {
+          setError(err.message || 'Failed to delete campaign.');
         }
       },
     });
@@ -557,12 +579,21 @@ export function MarketingModuleView() {
                       <td className="px-4 py-4 text-right tabular-nums text-slate-600">{c.sentCount}</td>
                       <td className="px-4 py-4 text-right tabular-nums font-medium text-emerald-700">{c.eligibleCount}</td>
                       <td className="px-5 py-4 text-right sm:px-6">
-                        <button
-                          onClick={() => handleTriggerOutreach(c)}
-                          className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 cursor-pointer"
-                        >
-                          <IconSend className="size-3.5" /> Start
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleTriggerOutreach(c)}
+                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 cursor-pointer"
+                          >
+                            <IconSend className="size-3.5" /> Start
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCampaign(c)}
+                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 cursor-pointer"
+                            title="Delete Campaign"
+                          >
+                            <IconTrash className="size-3.5" /> Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

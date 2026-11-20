@@ -40,6 +40,13 @@ marketingRoutes.get(
   CampaignController.getCampaign
 );
 
+marketingRoutes.delete(
+  '/campaigns/:id',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.deleteCampaign
+);
+
 // Lead management endpoints (View all students, edit in UI, details)
 marketingRoutes.get(
   '/leads',

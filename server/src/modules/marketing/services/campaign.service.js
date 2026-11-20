@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { pool } from '../../../core/db/pool.js';
 import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
@@ -30,10 +31,16 @@ export class CampaignService {
    */
   static async listCampaigns({ limit = 50, offset = 0 } = {}, db = pool) {
     const [rows] = await db.query(
-      `SELECT id, name, description, status, total_leads, sent_count, responded_count, eligible_count,
-              created_by, created_at, updated_at
-       FROM mkt_campaigns
-       ORDER BY id DESC
+      `SELECT c.id, c.name, c.description, c.status,
+              COUNT(l.id) AS total_leads,
+              SUM(CASE WHEN l.conversation_state != 'IDLE' THEN 1 ELSE 0 END) AS sent_count,
+              SUM(CASE WHEN l.conversation_state NOT IN ('IDLE', 'GREETING_SENT') THEN 1 ELSE 0 END) AS responded_count,
+              SUM(CASE WHEN l.eligibility_status = 'ELIGIBLE' OR l.conversation_state = 'QUALIFIED' THEN 1 ELSE 0 END) AS eligible_count,
+              c.created_by, c.created_at, c.updated_at
+       FROM mkt_campaigns c
+       LEFT JOIN mkt_leads l ON l.campaign_id = c.id
+       GROUP BY c.id
+       ORDER BY c.id DESC
        LIMIT ? OFFSET ?`,
       [Number(limit), Number(offset)]
     );
@@ -42,10 +49,10 @@ export class CampaignService {
       name: r.name,
       description: r.description,
       status: r.status,
-      totalLeads: r.total_leads,
-      sentCount: r.sent_count,
-      respondedCount: r.responded_count,
-      eligibleCount: r.eligible_count,
+      totalLeads: Number(r.total_leads || 0),
+      sentCount: Number(r.sent_count || 0),
+      respondedCount: Number(r.responded_count || 0),
+      eligibleCount: Number(r.eligible_count || 0),
       createdBy: r.created_by,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -56,11 +63,17 @@ export class CampaignService {
    * Get single campaign details with statistics
    */
   static async getCampaignById(campaignId, db = pool) {
-    const [rows] = await db.execute(
-      `SELECT id, name, description, status, total_leads, sent_count, responded_count, eligible_count,
-              created_by, created_at, updated_at
-       FROM mkt_campaigns
-       WHERE id = ?`,
+    const [rows] = await db.query(
+      `SELECT c.id, c.name, c.description, c.status,
+              COUNT(l.id) AS total_leads,
+              SUM(CASE WHEN l.conversation_state != 'IDLE' THEN 1 ELSE 0 END) AS sent_count,
+              SUM(CASE WHEN l.conversation_state NOT IN ('IDLE', 'GREETING_SENT') THEN 1 ELSE 0 END) AS responded_count,
+              SUM(CASE WHEN l.eligibility_status = 'ELIGIBLE' OR l.conversation_state = 'QUALIFIED' THEN 1 ELSE 0 END) AS eligible_count,
+              c.created_by, c.created_at, c.updated_at
+       FROM mkt_campaigns c
+       LEFT JOIN mkt_leads l ON l.campaign_id = c.id
+       WHERE c.id = ?
+       GROUP BY c.id`,
       [campaignId]
     );
     if (!rows.length) {
@@ -72,10 +85,10 @@ export class CampaignService {
       name: r.name,
       description: r.description,
       status: r.status,
-      totalLeads: r.total_leads,
-      sentCount: r.sent_count,
-      respondedCount: r.responded_count,
-      eligibleCount: r.eligible_count,
+      totalLeads: Number(r.total_leads || 0),
+      sentCount: Number(r.sent_count || 0),
+      respondedCount: Number(r.responded_count || 0),
+      eligibleCount: Number(r.eligible_count || 0),
       createdBy: r.created_by,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -457,15 +470,183 @@ export class CampaignService {
     }
   }
 
-  static async deleteLead(leadId, db = pool) {
-    const [result] = await db.query(
-      `DELETE FROM mkt_leads WHERE id = ?`,
-      [Number(leadId)]
-    );
-    if (!result.affectedRows) {
-      throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+  /**
+   * Delete a campaign, all its leads, associated students, uploaded docs, and outbox jobs
+   */
+  static async deleteCampaign(campaignId, db = pool) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Find all leads belonging to this campaign
+      const [leads] = await connection.query(
+        'SELECT id, phone_normalized FROM mkt_leads WHERE campaign_id = ?',
+        [Number(campaignId)]
+      );
+      const leadIds = leads.map((l) => l.id);
+
+      if (leadIds.length > 0) {
+        const placeholders = leadIds.map(() => '?').join(',');
+
+        // 1. Find associated students
+        const [students] = await connection.query(
+          `SELECT id FROM adm_students WHERE lead_id IN (${placeholders})`,
+          leadIds
+        );
+        const studentIds = students.map((s) => s.id);
+
+        if (studentIds.length > 0) {
+          const sPlaceholders = studentIds.map(() => '?').join(',');
+
+          // Clean up disk documents
+          const [docRows] = await connection.query(
+            `SELECT storage_key FROM adm_student_documents WHERE student_id IN (${sPlaceholders})`,
+            studentIds
+          );
+
+          for (const doc of docRows) {
+            if (doc.storage_key) {
+              const possiblePaths = [
+                path.resolve(process.cwd(), 'data', 'uploads', doc.storage_key),
+                path.resolve(process.cwd(), 'data', doc.storage_key),
+                path.resolve(process.cwd(), 'server', 'data', 'uploads', doc.storage_key),
+                path.resolve(process.cwd(), doc.storage_key),
+              ];
+              for (const p of possiblePaths) {
+                if (fs.existsSync(p)) {
+                  try { fs.unlinkSync(p); } catch {}
+                }
+              }
+            }
+          }
+
+          // Delete students (cascades to tokens, documents, merit entries)
+          await connection.query(
+            `DELETE FROM adm_students WHERE id IN (${sPlaceholders})`,
+            studentIds
+          );
+        }
+
+        // Cancel pending outbox jobs for these leads
+        for (const lead of leads) {
+          if (lead.phone_normalized) {
+            const clean = lead.phone_normalized.replace(/\D/g, '');
+            const suffix = clean.length >= 9 ? clean.slice(-9) : clean;
+            await connection.query(
+              'DELETE FROM outbox_jobs WHERE payload LIKE ?',
+              [`%${suffix}%`]
+            );
+          }
+        }
+
+        // Delete leads
+        await connection.query(
+          `DELETE FROM mkt_leads WHERE id IN (${placeholders})`,
+          leadIds
+        );
+      }
+
+      // Delete the campaign itself
+      const [res] = await connection.query(
+        'DELETE FROM mkt_campaigns WHERE id = ?',
+        [Number(campaignId)]
+      );
+
+      if (!res.affectedRows) {
+        throw new AppError(404, 'CAMPAIGN_NOT_FOUND', 'Campaign not found');
+      }
+
+      await connection.commit();
+      return { success: true, campaignId: Number(campaignId) };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
     }
-    return { success: true, leadId: Number(leadId) };
+  }
+
+  static async deleteLead(leadId, db = pool) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [leads] = await connection.query(
+        'SELECT id, campaign_id, phone_normalized FROM mkt_leads WHERE id = ?',
+        [Number(leadId)]
+      );
+      if (!leads.length) {
+        throw new AppError(404, 'LEAD_NOT_FOUND', 'Lead not found');
+      }
+      const lead = leads[0];
+
+      // Delete associated candidate student if exists
+      const [students] = await connection.query(
+        'SELECT id FROM adm_students WHERE lead_id = ?',
+        [lead.id]
+      );
+      if (students.length > 0) {
+        const studentIds = students.map((s) => s.id);
+        const placeholders = studentIds.map(() => '?').join(',');
+
+        const [docRows] = await connection.query(
+          `SELECT storage_key FROM adm_student_documents WHERE student_id IN (${placeholders})`,
+          studentIds
+        );
+        for (const doc of docRows) {
+          if (doc.storage_key) {
+            const possiblePaths = [
+              path.resolve(process.cwd(), 'data', 'uploads', doc.storage_key),
+              path.resolve(process.cwd(), 'data', doc.storage_key),
+              path.resolve(process.cwd(), 'server', 'data', 'uploads', doc.storage_key),
+              path.resolve(process.cwd(), doc.storage_key),
+            ];
+            for (const p of possiblePaths) {
+              if (fs.existsSync(p)) {
+                try { fs.unlinkSync(p); } catch {}
+              }
+            }
+          }
+        }
+
+        await connection.query(
+          `DELETE FROM adm_students WHERE id IN (${placeholders})`,
+          studentIds
+        );
+      }
+
+      // Cancel outbox jobs for this lead
+      if (lead.phone_normalized) {
+        const clean = lead.phone_normalized.replace(/\D/g, '');
+        const suffix = clean.length >= 9 ? clean.slice(-9) : clean;
+        await connection.query(
+          'DELETE FROM outbox_jobs WHERE payload LIKE ?',
+          [`%${suffix}%`]
+        );
+      }
+
+      // Delete the lead
+      await connection.query('DELETE FROM mkt_leads WHERE id = ?', [lead.id]);
+
+      // If the campaign now has 0 leads, delete the empty campaign!
+      if (lead.campaign_id) {
+        const [remaining] = await connection.query(
+          'SELECT COUNT(*) AS cnt FROM mkt_leads WHERE campaign_id = ?',
+          [lead.campaign_id]
+        );
+        if (remaining[0].cnt === 0) {
+          await connection.query('DELETE FROM mkt_campaigns WHERE id = ?', [lead.campaign_id]);
+        }
+      }
+
+      await connection.commit();
+      return { success: true, leadId: Number(leadId) };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
   }
 
   /**

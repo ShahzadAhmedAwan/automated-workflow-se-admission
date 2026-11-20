@@ -19,6 +19,13 @@ export const marketingApi = {
     return res.data;
   },
 
+  async deleteCampaign(id) {
+    const res = await apiRequest(`/marketing/campaigns/${id}`, {
+      method: 'DELETE',
+    }, true);
+    return res.data;
+  },
+
   async listLeads({ campaignId, status, conversationState, search, limit = 50, offset = 0 } = {}) {
     const params = new URLSearchParams();
     if (campaignId) params.append('campaignId', campaignId);

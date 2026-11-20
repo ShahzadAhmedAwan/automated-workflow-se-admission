@@ -46,6 +46,15 @@ export class CampaignController {
     }
   }
 
+  static async deleteCampaign(req, res, next) {
+    try {
+      const result = await CampaignService.deleteCampaign(Number(req.params.id));
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async previewLeads(req, res, next) {
     try {
       if (!req.file || !req.file.buffer) {

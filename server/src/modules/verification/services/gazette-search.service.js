@@ -5,6 +5,10 @@ import { OCR_CONFIG } from '../verification.constants.js';
 
 export class GazetteSearchService {
   static _textCache = new Map();
+  static _textCacheBytes = 0;
+  static MAX_CACHED_GAZETTES = 32;
+  static MAX_GAZETTE_CACHE_BYTES = 64 * 1024 * 1024;
+  static MAX_SINGLE_CACHED_TEXT_BYTES = 8 * 1024 * 1024;
 
   static getCachedText(key) {
     if (!key) return null;
@@ -12,18 +16,31 @@ export class GazetteSearchService {
     if (!entry) return null;
     if (Date.now() - entry.timestamp > 30 * 60 * 1000) {
       this._textCache.delete(key);
+      this._textCacheBytes -= entry.bytes;
       return null;
     }
+    this._textCache.delete(key);
+    this._textCache.set(key, entry);
     return entry.text;
   }
 
   static setCachedText(key, text) {
     if (!key || !text) return;
-    if (this._textCache.size >= 3) {
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (bytes > this.MAX_SINGLE_CACHED_TEXT_BYTES) return;
+    const prior = this._textCache.get(key);
+    if (prior) {
+      this._textCache.delete(key);
+      this._textCacheBytes -= prior.bytes;
+    }
+    while (this._textCache.size >= this.MAX_CACHED_GAZETTES || this._textCacheBytes + bytes > this.MAX_GAZETTE_CACHE_BYTES) {
       const oldestKey = this._textCache.keys().next().value;
+      const oldest = this._textCache.get(oldestKey);
+      if (oldest) this._textCacheBytes -= oldest.bytes;
       this._textCache.delete(oldestKey);
     }
-    this._textCache.set(key, { text, timestamp: Date.now() });
+    this._textCache.set(key, { text, timestamp: Date.now(), bytes });
+    this._textCacheBytes += bytes;
   }
 
   /**
@@ -228,7 +245,7 @@ export class GazetteSearchService {
     // e.g. "740", "740/1100", "740 / 1100", "520"
     // Marks are typically 2 to 4 digits between 100 and 1100 (or up to 1200)
     let obtainedMarks = null;
-    let totalMarks = 1100;
+    let totalMarks = null;
 
     // Pattern 1: Explicit fraction (e.g. 740/1100)
     const fractionMatch = matchedLine.match(/\b([1-9]\d{1,3})\s*\/\s*(\d{3,4})\b/);
@@ -242,8 +259,8 @@ export class GazetteSearchService {
 
       for (const numStr of nonRollNumbers) {
         const val = parseInt(numStr, 10);
-        // Scores are typically between 150 and 1100
-        if (val >= 150 && val <= 1100) {
+        // Accept a score only when the row has one plausible aggregate value.
+        if (val >= 0 && val <= 1200 && nonRollNumbers.length === 1) {
           obtainedMarks = val;
           break;
         }
@@ -261,7 +278,7 @@ export class GazetteSearchService {
         const nonRoll = snippetNumbers.filter((n) => n !== rollStr);
         for (const numStr of nonRoll) {
           const val = parseInt(numStr, 10);
-          if (val >= 150 && val <= 1100) {
+          if (val >= 0 && val <= 1200 && nonRoll.length === 1) {
             obtainedMarks = val;
             break;
           }
@@ -271,19 +288,15 @@ export class GazetteSearchService {
 
     // Determine status: PASS, COMPARTMENT, FAIL, etc.
     let status = 'UNKNOWN';
-    const upperSnippet = snippet.toUpperCase();
+    const upperSnippet = matchedLine.toUpperCase();
     if (upperSnippet.includes('PASS')) {
       status = 'PASS';
     } else if (upperSnippet.includes('COMP') || upperSnippet.includes('SUPPLY') || upperSnippet.includes('FAIL')) {
       status = 'COMPARTMENT';
-    } else if (obtainedMarks && obtainedMarks >= 363) {
-      // 33% of 1100 = 363 is passing threshold in Pakistan
-      status = 'PASS';
-    } else if (obtainedMarks) {
-      status = 'PASS';
     }
 
-    const isPass = status === 'PASS' || (obtainedMarks !== null && obtainedMarks >= 363);
+    const isPass = status === 'PASS' ? true
+      : ['COMPARTMENT', 'FAIL', 'ABSENT', 'WITHHELD'].includes(status) ? false : null;
 
     // Cross-check candidate name if candidateName is provided
     let nameMatchScore = null;
@@ -292,14 +305,23 @@ export class GazetteSearchService {
       nameMatchScore = compare.similarity;
     }
 
+    const candidateRollsOnRow = (matchedLine.match(/\b\d{5,10}\b/g) || []).filter((value) => value !== rollStr);
+    const explicitTotal = matchedLine.match(/\b(?:out\s+of|total\s*marks?)\s*[:=]?\s*(\d{3,4})\b/i)?.[1];
+    if (fractionMatch) totalMarks = Number(fractionMatch[2]);
+    else if (explicitTotal) totalMarks = Number(explicitTotal);
+    const automatable = obtainedMarks !== null && candidateRollsOnRow.length === 0
+      && nameMatchScore !== null && nameMatchScore >= 0.82;
+
     return {
       found: true,
       source: 'GAZETTE_PDF_TEXT',
+      automatable,
+      requiresReview: !automatable,
       rollNumber: rollStr,
       candidateName: candidateName || null,
       obtainedMarks,
       totalMarks,
-      percentage: obtainedMarks ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null,
+      percentage: obtainedMarks !== null && Number(totalMarks) > 0 ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null,
       isPass,
       status,
       rawSnippet: matchedLine || snippet,

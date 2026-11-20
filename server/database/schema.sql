@@ -340,7 +340,11 @@ CREATE TABLE IF NOT EXISTS adm_board_sources (
   board_name VARCHAR(160) NOT NULL,
   board_aliases JSON NULL,
   academic_year VARCHAR(20) NOT NULL,
+  exam_level VARCHAR(32) NULL,
+  exam_session VARCHAR(32) NULL,
+  exam_part VARCHAR(32) NULL,
   source_type ENUM('PORTAL_URL', 'GAZETTE') NOT NULL,
+  portal_adapter VARCHAR(40) NULL,
   result_url VARCHAR(2048) NULL,
   gazette_filename VARCHAR(255) NULL,
   storage_provider ENUM('R2', 'LOCAL_MOCK') NULL,
@@ -351,17 +355,20 @@ CREATE TABLE IF NOT EXISTS adm_board_sources (
   created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uq_adm_board_source_year (board_name, academic_year),
-  KEY ix_adm_board_source_active (is_active, board_name, academic_year),
+  KEY ix_adm_board_source_active (is_active, board_name, academic_year, exam_level, exam_session, exam_part),
   CONSTRAINT fk_adm_board_source_created_by FOREIGN KEY (created_by) REFERENCES sys_users(id) ON DELETE SET NULL,
   CONSTRAINT fk_adm_board_source_updated_by FOREIGN KEY (updated_by) REFERENCES sys_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO adm_board_sources (board_name, board_aliases, academic_year, source_type, result_url)
-VALUES
-  ('Federal Board (FBISE)', JSON_ARRAY('FBISE', 'FBISE Islamabad', 'Federal Board'), 'ALL', 'PORTAL_URL', 'https://portal.fbise.edu.pk/fbise-conduct/result/'),
-  ('AJK BISE Mirpur', JSON_ARRAY('AJK BISE', 'BISE AJK', 'AJK Board', 'Mirpur Board'), 'ALL', 'PORTAL_URL', 'https://ajkbise.net/results.php'),
-  ('State Engineering Entry Test (SEET)', JSON_ARRAY('SEET', 'MUST SEET', 'Entry Test'), '2026', 'PORTAL_URL', 'https://seet.must.edu.pk/seet_result.php');
+INSERT INTO adm_board_sources (board_name, board_aliases, academic_year, exam_level, exam_session, exam_part, source_type, portal_adapter, result_url)
+SELECT 'Federal Board (FBISE)', JSON_ARRAY('FBISE', 'FBISE Islamabad', 'Federal Board'), 'ALL', 'ALL', 'ALL', 'ALL', 'PORTAL_URL', 'FBISE', 'https://portal.fbise.edu.pk/fbise-conduct/result/'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM adm_board_sources WHERE board_name = 'Federal Board (FBISE)' AND source_type = 'PORTAL_URL');
+INSERT INTO adm_board_sources (board_name, board_aliases, academic_year, exam_level, exam_session, exam_part, source_type, portal_adapter, result_url)
+SELECT 'AJK BISE Mirpur', JSON_ARRAY('AJK BISE', 'BISE AJK', 'AJK Board', 'Mirpur Board'), '2026', 'HSSC', 'ANNUAL', 'PART_II', 'PORTAL_URL', 'AJKBISE', 'https://hsscresult.ajkbise.net/HSSC-II/'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM adm_board_sources WHERE board_name = 'AJK BISE Mirpur' AND source_type = 'PORTAL_URL' AND academic_year = '2026' AND exam_level = 'HSSC' AND exam_session = 'ANNUAL' AND exam_part = 'PART_II');
+INSERT INTO adm_board_sources (board_name, board_aliases, academic_year, exam_level, exam_session, exam_part, source_type, portal_adapter, result_url)
+SELECT 'State Engineering Entry Test (SEET)', JSON_ARRAY('SEET', 'MUST SEET', 'Entry Test'), '2026', 'ALL', 'ALL', 'ALL', 'PORTAL_URL', 'AUTO_FORM', 'https://seet.must.edu.pk/seet_result.php'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM adm_board_sources WHERE board_name = 'State Engineering Entry Test (SEET)' AND source_type = 'PORTAL_URL');
 
 -- ============================================================================
 -- MODULE 4: Merit Engine & Seat Verification Slice

@@ -25,6 +25,149 @@ import {
   formatUploadRequestMessage,
 } from './portal-message.service.js';
 
+async function verifyAgainstConfiguredSources({ extracted, docType, db = pool }) {
+  if (extracted?.isMock === true || extracted?.source === 'MOCK') {
+    return { isVerified: false, status: 'SIMULATED_OCR_SKIPPED', searchedSources: [] };
+  }
+  const expectedLevel = docType === DOCUMENT_TYPES.MATRIC_MARKSHEET ? 'SSC'
+    : docType === DOCUMENT_TYPES.FSC_MARKSHEET ? 'HSSC' : null;
+  const metadata = {
+    boardName: extracted.boardName,
+    academicYear: extracted.examYear,
+    examLevel: extracted.examLevel || expectedLevel,
+    examSession: extracted.examSession,
+    examPart: extracted.examPart,
+  };
+  if (!extracted.rollNumber || !metadata.examLevel || !metadata.academicYear || !expectedLevel) {
+    return {
+      isVerified: false,
+      status: 'EXAM_DETAILS_INCOMPLETE',
+      reason: 'Roll number and exam year are required. When the session cannot be read, only sources configured for any session are searched.',
+      searchedSources: [],
+    };
+  }
+  if (metadata.examLevel !== expectedLevel) {
+    return { isVerified: false, status: 'DOCUMENT_EXAM_LEVEL_MISMATCH', reason: 'The exam level on the marksheet does not match the requested document type.', searchedSources: [] };
+  }
+
+  const [portalSources, gazettes] = await Promise.all([
+    BoardSourceService.findMatchingSources({ ...metadata, sourceType: 'PORTAL_URL' }, db),
+    BoardSourceService.findMatchingSources({ ...metadata, sourceType: 'GAZETTE' }, db),
+  ]);
+  const searchedSources = [];
+  const identity = { rollNumber: String(extracted.rollNumber), candidateName: extracted.candidateName };
+  const portalMatches = [];
+
+  for (const source of portalSources) {
+    if (!metadata.examSession || !metadata.examPart) {
+      searchedSources.push({
+        sourceType: 'PORTAL_URL',
+        sourceId: source.id,
+        sourceLabel: source.board_name,
+        sourceUrl: source.result_url,
+        status: 'EXAM_DETAILS_INCOMPLETE',
+        found: false,
+      });
+      continue;
+    }
+    const result = await BoardRegistryService.verifyCandidate({
+      boardName: source.board_name,
+      ...identity,
+      examYear: extracted.examYear,
+      examLevel: extracted.examLevel,
+      examSession: extracted.examSession,
+      examPart: extracted.examPart,
+      sourceUrl: source.result_url,
+      portalAdapter: source.portal_adapter || 'AUTO_FORM',
+    });
+    searchedSources.push({
+      sourceType: 'PORTAL_URL',
+      sourceId: source.id,
+      sourceLabel: source.board_name,
+      sourceUrl: source.result_url,
+      status: result.status,
+      found: result.isVerified === true,
+    });
+    if (result.isVerified === true && result.isMock !== true) portalMatches.push({ source, result });
+  }
+
+  const gazetteMatches = [];
+  for (const source of gazettes) {
+    const result = await GazetteSearchService.searchGazette({
+      storageKey: source.storage_key,
+      storageProvider: source.storage_provider,
+      rollNumber: extracted.rollNumber,
+      candidateName: extracted.candidateName,
+      examYear: extracted.examYear,
+      boardName: source.board_name,
+    });
+    const trustworthyTextMatch = result.found === true && result.source === 'GAZETTE_PDF_TEXT' && result.automatable === true
+      && String(result.rollNumber || '') === String(extracted.rollNumber)
+      && Number.isFinite(Number(result.obtainedMarks)) && Number(result.obtainedMarks) >= 0
+      && Number.isFinite(Number(result.totalMarks || extracted.totalMarks))
+      && Number(result.obtainedMarks) <= Number(result.totalMarks || extracted.totalMarks)
+      && Number(result.nameMatchScore) >= 0.82;
+    searchedSources.push({
+      sourceType: 'GAZETTE',
+      sourceId: source.id,
+      sourceLabel: source.gazette_filename,
+      status: trustworthyTextMatch ? 'GAZETTE_MATCHED' : result.found ? 'GAZETTE_REVIEW_REQUIRED' : 'GAZETTE_NOT_FOUND',
+      found: result.found === true,
+      nameMatchScore: result.nameMatchScore ?? null,
+      boardMarks: result.obtainedMarks ?? null,
+    });
+    if (trustworthyTextMatch) gazetteMatches.push({ source, result });
+  }
+
+  if (gazetteMatches.length) {
+    const distinctScores = new Set(gazetteMatches.map(({ result }) => Number(result.obtainedMarks)));
+    if (distinctScores.size > 1) {
+      return { isVerified: false, status: 'OFFICIAL_SOURCE_CONFLICT', sourceType: 'GAZETTE', searchedSources };
+    }
+    if (portalMatches.some(({ result }) => Number(result.boardMarks) !== Number(gazetteMatches[0].result.obtainedMarks))) {
+      return { isVerified: false, status: 'OFFICIAL_SOURCE_CONFLICT', sourceType: 'OFFICIAL_SOURCES', searchedSources };
+    }
+  }
+
+  if (searchedSources.some((source) => source.status === 'GAZETTE_REVIEW_REQUIRED')) {
+    return { isVerified: false, status: 'GAZETTE_MATCH_REQUIRES_REVIEW', sourceType: 'GAZETTE', searchedSources };
+  }
+
+  if (portalMatches.length) {
+    const distinctPortalScores = new Set(portalMatches.map(({ result }) => Number(result.boardMarks)));
+    if (distinctPortalScores.size > 1) {
+      return { isVerified: false, status: 'OFFICIAL_SOURCE_CONFLICT', sourceType: 'PORTAL_URL', searchedSources };
+    }
+    const { source, result } = portalMatches[0];
+    return { ...result, boardSourceId: source.id, searchedSources };
+  }
+
+  if (gazetteMatches.length) {
+    const { source, result } = gazetteMatches[0];
+    return {
+      isVerified: true,
+      status: 'GAZETTE_VERIFIED',
+      sourceType: 'GAZETTE',
+      boardSourceId: source.id,
+      gazetteFilename: source.gazette_filename || null,
+      boardMarks: Number(result.obtainedMarks),
+      totalMarks: result.totalMarks ? Number(result.totalMarks) : (Number(extracted.totalMarks) || null),
+      candidateName: result.candidateName,
+      isPass: result.isPass,
+      rawSnippet: result.rawSnippet,
+      nameMatchScore: result.nameMatchScore,
+      searchedSources,
+    };
+  }
+
+  return {
+    isVerified: false,
+    status: searchedSources.length ? 'NO_OFFICIAL_RESULT_MATCH' : 'NO_SOURCE_CONFIGURED',
+    sourceType: 'OFFICIAL_SOURCES',
+    searchedSources,
+  };
+}
+
 export class AdmissionIntakeService {
   /**
    * Consumes LEAD_QUALIFIED event emitted by Module 2
@@ -322,64 +465,14 @@ export class AdmissionIntakeService {
         },
       });
 
-      // Query board portal or search gazette if marksheet and roll number extracted
+      // Use the configured board portal, then search every gazette matching the exam metadata.
       let portalResult = null;
       if (ocrResult.extracted?.rollNumber && (docRow.doc_type === DOCUMENT_TYPES.FSC_MARKSHEET || docRow.doc_type === DOCUMENT_TYPES.MATRIC_MARKSHEET)) {
-        const configuredSource = await BoardSourceService.findForBoard(ocrResult.extracted.boardName, ocrResult.extracted.examYear);
-        if (configuredSource) {
-          if (configuredSource.source_type === 'GAZETTE' && configuredSource.storage_key) {
-            // Automatic Gazette PDF Search by roll number
-            const gazetteSearchResult = await GazetteSearchService.searchGazette({
-              storageKey: configuredSource.storage_key,
-              storageProvider: configuredSource.storage_provider,
-              rollNumber: ocrResult.extracted.rollNumber,
-              candidateName: ocrResult.extracted.candidateName,
-              examYear: ocrResult.extracted.examYear,
-              boardName: configuredSource.board_name,
-            });
-
-            if (gazetteSearchResult.found) {
-              portalResult = {
-                isVerified: true,
-                status: 'GAZETTE_VERIFIED',
-                sourceType: 'GAZETTE',
-                boardSourceId: configuredSource.id,
-                gazetteFilename: configuredSource.gazette_filename || null,
-                boardMarks: gazetteSearchResult.obtainedMarks,
-                totalMarks: gazetteSearchResult.totalMarks,
-                candidateName: gazetteSearchResult.candidateName || ocrResult.extracted.candidateName,
-                isPass: gazetteSearchResult.isPass,
-                rawSnippet: gazetteSearchResult.rawSnippet,
-                nameMatchScore: gazetteSearchResult.nameMatchScore,
-              };
-            } else {
-              portalResult = {
-                isVerified: false,
-                status: 'GAZETTE_NOT_FOUND',
-                sourceType: 'GAZETTE',
-                boardSourceId: configuredSource.id,
-                gazetteFilename: configuredSource.gazette_filename || null,
-                reason: gazetteSearchResult.reason || 'Roll number not found in gazette PDF.',
-              };
-            }
-          } else {
-            portalResult = {
-              isVerified: false,
-              status: 'MANUAL_SOURCE_AVAILABLE',
-              sourceType: configuredSource.source_type,
-              boardSourceId: configuredSource.id,
-              sourceUrl: configuredSource.result_url || null,
-              gazetteFilename: configuredSource.gazette_filename || null,
-            };
-          }
-        } else {
-          portalResult = await BoardRegistryService.verifyCandidate({
-            boardName: ocrResult.extracted.boardName,
-            rollNumber: ocrResult.extracted.rollNumber,
-            examYear: ocrResult.extracted.examYear,
-            candidateName: ocrResult.extracted.candidateName,
-          });
-        }
+        portalResult = await verifyAgainstConfiguredSources({
+          extracted: { ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock },
+          docType: docRow.doc_type,
+          db: connection,
+        });
       }
 
       // Save raw OCR and portal responses
@@ -1518,45 +1611,8 @@ export class AdmissionIntakeService {
       throw new AppError(400, 'ROLL_NUMBER_MISSING', 'Candidate roll number has not been extracted for this document.');
     }
 
-    const boardName = extracted.boardName || 'AJK BISE';
-    const examYear = extracted.examYear || 'ALL';
-
-    const configuredSource = await BoardSourceService.findForBoard(boardName, examYear, db);
-    if (!configuredSource || configuredSource.source_type !== 'GAZETTE' || !configuredSource.storage_key) {
-      throw new AppError(404, 'GAZETTE_NOT_CONFIGURED', `No active PDF gazette is configured for ${boardName} (${examYear}). Upload the gazette in the Board Sources tab.`);
-    }
-
-    const gazetteResult = await GazetteSearchService.searchGazette({
-      storageKey: configuredSource.storage_key,
-      storageProvider: configuredSource.storage_provider,
-      rollNumber: extracted.rollNumber,
-      candidateName: extracted.candidateName || doc.full_name,
-      examYear: extracted.examYear,
-      boardName: configuredSource.board_name,
-    });
-
-    const portalResult = gazetteResult.found
-      ? {
-          isVerified: true,
-          status: 'GAZETTE_VERIFIED',
-          sourceType: 'GAZETTE',
-          boardSourceId: configuredSource.id,
-          gazetteFilename: configuredSource.gazette_filename || null,
-          boardMarks: gazetteResult.obtainedMarks,
-          totalMarks: gazetteResult.totalMarks,
-          candidateName: gazetteResult.candidateName || extracted.candidateName || doc.full_name,
-          isPass: gazetteResult.isPass,
-          rawSnippet: gazetteResult.rawSnippet,
-          nameMatchScore: gazetteResult.nameMatchScore,
-        }
-      : {
-          isVerified: false,
-          status: 'GAZETTE_NOT_FOUND',
-          sourceType: 'GAZETTE',
-          boardSourceId: configuredSource.id,
-          gazetteFilename: configuredSource.gazette_filename || null,
-          reason: gazetteResult.reason || 'Roll number not found in gazette PDF.',
-        };
+    const extractedForLookup = { ...extracted, candidateName: extracted.candidateName || doc.full_name };
+    const portalResult = await verifyAgainstConfiguredSources({ extracted: extractedForLookup, docType: doc.doc_type, db });
 
     await db.execute(
       `UPDATE adm_student_documents
@@ -1574,8 +1630,9 @@ export class AdmissionIntakeService {
       entityId: String(documentId),
       after: {
         rollNumber: extracted.rollNumber,
-        gazetteFound: gazetteResult.found,
-        boardMarks: gazetteResult.obtainedMarks,
+        searchedSources: portalResult.searchedSources,
+        status: portalResult.status,
+        boardMarks: portalResult.boardMarks ?? null,
       },
     });
 
@@ -1583,7 +1640,7 @@ export class AdmissionIntakeService {
       documentId,
       studentId: doc.student_id,
       portalVerification: portalResult,
-      gazetteResult,
+      gazetteResult: portalResult.sourceType === 'GAZETTE' ? portalResult : null,
     };
   }
 

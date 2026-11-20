@@ -53,7 +53,9 @@ export class VerificationDecisionService {
     const student = students[0];
     const attemptCount = student.attempt_count || 1;
     const ocrMarks = extractedOcr?.obtainedMarks;
-    const isPass = extractedOcr?.isPass;
+    const isPass = typeof portalVerification?.isPass === 'boolean'
+      ? portalVerification.isPass
+      : extractedOcr?.isPass;
 
     let targetClaimedMarks = 0;
     if (docType === 'FSC_MARKSHEET') {
@@ -62,7 +64,9 @@ export class VerificationDecisionService {
       targetClaimedMarks = student.matric_obtained_marks || 0;
     }
 
-    const boardMarks = Number(portalVerification?.boardMarks);
+    const boardMarks = portalVerification?.boardMarks === null || portalVerification?.boardMarks === undefined
+      ? Number.NaN
+      : Number(portalVerification.boardMarks);
     const hasValidBoardMarks = Number.isFinite(boardMarks);
 
     // Ground Truth Hierarchy:
@@ -87,8 +91,13 @@ export class VerificationDecisionService {
       ? IdentityMatcherService.compareNames(extractedOcr.candidateName, student.full_name).isMatch
       : false;
     const identityMatched = matchOcrPortal && matchOcrStudent;
+    const boardTotal = portalVerification?.totalMarks === null || portalVerification?.totalMarks === undefined
+      ? null
+      : Number(portalVerification.totalMarks);
+    const totalMarksCompatible = boardTotal === null || !Number.isFinite(boardTotal)
+      || boardTotal === Number(extractedOcr?.totalMarks);
     const portalMatched = portalVerification?.isVerified === true && !portalVerification.isMock &&
-      (boardMatchesOcr || (boardMatchesClaimed && Math.abs(ocrMarks - boardMarks) <= 5)) && identityMatched;
+      (boardMatchesOcr || (boardMatchesClaimed && Math.abs(ocrMarks - boardMarks) <= 5)) && identityMatched && totalMarksCompatible;
 
     if (extractedOcr?.isMock || extractedOcr?.source === 'MOCK') {
       return this._handleManualReviewEscalation({ documentId, student, discrepancyReason: 'Simulated OCR data cannot be used for a candidate decision.', connection });
@@ -111,7 +120,9 @@ export class VerificationDecisionService {
 
     // Check Condition B or C: Discrepancy
     const discrepancyReason = isPass === false
-      ? 'Candidate marked FAIL on marksheet.'
+      ? (typeof portalVerification?.isPass === 'boolean'
+        ? 'Official board result marks this candidate as not passed.'
+        : 'Uploaded marksheet indicates that the candidate did not pass.')
       : !portalMatched
         ? `Official board result does not confirm the ${ocrMarks} marks shown on the uploaded marksheet.`
         : `Marksheet shows ${ocrMarks} marks, but applicant declared ${targetClaimedMarks} marks.`;

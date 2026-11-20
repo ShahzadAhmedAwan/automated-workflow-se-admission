@@ -66,6 +66,9 @@ Expected JSON Schema:
   "roll_number": "string or null (Roll Number)",
   "registration_number": "string or null",
   "board_name": "string (e.g. BISE MIRPUR, BISE LAHORE, FBISE, BISE RAWALPINDI, etc. Identify the exact board name shown on the header)",
+  "exam_level": "SSC or HSSC or null (Matric/Secondary is SSC; Intermediate/FSc is HSSC)",
+  "exam_session": "ANNUAL or SUPPLEMENTARY or SECOND_ANNUAL or null",
+  "exam_part": "PART_I or PART_II or COMPOSITE or null",
   "exam_year": 2024,
   "total_marks": 1100,
   "obtained_marks": 940,
@@ -169,6 +172,9 @@ Expected JSON Schema:
       registrationNumber: String(data.registration_number || data.registrationNumber || '').trim(),
       boardName: (data.board_name || data.boardName || '').toUpperCase().trim(),
       examYear: Number(data.exam_year || data.examYear) || null,
+      examLevel: this._normalizeExamLevel(data.exam_level || data.examLevel),
+      examSession: this._normalizeExamSession(data.exam_session || data.examSession),
+      examPart: this._normalizeExamPart(data.exam_part || data.examPart),
       totalMarks,
       obtainedMarks,
       percentage: numberOrNull(data.percentage) ?? (obtainedMarks !== null && totalMarks ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null),
@@ -179,5 +185,27 @@ Expected JSON Schema:
       expiryDate: (data.expiry_date || data.expiryDate) ? String(data.expiry_date || data.expiryDate).trim() : null,
       subjects: Array.isArray(data.subjects) ? data.subjects : [],
     };
+  }
+
+  static _normalizeExamLevel(value) {
+    const normalized = String(value || '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (['SSC', 'MATRIC', 'SECONDARY', 'SSC1', 'SSC2'].includes(normalized)) return 'SSC';
+    if (['HSSC', 'FSC', 'INTERMEDIATE', 'INTER', 'HSSC1', 'HSSC2'].includes(normalized)) return 'HSSC';
+    return null;
+  }
+
+  static _normalizeExamSession(value) {
+    const normalized = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (['ANNUAL', 'FIRSTANNUAL', '1STANNUAL'].includes(normalized)) return 'ANNUAL';
+    if (['SUPPLEMENTARY', 'SUPPLY', 'SUPPLEMENT', 'SECONDANNUAL', '2NDANNUAL'].includes(normalized)) return 'SECOND_ANNUAL';
+    return null;
+  }
+
+  static _normalizeExamPart(value) {
+    const normalized = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (['I', '1', 'PARTI', 'PART1', 'SSCI', 'HSSCI', 'SSC1', 'HSSC1', '9TH', '11TH'].includes(normalized)) return 'PART_I';
+    if (['II', '2', 'PARTII', 'PART2', 'SSCII', 'HSSCII', 'SSC2', 'HSSC2', '10TH', '12TH'].includes(normalized)) return 'PART_II';
+    if (['COMPOSITE', 'COMBINED'].includes(normalized)) return 'COMPOSITE';
+    return null;
   }
 }

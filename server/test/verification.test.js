@@ -71,6 +71,24 @@ test('BoardSourceService: matches configured board aliases and exact academic ye
   assert.equal(await BoardSourceService.findForBoard('Unconfigured Board', '2026', mockDb), null);
 });
 
+test('BoardSourceService: returns every gazette matching board, year, level, session, and part', async () => {
+  const mockDb = {
+    async execute() {
+      return [[
+        { id: 10, board_name: 'AJK BISE Mirpur', board_aliases: ['AJK BISE'], academic_year: '2022', exam_level: 'HSSC', exam_session: 'ANNUAL', exam_part: 'PART_II', source_type: 'GAZETTE', gazette_filename: 'annual-a.pdf' },
+        { id: 11, board_name: 'AJK BISE Mirpur', board_aliases: ['AJK BISE'], academic_year: '2022', exam_level: 'HSSC', exam_session: 'ANNUAL', exam_part: 'PART_II', source_type: 'GAZETTE', gazette_filename: 'annual-b.pdf' },
+        { id: 12, board_name: 'AJK BISE Mirpur', board_aliases: ['AJK BISE'], academic_year: '2022', exam_level: 'HSSC', exam_session: 'SECOND_ANNUAL', exam_part: 'PART_II', source_type: 'GAZETTE' },
+        { id: 13, board_name: 'BISE Lahore', board_aliases: [], academic_year: '2022', exam_level: 'HSSC', exam_session: 'ANNUAL', exam_part: 'PART_II', source_type: 'GAZETTE' },
+      ]];
+    },
+  };
+  const matches = await BoardSourceService.findMatchingSources({
+    boardName: 'AJK BISE', academicYear: '2022', examLevel: 'HSSC',
+    examSession: 'ANNUAL', examPart: 'PART_II', sourceType: 'GAZETTE',
+  }, mockDb);
+  assert.deepEqual(matches.map((source) => source.id), [10, 11]);
+});
+
 test('Manual review schema requires a document decision, evidence type, and audit note', () => {
   assert.equal(manualReviewActionSchema.safeParse({ studentId: 5, documentId: 9, action: 'APPROVE' }).success, false);
   assert.equal(manualReviewActionSchema.safeParse({ studentId: 5, documentId: 9, action: 'APPROVE', reviewMethod: 'STAFF_PORTAL' }).success, false);
@@ -347,7 +365,45 @@ test('BoardRegistryService: safely returns failure for invalid rolls and unsuppo
     rollNumber: '12345',
   });
   assert.equal(unsupported.isVerified, false);
-  assert.equal(unsupported.status, 'UNSUPPORTED_BOARD');
+  assert.equal(unsupported.status, 'PORTAL_NOT_CONFIGURED');
+});
+
+test('BoardRegistryService: submits a public result form and extracts the matching result', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (requests.length === 1) {
+      return new Response(`
+        <form method="post" action="/result/search">
+          <input type="hidden" name="csrf" value="token-1">
+          <select name="examYear"><option value="2024">2024</option></select>
+          <select name="examLevel"><option value="ssc">Matric SSC</option><option value="hssc">FSc HSSC</option></select>
+          <select name="examSession"><option value="annual">First Annual Examination</option><option value="second">Second Annual Examination</option></select>
+          <select name="examPart"><option value="part1">Part I</option><option value="part2">Part II</option></select>
+          <input name="rollNumber" placeholder="Roll No">
+          <button name="submit" value="Search">Search</button>
+        </form>`, { status: 200, headers: { 'content-type': 'text/html' } });
+    }
+    assert.equal(options.method, 'POST');
+    assert.match(options.body, /rollNumber=123456/);
+    assert.match(options.body, /csrf=token-1/);
+    assert.match(options.body, /examLevel=hssc/);
+    assert.match(options.body, /examSession=annual/);
+    assert.match(options.body, /examPart=part2/);
+    return new Response(`Roll No: 123456\nStudent Name: Ayesha Noor\nMarks Obtained: 900\nResult Status: PASS`, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+  };
+  const result = await BoardRegistryService.verifyCandidate({
+    boardName: 'FBISE', rollNumber: '123456', examYear: '2024', examLevel: 'HSSC',
+    examSession: 'ANNUAL', examPart: 'PART_II', candidateName: 'Ayesha Noor', sourceUrl: 'https://portal.fbise.edu.pk/result',
+    portalAdapter: 'FBISE', fetchImpl, resolveHost: async () => [{ address: '93.184.216.34', family: 4 }],
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(result.status, 'PORTAL_MATCHED');
+  assert.equal(result.boardMarks, 900);
+  assert.equal(result.candidateName, 'Ayesha Noor');
 });
 
 test('VerificationDecisionService: fixture OCR never approves a candidate', async () => {
@@ -648,12 +704,20 @@ test('GazetteSearchService: extracts text from PDF buffer and automatically sear
   assert.equal(matchResult.found, true);
   assert.equal(matchResult.rollNumber, '535453');
   assert.equal(matchResult.obtainedMarks, 740);
-  assert.equal(matchResult.totalMarks, 1100);
+  assert.equal(matchResult.totalMarks, null);
   assert.equal(matchResult.isPass, true);
   assert.equal(matchResult.status, 'PASS');
+  assert.equal(matchResult.automatable, true);
   assert.ok(matchResult.rawSnippet.includes('535453'));
   assert.ok(matchResult.rawSnippet.includes('740'));
   assert.ok(matchResult.nameMatchScore >= 90);
+
+  const ambiguousRow = GazetteSearchService.searchPdfTextForCandidate({
+    pdfText: '535453 SHEIKH HASEEB 535454 OTHER CANDIDATE 740 PASS',
+    rollNumber: '535453',
+    candidateName: 'Sheikh Haseeb',
+  });
+  assert.equal(ambiguousRow.automatable, false, 'two candidate rolls on one extracted row must be reviewed by staff');
 
   // Test 3: searchGazette directly using buffer
   const directSearchResult = await GazetteSearchService.searchGazette({
@@ -701,7 +765,11 @@ test('AdmissionIntakeService.searchGazetteForDocument: performs on-demand gazett
               candidateName: 'Sheikh Haseeb Ur Rehman',
               boardName: 'AJK BISE',
               examYear: '2024',
+              examLevel: 'HSSC',
+              examSession: 'ANNUAL',
+              examPart: 'PART_II',
               obtainedMarks: 740,
+              totalMarks: 1100,
             }),
             portal_verification_data: null,
             full_name: 'Sheikh Haseeb Ur Rehman',

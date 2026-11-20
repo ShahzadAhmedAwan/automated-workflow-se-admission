@@ -51,14 +51,14 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
       if (result.portalVerification?.isVerified) {
         setNotice({
           type: 'success',
-          message: 'Gazette Match Found!',
-          detail: `Candidate Roll #${result.gazetteResult?.rollNumber}: ${result.gazetteResult?.obtainedMarks} Marks (${result.gazetteResult?.status})`,
+          message: 'Official result match found.',
+          detail: `${result.portalVerification.boardMarks} marks confirmed from ${result.portalVerification.sourceType === 'GAZETTE' ? result.portalVerification.gazetteFilename || 'a matching gazette' : 'the board portal'}.`,
         });
       } else {
         setNotice({
           type: 'warning',
-          message: 'Gazette Search Notice',
-          detail: result.portalVerification?.reason || 'Candidate roll number not found in gazette PDF.',
+          message: 'Official result needs review.',
+          detail: result.portalVerification?.reason || result.portalVerification?.status?.replace(/_/g, ' ').toLowerCase() || 'No matching result was confirmed from the configured sources.',
         });
       }
       await loadDossier(true);
@@ -835,6 +835,36 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                       {portal.isVerified ? 'VERIFIED MATCH' : 'NO DIRECT MATCH'}
                                     </strong>
                                   </div>
+                                  {ocr?.rollNumber && (
+                                    <button
+                                      type="button"
+                                      disabled={searchingGazetteDocId === doc.document_id}
+                                      onClick={() => handleSearchGazette(doc.document_id)}
+                                      className="mt-2 inline-flex items-center rounded border border-blue-600 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 cursor-pointer"
+                                    >
+                                      {searchingGazetteDocId === doc.document_id ? 'Checking official sources…' : 'Run official result checks'}
+                                    </button>
+                                  )}
+                                  {Array.isArray(portal.searchedSources) && portal.searchedSources.length > 0 && (
+                                    <ul className="mt-2 space-y-1 border-t border-slate-100 pt-2 text-[10px]">
+                                      {portal.searchedSources.map((source, index) => (
+                                        <li key={`${source.sourceId || source.sourceLabel}-${index}`} className="flex flex-wrap items-center justify-between gap-1">
+                                          <span className="min-w-0 truncate text-slate-600">{source.sourceLabel || source.sourceType}{source.sourceType === 'GAZETTE' ? ' · Gazette' : ' · Portal'}</span>
+                                          <span className={source.found ? 'font-semibold text-emerald-700' : 'text-slate-500'}>{source.status}</span>
+                                          {source.sourceType === 'GAZETTE' && source.sourceId && (
+                                            <button type="button" onClick={() => openGazette(source.sourceId)} className="text-blue-700 hover:underline">Open gazette</button>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {portal.isVerified && Number.isFinite(Number(portal.boardMarks)) && (
+                                    <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-900">
+                                      <strong>Official result:</strong> {portal.boardMarks}{portal.totalMarks ? ` / ${portal.totalMarks}` : ''} marks
+                                      {portal.candidateName ? ` · ${portal.candidateName}` : ''}
+                                      {portal.sourceType ? ` · ${portal.sourceType === 'GAZETTE' ? 'Gazette' : 'Board portal'}` : ''}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {doc.boardSource?.sourceType === 'PORTAL_URL' && (
@@ -848,16 +878,6 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                       <button type="button" onClick={() => openGazette(doc.boardSource.id)} className="inline-flex font-semibold text-blue-700 hover:underline text-xs">
                                         Open gazette: {doc.boardSource.gazetteFilename} ↗
                                       </button>
-                                      {ocr?.rollNumber && (
-                                        <button
-                                          type="button"
-                                          disabled={searchingGazetteDocId === doc.document_id}
-                                          onClick={() => handleSearchGazette(doc.document_id)}
-                                          className="inline-flex items-center rounded border border-blue-600 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 cursor-pointer"
-                                        >
-                                          {searchingGazetteDocId === doc.document_id ? 'Searching gazette…' : `Search gazette for Roll #${ocr.rollNumber}`}
-                                        </button>
-                                      )}
                                     </div>
 
                                     {portal.status === 'GAZETTE_VERIFIED' && (
@@ -888,16 +908,16 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                       </div>
                                     )}
 
-                                    {portal.status === 'GAZETTE_NOT_FOUND' && (
+                                    {['GAZETTE_NOT_FOUND', 'NO_OFFICIAL_RESULT_MATCH', 'EXAM_DETAILS_INCOMPLETE', 'OFFICIAL_SOURCE_CONFLICT', 'GAZETTE_MATCH_REQUIRES_REVIEW'].includes(portal.status) && (
                                       <div className="rounded border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
-                                        <span className="font-bold">Gazette Search Notice:</span> {portal.reason || 'Roll number not found in gazette PDF.'}
+                                        <span className="font-bold">Official source check:</span> {portal.reason || portal.status.replace(/_/g, ' ').toLowerCase()}
                                       </div>
                                     )}
                                   </div>
                                 )}
                                 {!doc.boardSource && (
                                   <p className="mb-0 mt-2 text-[10px] text-slate-500">
-                                    No automated portal scraper configured for this board. Review the original transcript above and click Approve or Override.
+                                    No matching official source is configured for these exam details. Review the transcript and record the evidence used.
                                   </p>
                                 )}
                               </>

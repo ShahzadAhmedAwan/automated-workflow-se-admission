@@ -9,7 +9,8 @@ function normalizeBoard(value) {
 export class BoardSourceService {
   static async list({ activeOnly = false } = {}, db = pool) {
     const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, source_type, result_url, gazette_filename, is_active, created_at, updated_at
+      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+              source_type, portal_adapter, result_url, gazette_filename, is_active, created_at, updated_at
          FROM adm_board_sources ${activeOnly ? 'WHERE is_active = TRUE' : ''}
         ORDER BY board_name ASC, academic_year DESC`
     );
@@ -18,15 +19,16 @@ export class BoardSourceService {
 
   static async findForBoard(boardName, academicYear, db = pool) {
     const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, source_type, result_url, gazette_filename, storage_provider, storage_key
-         FROM adm_board_sources WHERE is_active = TRUE ORDER BY academic_year DESC`
+      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+              source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
+         FROM adm_board_sources WHERE is_active = TRUE ORDER BY (source_type = 'PORTAL_URL') DESC, academic_year DESC, id DESC`
     );
     const input = normalizeBoard(boardName);
     const matches = rows.filter((row) => {
       const aliases = typeof row.board_aliases === 'string' ? JSON.parse(row.board_aliases) : (row.board_aliases || []);
       return [row.board_name, ...aliases].some((name) => {
         const candidate = normalizeBoard(name);
-        return input && (candidate === input || input.includes(candidate) || candidate.includes(input));
+        return input && (candidate === input || (candidate.length >= 5 && (input.includes(candidate) || candidate.includes(input))));
       });
     });
     if (!matches.length) return null;
@@ -35,7 +37,36 @@ export class BoardSourceService {
       || null;
   }
 
-  static async save({ id, boardName, boardAliases, academicYear, sourceType, resultUrl, file, actorId }, db = pool) {
+  static async findMatchingSources({ boardName, academicYear, examLevel, examSession, examPart, sourceType }, db = pool) {
+    const [rows] = await db.execute(
+      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+              source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
+         FROM adm_board_sources WHERE is_active = TRUE AND source_type = ?
+        ORDER BY academic_year DESC, id DESC`,
+      [sourceType]
+    );
+    const input = normalizeBoard(boardName);
+    const metadataMatches = (sourceValue, requestedValue) => !sourceValue || sourceValue === 'ALL'
+      || (requestedValue && String(sourceValue).toUpperCase() === String(requestedValue).toUpperCase());
+    return rows.filter((row) => {
+      const aliases = typeof row.board_aliases === 'string' ? JSON.parse(row.board_aliases) : (row.board_aliases || []);
+      const boardMatches = [row.board_name, ...aliases].some((name) => {
+        const candidate = normalizeBoard(name);
+        return input && (candidate === input || (candidate.length >= 5 && (input.includes(candidate) || candidate.includes(input))));
+      });
+      const yearMatches = String(row.academic_year) === String(academicYear) || row.academic_year === 'ALL';
+      return boardMatches && yearMatches
+        && metadataMatches(row.exam_level, examLevel)
+        && metadataMatches(row.exam_session, examSession)
+        && metadataMatches(row.exam_part, examPart);
+    }).sort((left, right) => {
+      const specificity = (row) => [row.academic_year !== 'ALL', Boolean(row.exam_level), Boolean(row.exam_session), Boolean(row.exam_part)]
+        .reduce((score, value) => score + Number(value), 0);
+      return specificity(right) - specificity(left);
+    });
+  }
+
+  static async save({ id, boardName, boardAliases, academicYear, examLevel, examSession, examPart, sourceType, portalAdapter, resultUrl, file, actorId }, db = pool) {
     const normalizedName = String(boardName || '').trim().replace(/\s+/g, ' ');
     const year = String(academicYear || '').trim();
     if (id !== undefined && !/^\d+$/.test(String(id))) throw new AppError(400, 'INVALID_BOARD_SOURCE', 'Board source ID is invalid.');
@@ -46,6 +77,21 @@ export class BoardSourceService {
       throw new AppError(400, 'INVALID_ACADEMIC_YEAR', 'Enter a year such as 2026 or 2026-27. Use ALL only for a year-independent result portal.');
     }
     if (!['PORTAL_URL', 'GAZETTE'].includes(sourceType)) throw new AppError(400, 'INVALID_SOURCE_TYPE', 'Choose a result portal or gazette source.');
+    const cleanMetadata = (value, allowed, label) => {
+      const normalized = String(value || '').trim().toUpperCase();
+      if (normalized && !allowed.includes(normalized)) throw new AppError(400, 'INVALID_EXAM_METADATA', `Choose a valid ${label}.`);
+      return normalized || null;
+    };
+    const level = cleanMetadata(examLevel, ['SSC', 'HSSC', 'ALL'], 'exam level');
+    const session = cleanMetadata(examSession, ['ANNUAL', 'SUPPLEMENTARY', 'SECOND_ANNUAL', 'ALL'], 'exam session');
+    const part = cleanMetadata(examPart, ['PART_I', 'PART_II', 'COMPOSITE', 'ALL', 'UNKNOWN'], 'exam part');
+    if (!level || !session || !part) {
+      throw new AppError(400, 'EXAM_METADATA_REQUIRED', 'Choose the exam level, session, and part. Select Any when the source covers more than one.');
+    }
+    const adapter = sourceType === 'PORTAL_URL' ? String(portalAdapter || 'AUTO_FORM').trim().toUpperCase() : null;
+    if (sourceType === 'PORTAL_URL' && !['AUTO_FORM', 'FBISE', 'AJKBISE'].includes(adapter)) {
+      throw new AppError(400, 'INVALID_PORTAL_ADAPTER', 'Choose a supported board portal adapter.');
+    }
 
     let safeUrl = null;
     if (sourceType === 'PORTAL_URL') {
@@ -69,9 +115,13 @@ export class BoardSourceService {
       if (sourceType === 'GAZETTE' && file) uploaded = await StorageService.uploadBoardGazette(file.buffer);
       await connection.beginTransaction();
       const [existing] = await connection.execute(
-        `SELECT id, storage_provider, storage_key FROM adm_board_sources
-          WHERE ${id ? 'id = ?' : 'board_name = ? AND academic_year = ?'} FOR UPDATE`,
-        id ? [Number(id)] : [normalizedName, year]
+        `SELECT id, source_type, storage_provider, storage_key FROM adm_board_sources
+          WHERE ${id ? 'id = ?' : sourceType === 'PORTAL_URL'
+            ? 'board_name = ? AND academic_year = ? AND source_type = ? AND COALESCE(exam_level, \'\') = ? AND COALESCE(exam_session, \'\') = ? AND COALESCE(exam_part, \'\') = ?'
+            : '1 = 0'} FOR UPDATE`,
+        id ? [Number(id)] : sourceType === 'PORTAL_URL'
+          ? [normalizedName, year, sourceType, level || '', session || '', part || '']
+          : []
       );
       oldSource = existing[0] || null;
       if (sourceType === 'GAZETTE') {
@@ -84,16 +134,16 @@ export class BoardSourceService {
 
       if (oldSource) {
         await connection.execute(
-          `UPDATE adm_board_sources SET board_name = ?, board_aliases = ?, academic_year = ?, source_type = ?, result_url = ?, gazette_filename = ?,
+          `UPDATE adm_board_sources SET board_name = ?, board_aliases = ?, academic_year = ?, exam_level = ?, exam_session = ?, exam_part = ?, source_type = ?, portal_adapter = ?, result_url = ?, gazette_filename = ?,
                   storage_provider = ?, storage_key = ?, is_active = TRUE, updated_by = ? WHERE id = ?`,
-          [normalizedName, JSON.stringify(aliases), year, sourceType, safeUrl, filename, storageProvider, storageKey, actorId, oldSource.id]
+          [normalizedName, JSON.stringify(aliases), year, level, session, part, sourceType, adapter, safeUrl, filename, storageProvider, storageKey, actorId, oldSource.id]
         );
       } else {
         await connection.execute(
-          `INSERT INTO adm_board_sources (board_name, board_aliases, academic_year, source_type, result_url, gazette_filename,
+          `INSERT INTO adm_board_sources (board_name, board_aliases, academic_year, exam_level, exam_session, exam_part, source_type, portal_adapter, result_url, gazette_filename,
                   storage_provider, storage_key, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [normalizedName, JSON.stringify(aliases), year, sourceType, safeUrl, filename, storageProvider, storageKey, actorId, actorId]
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [normalizedName, JSON.stringify(aliases), year, level, session, part, sourceType, adapter, safeUrl, filename, storageProvider, storageKey, actorId, actorId]
         );
       }
       commitAttempted = true;

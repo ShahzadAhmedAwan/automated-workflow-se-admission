@@ -10,6 +10,56 @@ const statements = source.split(';').map((sql) => sql.trim()).filter(Boolean);
 const connection = await pool.getConnection();
 
 try {
+  // Upgrade existing verification source tables before canonical seed statements reference new columns.
+  const [sourceTable] = await connection.query(`SHOW TABLES LIKE 'adm_board_sources'`);
+  if (sourceTable.length) {
+    const [sourceColumns] = await connection.query(`SHOW COLUMNS FROM adm_board_sources`);
+    const sourceColumnNames = new Set(sourceColumns.map((column) => column.Field));
+    const additions = [
+      ['exam_level', 'VARCHAR(32) NULL AFTER academic_year'],
+      ['exam_session', 'VARCHAR(32) NULL AFTER exam_level'],
+      ['exam_part', 'VARCHAR(32) NULL AFTER exam_session'],
+      ['portal_adapter', 'VARCHAR(40) NULL AFTER source_type'],
+    ];
+    for (const [name, definition] of additions) {
+      if (!sourceColumnNames.has(name)) {
+        await connection.query(`ALTER TABLE adm_board_sources ADD COLUMN ${name} ${definition}`);
+        console.info(`Added ${name} to adm_board_sources`);
+      }
+    }
+    const [indexes] = await connection.query(`SHOW INDEX FROM adm_board_sources`);
+    if (indexes.some((index) => index.Key_name === 'uq_adm_board_source_year')) {
+      await connection.query(`ALTER TABLE adm_board_sources DROP INDEX uq_adm_board_source_year`);
+      console.info('Enabled multiple verification sources per board and year.');
+    }
+    const sourceIndex = indexes.filter((index) => index.Key_name === 'ix_adm_board_source_active');
+    if (!sourceIndex.some((index) => index.Column_name === 'exam_part')) {
+      if (sourceIndex.length) await connection.query(`ALTER TABLE adm_board_sources DROP INDEX ix_adm_board_source_active`);
+      await connection.query(`ALTER TABLE adm_board_sources ADD KEY ix_adm_board_source_active (is_active, board_name, academic_year, exam_level, exam_session, exam_part)`);
+    }
+    await connection.query(
+      `UPDATE adm_board_sources
+          SET academic_year = '2026', exam_level = 'HSSC', exam_session = 'ANNUAL', exam_part = 'PART_II',
+              portal_adapter = 'AJKBISE', result_url = 'https://hsscresult.ajkbise.net/HSSC-II/'
+        WHERE board_name = 'AJK BISE Mirpur' AND source_type = 'PORTAL_URL'
+          AND result_url = 'https://ajkbise.net/results.php'`
+    );
+    await connection.query(
+      `UPDATE adm_board_sources SET portal_adapter = 'FBISE'
+        WHERE board_name = 'Federal Board (FBISE)' AND source_type = 'PORTAL_URL'
+          AND result_url = 'https://portal.fbise.edu.pk/fbise-conduct/result/'`
+    );
+    await connection.query(
+      `UPDATE adm_board_sources SET exam_level = 'UNKNOWN', exam_session = 'UNKNOWN'
+        WHERE source_type = 'GAZETTE' AND (exam_level IS NULL OR exam_session IS NULL)`
+    );
+    await connection.query(
+      `UPDATE adm_board_sources SET exam_level = COALESCE(exam_level, 'ALL'),
+              exam_session = COALESCE(exam_session, 'ALL'), exam_part = COALESCE(exam_part, 'ALL')
+        WHERE source_type = 'PORTAL_URL' AND (exam_level IS NULL OR exam_session IS NULL OR exam_part IS NULL)`
+    );
+  }
+
   console.info(`Applying ${statements.length} statements from database/schema.sql`);
   for (let index = 0; index < statements.length; index += 1) {
     try {

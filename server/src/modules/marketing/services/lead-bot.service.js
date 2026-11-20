@@ -217,27 +217,84 @@ export class LeadBotService {
   }
 
   /**
+   * Classifies an academic study background from student input
+   * Gracefully accepts short answers like "pre eng", "eng", "engineering", "pre med", "med", "medical", etc.
+   */
+  static classifyAcademicGroup(text) {
+    if (!text || typeof text !== 'string') return null;
+    const clean = text.trim().toLowerCase();
+
+    // 1. Ineligible groups
+    if (
+      clean.includes('arts') ||
+      clean.includes('humanities') ||
+      clean.includes('commerce') ||
+      clean.includes('icom') ||
+      clean.includes('i.com') ||
+      /\b(fa|f\.a)\b/i.test(clean)
+    ) {
+      return { group: 'Ineligible', hasMaths: false, eligible: false };
+    }
+
+    // 2. Pre-Medical variations (accepts: pre med, pre-med, med, medical, pre medical, doctor, bio, biology)
+    if (
+      /\b(pre[- ]?med|pre[- ]?medical|medical|med|bio|biology|doctor)\b/i.test(clean)
+    ) {
+      return { group: 'Pre-Medical', hasMaths: false, eligible: true };
+    }
+
+    // 3. Pre-Engineering variations (accepts: pre eng, pre-eng, eng, engineering, pre engg, pre-engineering, non-med)
+    if (
+      /\b(pre[- ]?eng|pre[- ]?engg|pre[- ]?engineering|engineering|engg|eng|non[- ]?med|non[- ]?medical)\b/i.test(clean)
+    ) {
+      return { group: 'FSc Pre-Engineering', hasMaths: true, eligible: true };
+    }
+
+    // 4. ICS variations (ics, comp, computer, computer science, cs)
+    if (
+      /\b(ics|i\.c\.s|comp|computer|computer science|cs)\b/i.test(clean)
+    ) {
+      return { group: 'ICS', hasMaths: true, eligible: true };
+    }
+
+    // 5. DAE variations (dae, diploma, associate engineer)
+    if (
+      /\b(dae|d\.a\.e|diploma)\b/i.test(clean)
+    ) {
+      return { group: 'DAE', hasMaths: true, eligible: true };
+    }
+
+    // 6. Generic math indicators
+    if (/\b(math|maths|mathematics)\b/i.test(clean) || LeadBotService.isAffirmative(clean)) {
+      return { group: 'FSc Pre-Engineering', hasMaths: true, eligible: true };
+    }
+
+    return null;
+  }
+
+  /**
    * Helper to return standard re-prompt text for an intake state
    */
   static getPromptForState(state, lead = {}) {
+    const hint = "\n\n_(If you have any questions, feel free to ask!)_";
     switch (state) {
       case CONVERSATION_STATE.AWAITING_NAME:
-        return "Could you please tell me your *Full Name*?";
+        return "Could you please tell me your *Full Name*?" + hint;
       case CONVERSATION_STATE.AWAITING_FATHER_NAME:
-        return "Could you please tell me your *Father's Name*?";
+        return "Could you please tell me your *Father's Name*?" + hint;
       case CONVERSATION_STATE.AWAITING_MARKS:
         if (lead.fsc_marks) {
-          return "Could you please let us know your *Total Marks* (e.g. out of *1100* or *550*)?";
+          return "Could you please let us know your *Total Marks* (e.g. out of *1100* or *550*)?" + hint;
         }
-        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
+        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)" + hint;
       case CONVERSATION_STATE.AWAITING_MATHS:
-        return "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
+        return "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)" + hint;
       case CONVERSATION_STATE.AWAITING_CNIC:
-        return "Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).";
+        return "Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*)." + hint;
       case CONVERSATION_STATE.AWAITING_EMAIL:
-        return "Please provide your active *Email Address* (e.g. *applicant@example.com*).";
+        return "Please provide your active *Email Address* (e.g. *applicant@example.com*) for official portal access." + hint;
       default:
-        return "Please let us know how we can assist you.";
+        return "Please let us know how we can assist you." + hint;
     }
   }
 
@@ -253,19 +310,21 @@ export class LeadBotService {
       /\b(wanna correct|want to correct|can i change|kuch change|theek karna|sahi karna|durust)\b/i,
       /\b(by mistake|mistakenly|glat likh|ghalat likh|wrong entry|i made a mistake|i did a mistake)\b/i,
       /\b(change marks|change name|change cnic|change email|change father|change group)\b/i,
+      /\b(write (my )?name again|dobara naam|name change|naam badalna|naam dobara)\b/i,
+      /\b(can i write|can i enter|can i re[- ]?enter|dubara likh|dobara likh)\b/i,
     ];
     return patterns.some((p) => p.test(clean));
   }
 
   /**
-   * Helper to format standard or updated confirmation summary
+   * Helper to format unified confirmation and review summary
    */
   static formatConfirmationMessage({ fullName, fatherName, cnic, email, marks, isUpdated = false }) {
     const title = isUpdated ? "*Admissions Pre-Registration Updated*" : "*Admissions Pre-Registration Confirmed*";
     const greeting = isUpdated
       ? `Your details have been successfully updated, *${fullName || 'Candidate'}*.`
       : `Congratulations *${fullName || 'Candidate'}*,\n\nYour admission interest for the Department of Software Engineering at UAJK has been successfully recorded.`;
-    const summaryTitle = isUpdated ? "*Updated Application Summary:*" : "*Application Summary:*";
+    const summaryTitle = isUpdated ? "*Updated Application Summary for Review:*" : "*Application Summary for Review:*";
 
     return (
       `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
@@ -278,8 +337,11 @@ export class LeadBotService {
       `- CNIC/B-Form: ${cnic || 'On Record'}\n` +
       `- Email: ${email || 'On Record'}\n` +
       `- FSc Marks: ${marks || 'Recorded'}\n\n` +
-      `Our admissions office will process your profile and issue your document verification portal link shortly.\n` +
-      `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime.`
+      `⚠️ *Please review your details above carefully.*\n` +
+      `If you made a mistake or want to make a correction (for example reply *"correction krni hai"*, *"can I write my name again"*, or tell us what to update), you can do so now!\n\n` +
+      `⏳ *Next Step:*\n` +
+      `Your official document upload portal link will be sent to you in 1 minute.\n\n` +
+      `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime!`
     );
   }
 
@@ -343,6 +405,25 @@ export class LeadBotService {
           [fromPhone, fromPhone]
         );
         const newLeadId = insertRes.insertId;
+
+        // If the very first message is expressing intent to ask a question (Requirement 6)
+        if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+          const reply = "Yes, please ask your question! What would you like to know?";
+          await LeadBotService.saveTurnAndQueueReply(
+            connection,
+            newLeadId,
+            fromPhone,
+            messageBody,
+            reply,
+            CONVERSATION_STATE.AWAITING_INTEREST,
+            [],
+            rawTimestamp,
+            {},
+            { queueReply }
+          );
+          await connection.commit();
+          return { reply, leadId: newLeadId, state: CONVERSATION_STATE.AWAITING_INTEREST };
+        }
 
         // If the very first message is already asking a question (Case 3)
         if (AIKnowledgeService.isQuestion(messageBody)) {
@@ -576,6 +657,11 @@ export class LeadBotService {
               }
             }
           }
+          // Student explicitly indicates they want to ask a question (Requirement 6)
+          else if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_INTEREST;
+          }
           // Case 1: Student says Yes / interested
           else if (LeadBotService.isAffirmative(messageBody)) {
             const hasKnownName =
@@ -585,10 +671,10 @@ export class LeadBotService {
 
             if (hasKnownName) {
               nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-              replyText = `Great to have you with us, *${fullName}*! To register your admission inquiry, what is your *Father's Name*?`;
+              replyText = `Great to have you with us, *${fullName}*!\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
             } else {
               nextState = CONVERSATION_STATE.AWAITING_NAME;
-              replyText = "Great! Let's get your admission inquiry registered. What is your *Full Name*?";
+              replyText = `Great! Let's get your admission inquiry registered.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
             }
           }
           // Case 3: Student asks a question or random inquiry
@@ -626,11 +712,14 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
+          } else if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_NAME;
           } else if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME)}`;
+              `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fullName = messageBody.trim();
@@ -650,21 +739,31 @@ export class LeadBotService {
               nextState = CONVERSATION_STATE.AWAITING_MATHS;
               replyText =
                 `Thank you, *${fullName}*!\n\n` +
-                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
             } else if (fatherName) {
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
               replyText =
-                `Thank you, *${fullName}*! What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
-                `*(Please provide obtained and total marks, e.g. 890/1100 or 420/550)*`;
+                `Thank you, *${fullName}*!\n\n` +
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
             } else {
               nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-              replyText = `Thank you, *${fullName}*! What is your *Father's Name*?`;
+              replyText = `Thank you, *${fullName}*!\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
             }
           } else {
-            replyText =
-              "Please enter a valid full name (alphabetic characters only, e.g. *Muhammad Ali*).\n\n" +
-              "If you have a question instead, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_NAME;
+            // Conversational grace: if student said something conversational, answer via AI first
+            const clean = messageBody.trim();
+            if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
+              nextState = CONVERSATION_STATE.AWAITING_NAME;
+            } else {
+              replyText =
+                "Please enter a valid full name (alphabetic characters only, e.g. *Muhammad Ali*).\n\n" +
+                "If you have a question instead, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_NAME;
+            }
           }
           break;
         }
@@ -681,11 +780,14 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
+          } else if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
           } else if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME)}`;
+              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
           } else if (LeadBotService.isValidName(messageBody)) {
             fatherName = messageBody.trim();
@@ -705,18 +807,27 @@ export class LeadBotService {
               nextState = CONVERSATION_STATE.AWAITING_MATHS;
               replyText =
                 `Thank you, *${fullName}*!\n\n` +
-                `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
             } else {
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
               replyText =
-                `Noted. What was your score in FSc / ICS / DAE (Part 1 or Complete)?\n` +
-                `*(Please provide obtained and total marks, e.g. 890/1100 or 420/550)*`;
+                `Noted.\n\n` +
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
             }
           } else {
-            replyText =
-              "Please enter a valid Father's name (letters only, e.g. *Tariq Mahmood*).\n\n" +
-              "If you have a question, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+            const clean = messageBody.trim();
+            if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
+              nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+            } else {
+              replyText =
+                "Please enter a valid Father's name (letters only, e.g. *Tariq Mahmood*).\n\n" +
+                "If you have a question, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+            }
           }
           break;
         }
@@ -733,6 +844,12 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
+            break;
+          }
+
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
             break;
           }
 
@@ -791,10 +908,10 @@ export class LeadBotService {
 
                 if (!hasKnownName) {
                   nextState = CONVERSATION_STATE.AWAITING_NAME;
-                  replyText = `Thank you! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\nTo continue your admission registration, what is your *Full Name*?`;
+                  replyText = `Thank you! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
                 } else if (!fatherName) {
                   nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-                  replyText = `Thank you, *${fullName}*! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\nWhat is your *Father's Name*?`;
+                  replyText = `Thank you, *${fullName}*! Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
                 } else if (cnic && email && (hasMaths !== null || lead.has_maths !== null)) {
                   nextState = CONVERSATION_STATE.QUALIFIED;
                   qualificationChanged = true;
@@ -811,7 +928,7 @@ export class LeadBotService {
                   nextState = CONVERSATION_STATE.AWAITING_MATHS;
                   replyText =
                     `Noted: *${percentage.toFixed(1)}%* marks (${obtained}/${total}).\n\n` +
-                    `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+                    LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
                 }
               }
               break;
@@ -855,7 +972,7 @@ export class LeadBotService {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To check your program eligibility:* What was your score in FSc / ICS / DAE (Part 1 or 2)? (e.g. *890/1100* or *420/550*)`;
+              `*To check your program eligibility:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
           } else if (!parsed) {
             replyText =
@@ -911,10 +1028,10 @@ export class LeadBotService {
 
               if (!hasKnownName) {
                 nextState = CONVERSATION_STATE.AWAITING_NAME;
-                replyText = `Thank you! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\nTo continue your admission registration, what is your *Full Name*?`;
+                replyText = `Thank you! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
               } else if (!fatherName) {
                 nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-                replyText = `Thank you, *${fullName}*! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\nWhat is your *Father's Name*?`;
+                replyText = `Thank you, *${fullName}*! Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
               } else if (cnic && email && (hasMaths !== null || lead.has_maths !== null)) {
                 nextState = CONVERSATION_STATE.QUALIFIED;
                 qualificationChanged = true;
@@ -931,7 +1048,7 @@ export class LeadBotService {
                 nextState = CONVERSATION_STATE.AWAITING_MATHS;
                 replyText =
                   `Noted: *${parsed.percentage.toFixed(1)}%* marks (${parsed.obtained}/${parsed.total}).\n\n` +
-                  `Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)`;
+                  LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
               }
             }
           }
@@ -957,13 +1074,29 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
-          } else if (
-            clean.includes('pre-medical') ||
-            clean.includes('pre medical') ||
-            clean.includes('pre-med') ||
-            clean.includes('medical') ||
-            clean.includes('bio')
-          ) {
+            break;
+          }
+
+          // Student explicitly indicates they want to ask a question (Requirement 6)
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            break;
+          }
+
+          // Classification of study group (Pre-Eng, Pre-Med, ICS, DAE, etc.)
+          const groupResult = LeadBotService.classifyAcademicGroup(messageBody);
+
+          if (groupResult?.group === 'Ineligible') {
+            nextState = CONVERSATION_STATE.NOT_INTERESTED;
+            qualificationChanged = true;
+            isEligible = false;
+            ineligibilityReason = INELIGIBILITY_REASON.NO_MATHEMATICS;
+            eligibleFor = PROGRAM_ELIGIBILITY.NONE;
+            replyText =
+              "Thank you for sharing your background. Engineering and Computing Technology programs (SE, SET, CET) require an FSc Pre-Engineering, ICS, Pre-Medical, or DAE background.\n\n" +
+              "Unfortunately, candidates with Arts, Humanities, or Commerce backgrounds are not eligible for these programs. If you would like information about other university departments or programs, feel free to ask anytime!";
+          } else if (groupResult?.group === 'Pre-Medical') {
             hasMaths = false;
             priorDegree = 'Pre-Medical';
             if (cnic && email && marksObtained && fatherName) {
@@ -981,36 +1114,12 @@ export class LeadBotService {
             } else {
               nextState = CONVERSATION_STATE.AWAITING_CNIC;
               replyText =
-                "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
-                "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+                "Noted: *Pre-Medical*! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
             }
-          } else if (
-            clean.includes('arts') ||
-            clean.includes('humanities') ||
-            clean.includes('commerce') ||
-            clean.includes('icom') ||
-            clean.includes('i.com') ||
-            /\b(fa|f\.a)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.NOT_INTERESTED;
-            qualificationChanged = true;
-            isEligible = false;
-            ineligibilityReason = INELIGIBILITY_REASON.NO_MATHEMATICS;
-            eligibleFor = PROGRAM_ELIGIBILITY.NONE;
-            replyText =
-              "Thank you for sharing your background. Engineering and Computing Technology programs (SE, SET, CET) require an FSc Pre-Engineering, ICS, Pre-Medical, or DAE background.\n\n" +
-              "Unfortunately, candidates with Arts, Humanities, or Commerce backgrounds are not eligible for these programs. If you would like information about other university departments or programs, feel free to ask anytime!";
-          } else if (
-            LeadBotService.isAffirmative(messageBody) ||
-            clean.includes('pre-eng') ||
-            clean.includes('ics') ||
-            clean.includes('dae') ||
-            clean.includes('math')
-          ) {
+          } else if (groupResult?.eligible) {
             hasMaths = true;
-            if (clean.includes('ics')) priorDegree = 'ICS';
-            else if (clean.includes('dae')) priorDegree = 'DAE';
-            else priorDegree = 'FSc Pre-Engineering';
+            priorDegree = groupResult.group;
 
             if (cnic && email && marksObtained && fatherName) {
               nextState = CONVERSATION_STATE.QUALIFIED;
@@ -1027,9 +1136,11 @@ export class LeadBotService {
             } else {
               nextState = CONVERSATION_STATE.AWAITING_CNIC;
               replyText =
-                "Great! Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+                `Great! Noted: *${priorDegree}*.\n\n` +
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
             }
           } else if (LeadBotService.isNegative(messageBody)) {
+            // Student replied No / Nahi to having studied mathematics -> Pre-Medical
             hasMaths = false;
             priorDegree = 'Pre-Medical';
             if (cnic && email && marksObtained && fatherName) {
@@ -1048,19 +1159,28 @@ export class LeadBotService {
               nextState = CONVERSATION_STATE.AWAITING_CNIC;
               replyText =
                 "Noted! Up to 40% of seats in B.Sc. Software Engineering (SE) are offered to Pre-Medical candidates under PEC policy, and you are fully eligible for Software Engineering Technology (SET) & Computer Engineering Technology (CET) (with an additional deficiency Mathematics course in the 1st semester).\n\n" +
-                "Next, please provide your *13-digit CNIC or Form-B number* (e.g. *12345-1234567-1*):";
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
             }
           } else if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS)}`;
+              `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_MATHS;
           } else {
-            replyText =
-              "Please let us know your study background (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, *DAE*) or reply *Yes* if you studied Mathematics.\n\n" +
-              "If you have a question, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            // Conversational grace fallback
+            if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            } else {
+              replyText =
+                "Please let us know your study background (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, *DAE*) or reply *Yes* if you studied Mathematics.\n\n" +
+                "If you have a question, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            }
           }
           break;
         }
@@ -1080,13 +1200,19 @@ export class LeadBotService {
             break;
           }
 
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            break;
+          }
+
           const parsedCnic = LeadBotService.parseCnic(messageBody);
 
           if (!parsedCnic && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To continue your registration:* Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).`;
+              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_CNIC;
           } else if (parsedCnic) {
             cnic = parsedCnic;
@@ -1105,7 +1231,8 @@ export class LeadBotService {
             } else {
               nextState = CONVERSATION_STATE.AWAITING_EMAIL;
               replyText =
-                "Thank you! Finally, please provide your *active Email Address* for official admission updates and portal access:";
+                "Thank you!\n\n" +
+                LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
             }
           } else {
             replyText =
@@ -1131,13 +1258,19 @@ export class LeadBotService {
             break;
           }
 
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            break;
+          }
+
           const parsedEmail = LeadBotService.parseEmail(messageBody);
 
           if (!parsedEmail && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
-              `*To complete your registration:* Please provide your Email Address (e.g. *applicant@example.com*).`;
+              `*To complete your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_EMAIL;
           } else if (parsedEmail) {
             email = parsedEmail;
@@ -1172,6 +1305,23 @@ export class LeadBotService {
         // ---------------------------------------------------------------------
         case CONVERSATION_STATE.QUALIFIED: {
           const clean = messageBody.trim().toLowerCase();
+
+          // Cancel any pending un-dispatched upload link job so candidate can freely inquire or correct!
+          try {
+            await connection.execute(
+              `DELETE FROM outbox_jobs WHERE job_type = 'LEAD_QUALIFIED' AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.leadId')) = ? AND status = 'PENDING'`,
+              [lead.id]
+            );
+          } catch {
+            // Safe fallback
+          }
+
+          // Student explicitly indicates they want to ask a question (Requirement 6)
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            break;
+          }
 
           // Check direct field value submissions
           const marksInMsg = LeadBotService.parseMarks(messageBody);
@@ -1334,11 +1484,12 @@ export class LeadBotService {
             clean === '1' ||
             clean === 'name' ||
             clean === 'full name' ||
+            /\b(write (my )?name again|can i (change|write|enter|re[- ]?enter) (my )?name|change (my )?name|correct (my )?name|naam (change|galat|ghalat|dobara|dubara)|mera naam)\b/i.test(clean) ||
             /\b(change|correct|edit|update|wrong)\b.*\b(name|naam)\b/i.test(clean) ||
             /\b(name|naam)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
           ) {
             nextState = CONVERSATION_STATE.AWAITING_NAME;
-            replyText = "No problem! What is your correct *Full Name*?";
+            replyText = "Yes, absolutely! What is your correct *Full Name*?";
             break;
           }
 
@@ -1585,6 +1736,7 @@ export class LeadBotService {
             hasMaths: hasMaths !== null ? hasMaths : true,
             eligibleFor: eligibleFor || PROGRAM_ELIGIBILITY.SE_SET_CET,
           },
+          availableAt: new Date(Date.now() + 60 * 1000), // Delay document upload link by 1 minute so student can review and correct
           connection,
         });
 

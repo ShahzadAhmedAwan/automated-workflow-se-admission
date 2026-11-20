@@ -105,4 +105,35 @@ export const marketingApi = {
     const res = await apiRequest('/marketing/whatsapp/status', {}, true);
     return res.data;
   },
+
+  async updateWhatsAppNumber(phone) {
+    const res = await apiRequest('/marketing/whatsapp/number', {
+      method: 'POST',
+      body: JSON.stringify({ phone }),
+    }, true);
+    return res.data;
+  },
+
+  async getKnowledge() {
+    const res = await apiRequest('/marketing/knowledge', {}, true);
+    return res.data;
+  },
+
+  async updateKnowledge(knowledge) {
+    const res = await apiRequest('/marketing/knowledge', {
+      method: 'POST',
+      body: JSON.stringify({ knowledge }),
+    }, true);
+    return res.data;
+  },
+
+  async uploadKnowledgeFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await apiRequest('/marketing/knowledge', {
+      method: 'POST',
+      body: formData,
+    }, true);
+    return res.data;
+  },
 };

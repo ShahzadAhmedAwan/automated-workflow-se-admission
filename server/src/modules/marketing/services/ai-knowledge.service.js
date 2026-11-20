@@ -40,6 +40,81 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
   }
 
   /**
+   * Updates the knowledge base document and refreshes in-memory cache
+   */
+  static setKnowledgeText(content) {
+    if (typeof content !== 'string') {
+      throw new TypeError('Knowledge document content must be a string.');
+    }
+    const dir = path.dirname(KNOWLEDGE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(KNOWLEDGE_PATH, content, 'utf8');
+    AIKnowledgeService.knowledgeCache = content;
+    return {
+      byteSize: Buffer.byteLength(content, 'utf8'),
+      charCount: content.length,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Returns metadata and stats about the current knowledge document
+   */
+  static getKnowledgeMeta() {
+    const text = AIKnowledgeService.getKnowledgeText();
+    let stats = null;
+    try {
+      if (fs.existsSync(KNOWLEDGE_PATH)) {
+        stats = fs.statSync(KNOWLEDGE_PATH);
+      }
+    } catch {
+      stats = null;
+    }
+    return {
+      knowledge: text,
+      byteSize: Buffer.byteLength(text, 'utf8'),
+      charCount: text.length,
+      wordCount: text.trim().split(/\s+/).filter(Boolean).length,
+      updatedAt: stats?.mtime ? stats.mtime.toISOString() : new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Helper to detect if a student explicitly states they want to ask a question
+   * (e.g. "Yes, I have a question", "han ek sawal hai", "can I ask something")
+   */
+  static isAskingToAskQuestion(text) {
+    if (!text || typeof text !== 'string') return false;
+    const clean = text.trim().toLowerCase();
+
+    // English patterns
+    const englishPatterns = [
+      /\b(yes\b.*\b(have a question|want to ask|can i ask|ask a question))\b/i,
+      /\b(i have a question|i have one question|i got a question|have a question|got a question)\b/i,
+      /\b(can i ask (a question|something)|may i ask (a question|something)|want to ask (a question|something))\b/i,
+      /\b(yes\s*,?\s*(i\s+do|i\s+have))\b/i,
+    ];
+
+    if (englishPatterns.some((p) => p.test(clean))) {
+      return true;
+    }
+
+    // Urdu / Roman Urdu patterns
+    const urduPatterns = [
+      /\b(sawal (hai|puchna|poochna)|question hai|ek sawal|kuch puchna|kuch poochna)\b/i,
+      /\b(han\b.*\b(sawal|question|puchna|poochna))\b/i,
+      /\b(ji\b.*\b(sawal|question|puchna|poochna))\b/i,
+      /\b(jee\b.*\b(sawal|question|puchna|poochna))\b/i,
+      /\b(haan\b.*\b(sawal|question|puchna|poochna))\b/i,
+      /\b(puch sakta|pooch sakta|puch sakti|pooch sakti)\b/i,
+    ];
+
+    return urduPatterns.some((p) => p.test(clean));
+  }
+
+  /**
    * Helper to detect if a message is an inquiry/question rather than a direct answer
    */
   static isQuestion(text) {
@@ -49,9 +124,30 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     // Explicit question mark
     if (clean.includes('?')) return true;
 
+    // Direct intention to ask a question
+    if (AIKnowledgeService.isAskingToAskQuestion(clean)) return true;
+
     // Interrogatives at start or core positions
     if (
-      /^(what|where|when|who|why|how|which|whose|is|are|can|do|will|could|should|kya|kab|kahan|kitni|kitna|kaise|konsa)\b/i.test(
+      /^(what|where|when|who|why|how|which|whose|is|are|can|do|will|could|should|would|kya|kab|kahan|kitni|kitna|kaise|konsa|kon)\b/i.test(
+        clean
+      )
+    ) {
+      return true;
+    }
+
+    // Statements of admissions interest in other programs or intent to apply
+    // (e.g. "i want to take admission in electrical", "mujhe admission chahiye")
+    if (
+      /\b(electrical|civil|mechanical|electronics|telecom|mechatronics|cs|computer science|artificial intelligence|data science|cyber security|bba|pharmacy|dpt|mbbs|llb)\b/i.test(
+        clean
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      /\b(want to take admission|admission lena|admission leni|apply karna|admission chahiye|seat chahiye|classes kab|timing kya)\b/i.test(
         clean
       )
     ) {
@@ -119,16 +215,18 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     const timeoutId = setTimeout(() => controller.abort(), 4500);
 
     const systemPrompt = `You are the official WhatsApp Admissions AI Assistant for the Department of Software Engineering at The University of Azad Jammu & Kashmir (UAJK), Chehla Campus, Muzaffarabad.
-Your job is to answer prospective students' questions accurately, concisely, and warmly.
+The admissions office has uploaded the official admissions and guidelines document below. You MUST behave, answer, and bend your guidance, rules, eligibility criteria, and tone strictly according to this document.
 
 STRICT GUIDELINES:
-1. Always ground your answers strictly in the knowledge base provided below.
-2. If asking about programs: UAJK offers B.Sc. Software Engineering (SE - PEC accredited, min 60% F.Sc.), B.Sc. Software Engineering Technology (SET - NTC accredited, min 50% F.Sc.), and B.Sc. Computer Engineering Technology (CET - NTC accredited, min 50% F.Sc.).
-3. Pre-Medical students ARE eligible for SET & CET with a deficiency math course in the first semester, and can also apply for SE under the PEC 40% quota if they have >= 60% marks.
-4. Keep replies WhatsApp-friendly: concise (2-4 bullet points or short sentences), polite, using bold (*text*) for key details.
-5. If the exact answer is not in the knowledge base, politely provide general university guidance and direct them to contact the Department Helpline at +92-5822-960510 or email se@uajk.edu.pk, or visit https://uajk.edu.pk/.
+1. Always ground your behavior, answers, eligibility rules, and numbers strictly in the knowledge document provided below.
+2. Department programs: UAJK Department of Software Engineering (Chehla Campus) offers B.Sc. Software Engineering (SE - PEC accredited, min 60% F.Sc.), B.Sc. Software Engineering Technology (SET - NTC accredited, min 50% F.Sc.), and B.Sc. Computer Engineering Technology (CET - NTC accredited, min 50% F.Sc.).
+3. If a student asks about other programs (e.g. Electrical Engineering, Civil Engineering, Mechanical, BSCS, BSAI), politely clarify what is offered at the Department of Software Engineering (Chehla Campus) vs other university faculties/campuses (e.g. Faculty of Engineering or King Abdullah Campus), adhering to the uploaded document.
+4. If a student says they have a question (e.g. "Yes, I have a question"), warmly and eagerly invite them to ask it.
+5. Academic groups: Pre-Engineering, ICS, and DAE are eligible with Mathematics. Pre-Medical students are eligible for SET & CET with a deficiency math course in the first semester, and can apply for SE under the PEC 40% quota if they have >= 60% marks.
+6. Keep replies WhatsApp-friendly: warm, polite, concise (2-4 bullet points or short sentences), using bold (*text*) for key details.
+7. If the exact answer is not in the knowledge base, politely provide general university guidance and direct them to contact the Department Helpline at +92-5822-960510 or email se@uajk.edu.pk, or visit https://uajk.edu.pk/.
 
-KNOWLEDGE BASE:
+KNOWLEDGE BASE DOCUMENT:
 ${knowledge}
 `;
 
@@ -177,6 +275,13 @@ ${knowledge}
    */
   static matchLocalKnowledge(query, _knowledge = '') {
     const q = (query || '').toLowerCase();
+
+    // 00. Explicit statement of wanting to ask a question
+    if (AIKnowledgeService.isAskingToAskQuestion(q)) {
+      return (
+        "Yes, please ask your question! Feel free to ask anything about our undergraduate programs (SE, SET, CET), eligibility criteria, fee structure, hostel facilities, or admissions process, and I'll be glad to help."
+      );
+    }
 
     // 0a. Identity / "who are you" / "who is this"
     if (
@@ -397,6 +502,42 @@ ${knowledge}
         "2. *B.Sc. Software Engineering Technology (SET)* - 4 Years, NTC Accredited\n" +
         "3. *B.Sc. Computer Engineering Technology (CET)* - 4 Years, NTC Accredited\n" +
         "4. *MS Software Engineering* - 2 Years Postgraduate"
+      );
+    }
+
+    // 9a. Inquiries about Electrical, Civil, Mechanical Engineering disciplines
+    if (
+      q.includes('electrical') ||
+      q.includes('civil') ||
+      q.includes('mechanical') ||
+      q.includes('electronics') ||
+      q.includes('telecom')
+    ) {
+      return (
+        "*Engineering Disciplines at UAJK:*\n" +
+        "At the *Department of Software Engineering* (Chehla Campus, Muzaffarabad), we offer:\n" +
+        "- *B.Sc. Software Engineering (SE)* - PEC accredited (60% min F.Sc.)\n" +
+        "- *B.Sc. Software Engineering Technology (SET)* - NTC accredited (50% min F.Sc.)\n" +
+        "- *B.Sc. Computer Engineering Technology (CET)* - NTC accredited (50% min F.Sc.)\n\n" +
+        "Electrical, Civil, and Mechanical Engineering fall under other engineering departments of the University. For details regarding Electrical or Civil admissions, please visit the central university portal at https://uajk.edu.pk/ or contact the University Admissions Directorate."
+      );
+    }
+
+    // 9b. Inquiries about Computer Science, AI, Cyber Security
+    if (
+      q.includes('computer science') ||
+      q.includes('bs cs') ||
+      q.includes('bscs') ||
+      q.includes('artificial intelligence') ||
+      q.includes('bs ai') ||
+      q.includes('bsai') ||
+      q.includes('cyber security')
+    ) {
+      return (
+        "*Computing Programs at UAJK:*\n" +
+        "- *Department of Software Engineering (Chehla Campus):* Offers B.Sc. Software Engineering (PEC accredited, 60% min), SET (NTC, 50% min), and CET (NTC, 50% min).\n" +
+        "- *Faculty of Science (King Abdullah Campus - Chatter Klass):* Offers BS Computer Science (BSCS), BS Artificial Intelligence (BSAI), and BS Cyber Security (50% min in F.Sc.).\n" +
+        "Both campuses offer outstanding computing degree paths!"
       );
     }
 

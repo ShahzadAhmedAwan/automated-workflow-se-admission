@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { marketingApi } from './marketingApi.js';
 import {
   IconPlus,
@@ -12,6 +12,7 @@ import {
   IconPencil,
   IconUsers,
   IconTrash,
+  IconUploadCloud,
 } from '../../core/icons/Icons.jsx';
 import { MetricStrip, SectionTabs, StatusBadge, WorkspacePanel, ConfirmDialog } from '../../core/ui/primitives.jsx';
 
@@ -107,6 +108,7 @@ export function MarketingModuleView() {
 
   // Live Simulator
   const [simPhone, setSimPhone] = useState('923001234567');
+  const [simPhoneInput, setSimPhoneInput] = useState('923001234567');
   const [simMessage, setSimMessage] = useState('Yes');
   const [simHistory, setSimHistory] = useState([
     {
@@ -118,8 +120,18 @@ export function MarketingModuleView() {
   const [simTurnState, setSimTurnState] = useState('AWAITING_INTEREST');
   const [simSending, setSimSending] = useState(false);
 
+  // Dynamic Bot Knowledge & Policy Document State
+  const [knowledgeText, setKnowledgeText] = useState('');
+  const [knowledgeMeta, setKnowledgeMeta] = useState(null);
+  const [loadingKnowledge, setLoadingKnowledge] = useState(false);
+  const [savingKnowledge, setSavingKnowledge] = useState(false);
+  const [customWhatsAppInput, setCustomWhatsAppInput] = useState('');
+  const [savingWhatsAppNumber, setSavingWhatsAppNumber] = useState(false);
+  const knowledgeFileInputRef = useRef(null);
+
   useEffect(() => {
     loadCampaigns();
+    loadKnowledge();
   }, []);
 
   useEffect(() => {
@@ -417,6 +429,90 @@ export function MarketingModuleView() {
     }
   }
 
+  async function loadKnowledge() {
+    setLoadingKnowledge(true);
+    try {
+      const data = await marketingApi.getKnowledge();
+      setKnowledgeText(data.content || '');
+      setKnowledgeMeta(data);
+    } catch (err) {
+      console.error('Failed to load knowledge:', err);
+    } finally {
+      setLoadingKnowledge(false);
+    }
+  }
+
+  async function handleSaveKnowledge(e) {
+    if (e) e.preventDefault();
+    setSavingKnowledge(true);
+    setError('');
+    try {
+      const res = await marketingApi.updateKnowledge(knowledgeText);
+      setKnowledgeMeta(res);
+      setSuccess('Bot admissions document updated successfully! The Gemini AI system prompt is now grounded in this text.');
+    } catch (err) {
+      setError(err.message || 'Failed to update knowledge base.');
+    } finally {
+      setSavingKnowledge(false);
+    }
+  }
+
+  function handleKnowledgeFileUpload(e) {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const content = evt.target?.result;
+      if (typeof content === 'string') {
+        setKnowledgeText(content);
+        setSavingKnowledge(true);
+        try {
+          const res = await marketingApi.uploadKnowledgeFile(selectedFile);
+          setKnowledgeMeta(res);
+          setSuccess(`Document "${selectedFile.name}" uploaded successfully! Live bot behavior updated.`);
+        } catch (err) {
+          setError(err.message || 'Failed to upload document file.');
+        } finally {
+          setSavingKnowledge(false);
+        }
+      }
+    };
+    reader.readAsText(selectedFile);
+  }
+
+  async function handleSaveWhatsAppNumber(e) {
+    if (e) e.preventDefault();
+    if (!customWhatsAppInput.trim()) return;
+    setSavingWhatsAppNumber(true);
+    setError('');
+    try {
+      const res = await marketingApi.updateWhatsAppNumber(customWhatsAppInput.trim());
+      setSuccess(`Active WhatsApp number updated to ${res.number || customWhatsAppInput}.`);
+      setCustomWhatsAppInput('');
+    } catch (err) {
+      setError(err.message || 'Failed to update WhatsApp number.');
+    } finally {
+      setSavingWhatsAppNumber(false);
+    }
+  }
+
+  function handleSwitchSimPhone(newPhone) {
+    const cleaned = String(newPhone || '').replace(/\D/g, '');
+    if (!cleaned) return;
+    setSimPhone(cleaned);
+    setSimPhoneInput(cleaned);
+    setSimHistory([
+      {
+        direction: 'OUTBOUND',
+        text: 'Assalam-o-Alaikum! Are you interested in Software Engineering admissions for Fall 2026? (Reply Yes/No)',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+    setSimTurnState('AWAITING_INTEREST');
+    setSuccess(`Simulator applicant switched to +${cleaned}`);
+  }
+
   // Summary Metrics for Campaigns
   const totalLeadsCount = campaigns.reduce((acc, c) => acc + (c.totalLeads || 0), 0);
   const totalSentCount = campaigns.reduce((acc, c) => acc + (c.sentCount || 0), 0);
@@ -458,6 +554,7 @@ export function MarketingModuleView() {
           { id: 'campaigns', label: 'Broadcast Campaigns' },
           { id: 'single', label: 'Single Lead Outreach' },
           { id: 'simulator', label: 'WhatsApp Bot Simulator' },
+          { id: 'knowledge', label: 'Bot Knowledge & Rules' },
         ]}
       />
 
@@ -1249,23 +1346,87 @@ export function MarketingModuleView() {
       {activeTab === 'simulator' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Chat Panel */}
-          <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs flex flex-col h-[580px]">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/75 flex items-center justify-between">
+          <div className="md:col-span-2 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs flex flex-col h-[640px]">
+            {/* Header with Switchable Phone & Presets */}
+            <div className="px-6 py-3.5 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                 <div>
-                  <div className="text-sm font-bold text-slate-900">Message simulator</div>
-                  <div className="text-xs text-slate-500">Applicant: +{simPhone}</div>
+                  <div className="text-sm font-bold text-slate-900">WhatsApp Bot Simulator</div>
+                  <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                    <span>Applicant Phone:</span>
+                    <span className="font-mono font-semibold text-slate-800">+{simPhone}</span>
+                  </div>
                 </div>
               </div>
-              <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                {simulatorStatusLabels[simTurnState] || 'In progress'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded bg-slate-200/70 text-slate-700 border border-slate-300">
+                  {simulatorStatusLabels[simTurnState] || simTurnState}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchSimPhone(simPhone)}
+                  className="px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/50 rounded cursor-pointer transition"
+                  title="Reset conversation for this number"
+                >
+                  Reset Chat
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Switch Number Bar */}
+            <div className="px-6 py-2 bg-slate-100/75 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-slate-600">Simulate Number:</span>
+                <input
+                  type="text"
+                  value={simPhoneInput}
+                  onChange={(e) => setSimPhoneInput(e.target.value)}
+                  placeholder="e.g. 923001234567"
+                  className="px-2 py-0.5 rounded border border-slate-300 text-xs font-mono w-32 bg-white text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSwitchSimPhone(simPhoneInput)}
+                  className="px-2.5 py-0.5 rounded bg-blue-700 text-white font-semibold hover:bg-blue-800 cursor-pointer"
+                >
+                  Switch
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 text-[11px]">
+                <span className="text-slate-500">Presets:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchSimPhone('923408195018')}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 font-mono hover:bg-slate-50 cursor-pointer"
+                >
+                  Admin (+923408195018)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchSimPhone('923001234567')}
+                  className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-700 font-mono hover:bg-slate-50 cursor-pointer"
+                >
+                  Student (+923001234567)
+                </button>
+              </div>
             </div>
 
             {/* Chat Body */}
             <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-slate-50/25">
+              {simTurnState === 'QUALIFIED' && (
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs shadow-xs space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>⏱️</span>
+                    <span>1-Minute Review & Correction Grace Window Active</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-800">
+                    The bot has summarized the candidate's details for verification. It pauses for 1 minute before sending the document upload link. If the applicant notices a mistake, they can say <strong>"can I write my name again"</strong>, <strong>"correction krni hai"</strong>, or <strong>"I made a mistake"</strong> to edit their details immediately.
+                  </p>
+                </div>
+              )}
+
               {simHistory.map((m, idx) => (
                 <div
                   key={idx}
@@ -1291,7 +1452,7 @@ export function MarketingModuleView() {
             <form onSubmit={handleSendSimulatedTurn} className="p-4 border-t border-slate-200 bg-white flex gap-3">
               <input
                 type="text"
-                placeholder="Type a reply…"
+                placeholder="Type a reply (e.g. 'Yes', 'pre eng', 'Yes, I have a question', 'can I write my name again')…"
                 value={simMessage}
                 onChange={(e) => setSimMessage(e.target.value)}
                 className="flex-1 px-4 py-2.5 rounded-md bg-white border border-slate-300 text-slate-900 text-sm focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none"
@@ -1308,28 +1469,208 @@ export function MarketingModuleView() {
           </div>
 
           {/* Reference Sidebar */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-            <h3 className="text-xs font-bold text-slate-900">How qualification works</h3>
-            <div className="text-xs text-slate-600 space-y-3 leading-relaxed">
-              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="font-bold text-slate-900 mb-1">Interest</div>
-                <div>Interested applicants are asked for their marks.</div>
+          <div className="space-y-4">
+            {/* WhatsApp Number Configuration Widget */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+              <h3 className="text-xs font-bold text-slate-900 mb-2">WhatsApp Number in UI</h3>
+              <p className="text-[11px] text-slate-600 mb-3 leading-relaxed">
+                Configure the primary outbound WhatsApp business phone number. You can also edit this anytime from the top navbar badge.
+              </p>
+              <form onSubmit={handleSaveWhatsAppNumber} className="space-y-2">
+                <input
+                  type="text"
+                  value={customWhatsAppInput}
+                  onChange={(e) => setCustomWhatsAppInput(e.target.value)}
+                  placeholder="e.g. 923408195018"
+                  className="w-full px-3 py-1.5 text-xs font-mono rounded border border-slate-300 bg-white text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+                <button
+                  type="submit"
+                  disabled={savingWhatsAppNumber || !customWhatsAppInput.trim()}
+                  className="w-full py-1.5 px-3 text-xs font-semibold rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 cursor-pointer transition"
+                >
+                  {savingWhatsAppNumber ? 'Saving…' : 'Update WhatsApp Number'}
+                </button>
+              </form>
+            </div>
+
+            {/* Smart Intelligence Guide */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-3">
+              <h3 className="text-xs font-bold text-slate-900">Gemini Intelligence & Rules</h3>
+              <div className="text-xs text-slate-600 space-y-2.5 leading-relaxed">
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="font-bold text-slate-900 mb-0.5">Short Academic Answers</div>
+                  <div>Accepts "pre eng", "eng", "med", "pre med", "ics" without requiring exact full names.</div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="font-bold text-slate-900 mb-0.5">"Yes, I have a question"</div>
+                  <div>Politely invites the applicant to ask their question first before continuing intake.</div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="font-bold text-slate-900 mb-0.5">In-between Inquiries</div>
+                  <div>If an applicant asks about Electrical Engineering, fees, or hostels, Gemini answers it directly before asking the next intake question.</div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900">
+                  <div className="font-bold mb-0.5">Dynamic Document Grounding</div>
+                  <div>Upload your prospectus in the <strong>Bot Knowledge & Rules</strong> tab to adapt bot behavior on the fly.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================= TAB 6: BOT KNOWLEDGE & DYNAMIC RULES ======================= */}
+      {activeTab === 'knowledge' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900">Admissions Policy & Knowledge Document</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    Gemini 2.5 Active Grounding
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                  Upload an admissions document or prospectus. The bot and Gemini AI strictly adhere to this document when answering questions, checking eligibility, and guiding applicants.
+                </p>
               </div>
 
-              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="font-bold text-slate-900 mb-1">Marks</div>
-                <div>Applicants need at least 50% of their total marks.</div>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={loadKnowledge}
+                  disabled={loadingKnowledge}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 cursor-pointer disabled:opacity-50 transition"
+                >
+                  <IconRefresh className="size-3.5" />
+                  <span>Reload</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveKnowledge}
+                  disabled={savingKnowledge}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-xs transition"
+                >
+                  <IconCheck className="size-4" />
+                  <span>{savingKnowledge ? 'Deploying…' : 'Save & Deploy to Live Bot'}</span>
+                </button>
               </div>
+            </div>
 
-              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="font-bold text-slate-900 mb-1">Mathematics</div>
-                <div>Applicants must have studied Mathematics.</div>
+            {/* Metrics Ribbon */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 py-4 border-b border-slate-100 text-xs">
+              <div className="p-3 bg-slate-50 rounded-lg">
+                <div className="text-slate-500 text-[11px]">Last Updated</div>
+                <div className="font-semibold text-slate-800 mt-0.5">
+                  {knowledgeMeta?.updatedAt ? new Date(knowledgeMeta.updatedAt).toLocaleString() : 'System Default'}
+                </div>
               </div>
+              <div className="p-3 bg-slate-50 rounded-lg">
+                <div className="text-slate-500 text-[11px]">Character Count</div>
+                <div className="font-semibold text-slate-800 mt-0.5">
+                  {knowledgeMeta?.charCount || knowledgeText.length} characters
+                </div>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-lg">
+                <div className="text-slate-500 text-[11px]">Word Count</div>
+                <div className="font-semibold text-slate-800 mt-0.5">
+                  {knowledgeMeta?.wordCount || (knowledgeText.trim() ? knowledgeText.trim().split(/\s+/).length : 0)} words
+                </div>
+              </div>
+              <div className="p-3 bg-slate-50 rounded-lg">
+                <div className="text-slate-500 text-[11px]">Document Storage</div>
+                <div className="font-semibold text-slate-800 mt-0.5 font-mono text-[11px] truncate" title={knowledgeMeta?.filePath}>
+                  server/data/knowledge.txt
+                </div>
+              </div>
+            </div>
 
-              <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900">
-                <div className="font-bold mb-1">Next step</div>
-                <div>Qualified applicants can continue to document verification.</div>
+            {/* Upload Box */}
+            <div className="my-5">
+              <label className="block text-xs font-bold text-slate-800 mb-2">
+                Upload Admissions Document (.txt, .md, .doc, .csv, .json)
+              </label>
+              <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-6 text-center transition bg-slate-50/50 hover:bg-blue-50/20">
+                <input
+                  type="file"
+                  id="knowledgeDocUpload"
+                  ref={knowledgeFileInputRef}
+                  accept=".txt,.md,.markdown,.doc,.json,.csv"
+                  onChange={handleKnowledgeFileUpload}
+                  className="hidden"
+                />
+                <label htmlFor="knowledgeDocUpload" className="cursor-pointer flex flex-col items-center">
+                  <IconUploadCloud className="w-8 h-8 text-blue-600 mb-2" />
+                  <span className="text-sm font-semibold text-slate-800">
+                    Click to select or drop an admissions prospectus / document
+                  </span>
+                  <span className="text-xs text-slate-500 mt-1">
+                    Plain text or Markdown documents will load into the editor and immediately synchronize with the bot.
+                  </span>
+                </label>
               </div>
+            </div>
+
+            {/* Monospace Document Editor */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-slate-800">
+                  Live Knowledge Base & Guidelines Editor
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Changes made here directly instruct the Gemini model and rule evaluation engine
+                </span>
+              </div>
+              <textarea
+                rows={16}
+                value={knowledgeText}
+                onChange={(e) => setKnowledgeText(e.target.value)}
+                placeholder="Paste admissions requirements, program eligibility, deadlines, fee details, and FAQ answers..."
+                className="w-full p-4 rounded-xl border border-slate-700 font-mono text-xs text-slate-100 bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed resize-y"
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  The AI lead bot will strictly abide by the rules and policies written above.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveKnowledge}
+                  disabled={savingKnowledge}
+                  className="inline-flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  <IconCheck className="size-4" />
+                  <span>{savingKnowledge ? 'Saving & Grounding…' : 'Save & Deploy to Live Bot'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Explanation Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs">
+              <h4 className="text-xs font-bold text-slate-900 mb-1">🤖 Dynamic Document Grounding</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Gemini dynamically references this document for program details, eligibility criteria, and fee structures. The bot bends its answers to strictly match the text.
+              </p>
+            </div>
+
+            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs">
+              <h4 className="text-xs font-bold text-slate-900 mb-1">⏱️ 1-Minute Correction Grace</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Before sending the verification portal document upload link, the bot presents a unified summary and waits 60 seconds. Students can request changes ("correction krni hai", "change name") before the link is dispatched.
+              </p>
+            </div>
+
+            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-xs">
+              <h4 className="text-xs font-bold text-slate-900 mb-1">💬 Conversational Intelligence</h4>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                If an applicant says "Yes, I have a question" or asks about Electrical Engineering in between intake steps, the bot answers gracefully first before continuing the workflow.
+              </p>
             </div>
           </div>
         </div>

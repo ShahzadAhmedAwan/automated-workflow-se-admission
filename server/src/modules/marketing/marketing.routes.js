@@ -16,6 +16,11 @@ const upload = multer({
   },
 });
 
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+});
+
 export const marketingRoutes = Router();
 
 // Staff-protected campaign management endpoints
@@ -128,4 +133,28 @@ marketingRoutes.get(
   '/whatsapp/status',
   authenticate,
   CampaignController.getWhatsAppStatus
+);
+
+// Staff-accessible WhatsApp custom number update
+marketingRoutes.post(
+  '/whatsapp/number',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.updateWhatsAppNumber
+);
+
+// AI Knowledge Base document retrieval and update
+marketingRoutes.get(
+  '/knowledge',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.getKnowledgeBase
+);
+
+marketingRoutes.post(
+  '/knowledge',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  docUpload.single('file'),
+  CampaignController.updateKnowledgeBase
 );

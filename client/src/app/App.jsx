@@ -16,6 +16,9 @@ import {
   IconPlus,
   IconMenu,
   IconSidebarToggle,
+  IconClose,
+  IconCheck,
+  IconRefresh,
 } from '../core/icons/Icons.jsx';
 
 const navigation = [
@@ -45,6 +48,10 @@ export function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [waStatus, setWaStatus] = useState({ connected: false, status: 'CHECKING', phone: null });
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [waPhoneInput, setWaPhoneInput] = useState('');
+  const [savingWaNumber, setSavingWaNumber] = useState(false);
+  const [waModalMsg, setWaModalMsg] = useState({ error: '', success: '' });
 
   useEffect(() => {
     if (!user) return;
@@ -66,6 +73,23 @@ export function App() {
       clearInterval(interval);
     };
   }, [user]);
+
+  async function handleSaveWhatsAppNumber(e) {
+    e.preventDefault();
+    if (!waPhoneInput.trim()) return;
+    setSavingWaNumber(true);
+    setWaModalMsg({ error: '', success: '' });
+    try {
+      await marketingApi.updateWhatsAppNumber(waPhoneInput.trim());
+      setWaModalMsg({ error: '', success: 'WhatsApp number updated successfully!' });
+      const refreshed = await marketingApi.getWhatsAppStatus();
+      if (refreshed) setWaStatus(refreshed);
+    } catch (err) {
+      setWaModalMsg({ error: err.message || 'Failed to update WhatsApp number', success: '' });
+    } finally {
+      setSavingWaNumber(false);
+    }
+  }
 
   if (status === 'loading') {
     return (
@@ -214,20 +238,33 @@ export function App() {
           </div>
 
           <div className="flex shrink-0 items-center gap-3">
-            {/* WhatsApp Session Status */}
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border ${
+            {/* WhatsApp Session Status & Phone Config Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setWaPhoneInput(waStatus.phone || waStatus.adminNumber || '923408195018');
+                setWaModalMsg({ error: '', success: '' });
+                setShowWaModal(true);
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium border cursor-pointer hover:shadow-xs transition ${
                 waStatus.connected
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                   : waStatus.status === 'NEEDS_QR'
                     ? 'border-amber-200 bg-amber-50 text-amber-800'
                     : 'border-slate-200 bg-slate-50 text-slate-600'
               }`}
+              title="Click to view or change WhatsApp number & connection"
             >
               <span className={`size-1.5 rounded-full ${waStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-              <span className="hidden sm:inline">{waStatus.connected ? 'WhatsApp Online' : 'WhatsApp Offline'}</span>
-              <span className="sm:hidden">{waStatus.connected ? 'Online' : 'Offline'}</span>
-            </span>
+              <span className="hidden sm:inline">
+                {waStatus.connected
+                  ? `WhatsApp Online ${waStatus.phone ? `(+${waStatus.phone})` : ''}`
+                  : `WhatsApp Offline ${waStatus.phone ? `(+${waStatus.phone})` : ''}`}
+              </span>
+              <span className="sm:hidden">
+                {waStatus.connected ? (waStatus.phone ? `+${waStatus.phone}` : 'Online') : 'Offline'}
+              </span>
+            </button>
 
             {isSuperAdmin && (
               <button
@@ -298,6 +335,91 @@ export function App() {
         </main>
       </div>
 
+      {/* WhatsApp Configuration & Number Modal */}
+      {showWaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs">
+          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className={`size-2.5 rounded-full ${waStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                <h3 className="text-base font-bold text-slate-900">WhatsApp Configuration</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWaModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
+              >
+                <IconClose className="size-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Connection Status:</span>
+                  <span className={`font-semibold ${waStatus.connected ? 'text-emerald-700' : 'text-slate-600'}`}>
+                    {waStatus.connected ? '🟢 Connected (Online)' : waStatus.status === 'NEEDS_QR' ? '🟡 QR Scan Needed' : '⚪ Offline / Standby'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Active Bot Phone:</span>
+                  <span className="font-mono font-semibold text-slate-800">
+                    +{waStatus.phone || waStatus.adminNumber || 'Not set'}
+                  </span>
+                </div>
+              </div>
+
+              {waModalMsg.error && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                  {waModalMsg.error}
+                </div>
+              )}
+              {waModalMsg.success && (
+                <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
+                  <IconCheck className="size-4 shrink-0 text-emerald-600" />
+                  <span>{waModalMsg.success}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveWhatsAppNumber} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Change WhatsApp Number
+                  </label>
+                  <input
+                    type="text"
+                    value={waPhoneInput}
+                    onChange={(e) => setWaPhoneInput(e.target.value)}
+                    placeholder="e.g. 923408195018 or 03408195018"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
+                    required
+                  />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Enter the WhatsApp phone number (with country code 92 or standard mobile format).
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    disabled={savingWaNumber || !waPhoneInput.trim()}
+                    className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 transition"
+                  >
+                    {savingWaNumber ? 'Saving…' : 'Update WhatsApp Number'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowWaModal(false)}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

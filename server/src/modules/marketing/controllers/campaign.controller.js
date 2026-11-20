@@ -261,14 +261,110 @@ export class CampaignController {
       const lastKnown = rows && rows.length ? rows[0] : null;
       const lastVal = lastKnown ? (typeof lastKnown.setting_value === 'string' ? JSON.parse(lastKnown.setting_value) : lastKnown.setting_value) : null;
 
+      // Check if admin has set a custom WhatsApp phone number in sys_settings
+      let customPhone = null;
+      try {
+        const [customRows] = await db.query(
+          `SELECT setting_value FROM sys_settings WHERE setting_key = 'whatsapp_custom_number' LIMIT 1`
+        );
+        if (customRows && customRows.length) {
+          customPhone = customRows[0].setting_value;
+        }
+      } catch {
+        // Table or row not found
+      }
+
+      const activePhone = lastVal?.phone || fallbackPhone || customPhone || process.env.ADMIN_NUMBER || null;
+
       res.json({
         status: 'success',
         data: {
           connected: false,
           status: lastVal?.status === 'NEEDS_QR' ? 'NEEDS_QR' : 'OFFLINE',
-          phone: lastVal?.phone || fallbackPhone || null,
+          phone: activePhone,
+          adminNumber: process.env.ADMIN_NUMBER || null,
+          customPhone,
           updatedAt: lastKnown?.updated_at ? new Date(lastKnown.updated_at).toISOString() : null,
           error: lastVal?.error || null,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Sets or updates custom WhatsApp / Bot contact number in sys_settings
+   */
+  static async updateWhatsAppNumber(req, res, next, db = pool) {
+    try {
+      const { phone } = req.body;
+      if (!phone || typeof phone !== 'string') {
+        throw new AppError(400, 'INVALID_PHONE', 'Valid WhatsApp phone number string is required.');
+      }
+      const cleanPhone = phone.replace(/\D/g, '');
+      if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+        throw new AppError(400, 'INVALID_PHONE', 'Phone number must be between 10 and 15 digits.');
+      }
+
+      await db.execute(
+        `INSERT INTO sys_settings (setting_key, setting_value)
+         VALUES ('whatsapp_custom_number', ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP(3)`,
+        [cleanPhone]
+      );
+
+      res.json({
+        status: 'success',
+        data: {
+          phone: cleanPhone,
+          message: 'WhatsApp phone number updated successfully.',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Returns current AI admissions knowledge document and metadata
+   */
+  static async getKnowledgeBase(_req, res, next) {
+    try {
+      const meta = AIKnowledgeService.getKnowledgeMeta();
+      res.json({
+        status: 'success',
+        data: meta,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Updates AI admissions knowledge base from document text or file upload
+   */
+  static async updateKnowledgeBase(req, res, next) {
+    try {
+      let content = '';
+      if (req.file) {
+        content = req.file.buffer.toString('utf8');
+      } else if (req.body && typeof req.body.knowledge === 'string') {
+        content = req.body.knowledge;
+      } else {
+        throw new AppError(400, 'INVALID_PAYLOAD', 'Knowledge document content or file is required.');
+      }
+
+      if (!content.trim()) {
+        throw new AppError(400, 'EMPTY_DOCUMENT', 'Knowledge document cannot be empty.');
+      }
+
+      const result = AIKnowledgeService.setKnowledgeText(content);
+      res.json({
+        status: 'success',
+        data: {
+          message: 'Knowledge document deployed successfully. Bot will immediately adapt its behavior to this document.',
+          ...result,
         },
       });
     } catch (err) {

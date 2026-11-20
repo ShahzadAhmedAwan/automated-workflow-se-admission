@@ -1462,3 +1462,161 @@ test('Marketing Phase: If student just writes 500, 900, or 60%, ask him the tota
   assert.equal(turnC2.state, CONVERSATION_STATE.AWAITING_MATHS);
   assert.ok(turnC2.reply.includes('60.0%'));
 });
+
+test('LeadBotService: Short Academic Group Recognition (pre eng, eng, engineering, pre med, med, medical)', async () => {
+  // Test Pre-Engineering short answers
+  assert.equal(LeadBotService.classifyAcademicGroup('pre eng')?.group, 'FSc Pre-Engineering');
+  assert.equal(LeadBotService.classifyAcademicGroup('eng')?.group, 'FSc Pre-Engineering');
+  assert.equal(LeadBotService.classifyAcademicGroup('engineering')?.group, 'FSc Pre-Engineering');
+  assert.equal(LeadBotService.classifyAcademicGroup('pre-eng')?.group, 'FSc Pre-Engineering');
+  assert.equal(LeadBotService.classifyAcademicGroup('pre engg')?.group, 'FSc Pre-Engineering');
+
+  // Test Pre-Medical short answers
+  assert.equal(LeadBotService.classifyAcademicGroup('pre med')?.group, 'Pre-Medical');
+  assert.equal(LeadBotService.classifyAcademicGroup('med')?.group, 'Pre-Medical');
+  assert.equal(LeadBotService.classifyAcademicGroup('medical')?.group, 'Pre-Medical');
+  assert.equal(LeadBotService.classifyAcademicGroup('pre-med')?.group, 'Pre-Medical');
+
+  // Test ICS and DAE
+  assert.equal(LeadBotService.classifyAcademicGroup('ics')?.group, 'ICS');
+  assert.equal(LeadBotService.classifyAcademicGroup('comp')?.group, 'ICS');
+  assert.equal(LeadBotService.classifyAcademicGroup('computer science')?.group, 'ICS');
+  assert.equal(LeadBotService.classifyAcademicGroup('dae')?.group, 'DAE');
+});
+
+test('LeadBotService: "Yes, I have a question" handled politely before asking next intake question', async () => {
+  let currentLead = {
+    id: 501,
+    full_name: 'Muhammad',
+    father_name: 'Zahid',
+    phone_normalized: '923001112233',
+    conversation_state: CONVERSATION_STATE.AWAITING_MARKS,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return {
+        async query() { return [[{ ...currentLead }]]; },
+        async execute(sql, params) {
+          if (sql.includes('UPDATE mkt_leads')) currentLead.conversation_state = params[0];
+          return [{ affectedRows: 1, insertId: 1 }];
+        },
+        async beginTransaction() {},
+        async commit() {},
+        async rollback() {},
+        release() {},
+      };
+    },
+  };
+
+  // Student says "Yes, I have a question"
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001112233',
+    messageBody: 'Yes, I have a question',
+  }, mockDb);
+
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn1.reply.includes('Yes, please ask your question'));
+
+  // Student then asks "is electrical engineering offered?"
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001112233',
+    messageBody: 'is electrical engineering offered here?',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn2.reply.includes('Department of Software Engineering'));
+  assert.ok(turn2.reply.includes('To check your program eligibility'));
+});
+
+test('LeadBotService: In-between inquiry about electrical engineering answered gracefully first', async () => {
+  let currentLead = {
+    id: 502,
+    full_name: 'Usman',
+    phone_normalized: '923004445566',
+    conversation_state: CONVERSATION_STATE.AWAITING_FATHER_NAME,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return {
+        async query() { return [[{ ...currentLead }]]; },
+        async execute(sql, params) {
+          if (sql.includes('UPDATE mkt_leads')) currentLead.conversation_state = params[0];
+          return [{ affectedRows: 1, insertId: 1 }];
+        },
+        async beginTransaction() {},
+        async commit() {},
+        async rollback() {},
+        release() {},
+      };
+    },
+  };
+
+  const turn = await LeadBotService.processIncomingMessage({
+    fromPhone: '923004445566',
+    messageBody: 'i want to take admission in electrical or anything',
+  }, mockDb);
+
+  assert.equal(turn.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  // Must address the electrical question FIRST
+  assert.ok(turn.reply.includes('Software Engineering') || turn.reply.includes('Electrical'));
+  // And THEN ask for father's name
+  assert.ok(turn.reply.includes("Father's Name"));
+});
+
+test('LeadBotService: Candidate in QUALIFIED state can say "can I write my name again" or "correction krni hai"', async () => {
+  let currentLead = {
+    id: 503,
+    full_name: 'Ali Raza',
+    father_name: 'Tariq',
+    fsc_marks: 890,
+    has_maths: 1,
+    cnic: '82101-1234567-1',
+    email: 'ali@gmail.com',
+    phone_normalized: '923005556677',
+    conversation_state: CONVERSATION_STATE.QUALIFIED,
+    chat_history: JSON.stringify([]),
+  };
+
+  let deletedPendingJobs = 0;
+  const mockDb = {
+    async getConnection() {
+      return {
+        async query() { return [[{ ...currentLead }]]; },
+        async execute(sql, params) {
+          if (sql.includes('DELETE FROM outbox_jobs')) deletedPendingJobs++;
+          if (sql.includes('UPDATE mkt_leads')) currentLead.conversation_state = params[0];
+          return [{ affectedRows: 1, insertId: 1 }];
+        },
+        async beginTransaction() {},
+        async commit() {},
+        async rollback() {},
+        release() {},
+      };
+    },
+  };
+
+  // Student says "can I write my name again"
+  const turnName = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005556677',
+    messageBody: 'can I write my name again',
+  }, mockDb);
+
+  assert.equal(turnName.state, CONVERSATION_STATE.AWAITING_NAME);
+  assert.ok(turnName.reply.includes('Full Name'));
+  assert.ok(deletedPendingJobs >= 1);
+
+  // Student enters corrected name
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_NAME;
+  const turnCorrectName = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005556677',
+    messageBody: 'Muhammad Ali Raza',
+  }, mockDb);
+
+  assert.equal(turnCorrectName.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turnCorrectName.reply.includes('Muhammad Ali Raza'));
+  assert.ok(turnCorrectName.reply.includes('1 minute'));
+});

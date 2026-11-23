@@ -12,6 +12,7 @@ import { AppError } from '../../../core/errors/app-error.js';
 import { config } from '../../../core/config/env.js';
 import { BoardSourceService } from '../services/board-source.service.js';
 import { StorageService } from '../services/storage/storage.service.js';
+import { GazetteSearchService } from '../services/gazette-search.service.js';
 import { ExpirationReminderService } from '../services/expiration-reminder.service.js';
 import {
   buildPortalUrl,
@@ -51,6 +52,43 @@ export class StaffVerificationController {
       const filename = String(rows[0].gazette_filename || 'board-gazette.pdf').replace(/["\\\r\n]/g, '_');
       res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, 'Cache-Control': 'private, no-store' });
       res.send(buffer);
+    } catch (err) { next(err); }
+  }
+
+  static async testRollInGazette(req, res, next) {
+    try {
+      const sourceId = Number(req.params.sourceId);
+      const { rollNumber, candidateName } = req.body;
+      if (!rollNumber) throw new AppError(400, 'ROLL_NUMBER_REQUIRED', 'Please provide a roll number to test.');
+
+      const [rows] = await pool.execute(
+        `SELECT id, board_name, academic_year, exam_level, gazette_filename, storage_provider, storage_key
+           FROM adm_board_sources
+          WHERE id = ? AND source_type = 'GAZETTE'`,
+        [sourceId]
+      );
+      if (!rows.length || !rows[0].storage_key) throw new AppError(404, 'GAZETTE_NOT_FOUND', 'Gazette file not found.');
+
+      const source = rows[0];
+      const result = await GazetteSearchService.searchGazette({
+        storageKey: source.storage_key,
+        storageProvider: source.storage_provider,
+        rollNumber,
+        candidateName,
+        examYear: source.academic_year,
+        boardName: source.board_name,
+      });
+
+      res.json({
+        status: 'success',
+        data: {
+          sourceId,
+          boardName: source.board_name,
+          gazetteFilename: source.gazette_filename,
+          rollNumber,
+          searchResult: result,
+        },
+      });
     } catch (err) { next(err); }
   }
 
@@ -313,6 +351,22 @@ export class StaffVerificationController {
         documentId,
         actorId: req.auth?.userId,
       });
+      res.json({ status: 'success', data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Re-run live AI OCR extraction on an existing document
+   */
+  static async reprocessOcr(req, res, next) {
+    try {
+      const documentId = Number(req.params.documentId);
+      if (!Number.isSafeInteger(documentId) || documentId < 1) {
+        throw new AppError(400, 'INVALID_DOCUMENT_ID', 'Invalid document ID.');
+      }
+      const result = await AdmissionIntakeService.reprocessDocumentOcr(documentId);
       res.json({ status: 'success', data: result });
     } catch (err) {
       next(err);

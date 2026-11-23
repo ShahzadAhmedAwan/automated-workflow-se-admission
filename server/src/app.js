@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { rateLimit } from 'express-rate-limit';
 import { randomUUID } from 'node:crypto';
 import { config } from './core/config/env.js';
 import { authRoutes } from './modules/auth/index.js';
@@ -49,11 +50,29 @@ export function createApp() {
   app.use(`${config.API_BASE_PATH}/verification`, verificationRoutes);
   app.use(`${config.API_BASE_PATH}/merit`, meritRoutes);
 
-  // Short and standard public upload redirect handlers
-  app.get('/u/:token', (req, res) => {
+  // Rate-limited and validated public upload link redirect handlers
+  const redirectLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: config.NODE_ENV === 'test' ? 1000 : 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: { code: 'RATE_LIMITED', message: 'Too many link redirect requests. Please try again later.' } },
+  });
+
+  const isValidRedirectToken = (token) => {
+    return typeof token === 'string' && /^[a-zA-Z0-9_-]{16,128}$/.test(token);
+  };
+
+  app.get('/u/:token', redirectLimiter, (req, res) => {
+    if (!isValidRedirectToken(req.params.token)) {
+      return res.status(400).json({ error: { code: 'INVALID_TOKEN_FORMAT', message: 'Invalid document intake link token format.' } });
+    }
     res.redirect(`${config.APP_ORIGIN}/u/${encodeURIComponent(req.params.token)}`);
   });
-  app.get('/upload/:token', (req, res) => {
+  app.get('/upload/:token', redirectLimiter, (req, res) => {
+    if (!isValidRedirectToken(req.params.token)) {
+      return res.status(400).json({ error: { code: 'INVALID_TOKEN_FORMAT', message: 'Invalid document intake link token format.' } });
+    }
     res.redirect(`${config.APP_ORIGIN}/u/${encodeURIComponent(req.params.token)}`);
   });
 

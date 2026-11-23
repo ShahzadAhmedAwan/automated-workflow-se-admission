@@ -1009,3 +1009,222 @@ test('PortalMessageService: formats clean, structured WhatsApp upload messages w
   assert.ok(reminderMsg.includes('- CNIC / B-Form (Front Side)'));
   assert.ok(reminderMsg.includes(url));
 });
+
+test('VerificationDecisionService: CNIC Front matches declared marketing CNIC and marksheet name -> MATCHED', async () => {
+  const executedQueries = [];
+  const mockDb = {
+    async execute(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 17,
+          cnic: '82203-0585551-5',
+          lead_cnic: '82203-0585551-5',
+          full_name: 'SHEIKH HASEEB UR REHMAN',
+          lead_name: 'SHEIKH HASEEB UR REHMAN',
+          phone_normalized: '923179459856',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[{
+          doc_type: 'FSC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
+        }, {
+          doc_type: 'MATRIC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB-UR-REHMAN' }),
+        }]];
+      }
+      if (query.includes('verification_status NOT IN')) {
+        return [[]]; // All documents verified
+      }
+      if (query.includes('FROM adm_student_documents WHERE id = ?')) {
+        return [[{ storage_key: 'uploads/cnic.jpg', original_filename: 'cnic.jpg', file_mime: 'image/jpeg' }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 25,
+    studentId: 17,
+    docType: DOCUMENT_TYPES.CNIC_FRONT,
+    extractedOcr: {
+      candidateName: 'SHEIKH HASEEB UR REHMAN',
+      cnic: '8220305855515',
+      fatherName: 'SHEIKH ABDUL HAFEEZ',
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, DOCUMENT_VERIFICATION_STATUS.MATCHED);
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.VERIFIED);
+});
+
+test('VerificationDecisionService: CNIC Front with mismatched CNIC number -> MANUAL_REVIEW with reason', async () => {
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 17,
+          cnic: '82203-0585551-5',
+          lead_cnic: '82203-0585551-5',
+          full_name: 'SHEIKH HASEEB UR REHMAN',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[{
+          doc_type: 'FSC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
+        }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 25,
+    studentId: 17,
+    docType: DOCUMENT_TYPES.CNIC_FRONT,
+    extractedOcr: {
+      candidateName: 'SHEIKH HASEEB UR REHMAN',
+      cnic: '3740511111111', // Mismatched CNIC
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, 'ESCALATED_MANUAL_REVIEW');
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW);
+  assert.ok(decision.discrepancyReason.includes('does not match applicant declared CNIC'));
+});
+
+test('VerificationDecisionService: CNIC Front with mismatched name -> MANUAL_REVIEW with reason', async () => {
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 17,
+          cnic: '82203-0585551-5',
+          lead_cnic: '82203-0585551-5',
+          full_name: 'SHEIKH HASEEB UR REHMAN',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[{
+          doc_type: 'FSC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
+        }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 25,
+    studentId: 17,
+    docType: DOCUMENT_TYPES.CNIC_FRONT,
+    extractedOcr: {
+      candidateName: 'Ali Ahmed Khan', // Mismatched name
+      cnic: '8220305855515',
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, 'ESCALATED_MANUAL_REVIEW');
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW);
+  assert.ok(decision.discrepancyReason.includes('does not match marksheet name'));
+});
+
+test('VerificationDecisionService: Domicile matches marksheet name and updates student city in DB', async () => {
+  const executedQueries = [];
+  const mockDb = {
+    async execute(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 17,
+          lead_id: 31,
+          cnic: '82203-0585551-5',
+          full_name: 'SHEIKH HASEEB UR REHMAN',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[{
+          doc_type: 'FSC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
+        }]];
+      }
+      if (query.includes('verification_status NOT IN')) {
+        return [[]]; // All documents verified
+      }
+      if (query.includes('FROM adm_student_documents WHERE id = ?')) {
+        return [[{ storage_key: 'uploads/domicile.jpg', original_filename: 'domicile.jpg', file_mime: 'image/jpeg' }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 26,
+    studentId: 17,
+    docType: DOCUMENT_TYPES.DOMICILE,
+    extractedOcr: {
+      candidateName: 'SHEIKH HASEEB-UR-REHMAN',
+      district: 'Mirpur',
+      city: 'Mirpur',
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, DOCUMENT_VERIFICATION_STATUS.MATCHED);
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.VERIFIED);
+
+  const cityUpdate = executedQueries.find((q) => q.query.includes('UPDATE adm_students SET city = ? WHERE id = ?'));
+  assert.ok(cityUpdate, 'adm_students.city was updated with extracted city');
+  assert.equal(cityUpdate.params[0], 'Mirpur');
+});
+
+test('VerificationDecisionService: Domicile with mismatched name -> MANUAL_REVIEW with reason', async () => {
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 17,
+          cnic: '82203-0585551-5',
+          full_name: 'SHEIKH HASEEB UR REHMAN',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[{
+          doc_type: 'FSC_MARKSHEET',
+          extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
+        }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 26,
+    studentId: 17,
+    docType: DOCUMENT_TYPES.DOMICILE,
+    extractedOcr: {
+      candidateName: 'Zubair Tariq', // Mismatched name
+      city: 'Mirpur',
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, 'ESCALATED_MANUAL_REVIEW');
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW);
+  assert.ok(decision.discrepancyReason.includes('does not match marksheet name'));
+});

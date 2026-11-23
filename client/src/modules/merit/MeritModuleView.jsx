@@ -518,7 +518,7 @@ export function MeritModuleView() {
           { id: 'calculations', label: 'Merit Calculations & Rankings' },
           { id: 'seet', label: 'SEET Entrance Test & Gazette Sync' },
           { id: 'policies', label: 'Admission Weightage Policies' },
-          { id: 'snapshots', label: 'Snapshot History & Export' },
+          { id: 'snapshots', label: 'Snapshot History & Export', count: snapshots.length || undefined },
         ]}
       />
 
@@ -556,57 +556,87 @@ export function MeritModuleView() {
       {/* ==================================================================== */}
       {activeTab === 'calculations' && (
         <div className="space-y-5">
-          <WorkspacePanel
-            title={(
-              <div className="flex items-center gap-2.5">
-                <span>{meritData?.snapshot?.snapshotTitle || 'Merit Calculations & Rankings'}</span>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  isLocked
-                    ? 'bg-amber-100 text-amber-900 border border-amber-200'
-                    : 'bg-blue-50 text-blue-700 border border-blue-200/60'
-                }`}>
-                  <span className={`size-1.5 rounded-full ${isLocked ? 'bg-amber-600' : 'bg-blue-600'}`} />
-                  {isLocked ? 'Official Snapshot (Locked)' : 'Live Preview (Dry Run)'}
-                </span>
-              </div>
-            )}
-            description={
-              allEntries.length === 0
-                ? 'No verified applicants evaluated yet'
-                : `${totalCount} verified applicant${totalCount === 1 ? '' : 's'} evaluated · ${selectedCount} selected · ${seetPendingCount} SEET score pending`
-            }
-            actions={(
-              <div className="flex flex-wrap items-center gap-2">
-                {snapshots.length > 0 && (
-                  <select
-                    value={currentSnapshotId || ''}
-                    onChange={(e) => {
-                      if (e.target.value === 'dry_run') {
-                        runDryRunCalculation();
-                      } else {
-                        loadSnapshotDetails(Number(e.target.value));
-                      }
-                    }}
-                    className="h-8.5 px-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 shadow-2xs focus:outline-none focus:border-blue-600"
-                  >
-                    <option value="dry_run">Live Preview (Dry Run)</option>
-                    {snapshots.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.snapshotTitle} {s.isLocked ? '[Locked]' : '[Draft]'}
-                      </option>
-                    ))}
-                  </select>
-                )}
+          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-300/90 bg-white shadow-xs">
+            {/* Academic Panel Header */}
+            <div className="border-b border-slate-200 bg-slate-50/75 px-6 py-4">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                <div className="min-w-0 space-y-2 flex-1">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <h2 className="m-0 text-base font-bold text-slate-900 tracking-tight">
+                      {meritData?.snapshot?.snapshotTitle || 'Merit Calculations & Rankings'}
+                    </h2>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+                        isLocked
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : currentSnapshotId
+                            ? 'bg-slate-100 text-slate-800 border border-slate-300'
+                            : 'bg-blue-50 text-blue-700 border border-blue-200'
+                      }`}
+                    >
+                      <span
+                        className={`size-2 rounded-full ${
+                          isLocked ? 'bg-amber-600' : currentSnapshotId ? 'bg-slate-600' : 'bg-blue-600'
+                        }`}
+                      />
+                      {isLocked
+                        ? 'Official Snapshot (Locked)'
+                        : currentSnapshotId
+                          ? `Saved Snapshot (Iteration ${meritData?.snapshot?.iterationNumber || 1})`
+                          : 'Live Preview (Dry Run)'}
+                    </span>
+                  </div>
+                  <p className="m-0 text-xs text-slate-500 font-normal leading-relaxed">
+                    {allEntries.length === 0
+                      ? 'No verified applicants evaluated in this view · Switch to Live Preview or select a snapshot'
+                      : `${totalCount} verified applicant${totalCount === 1 ? '' : 's'} evaluated · ${selectedCount} selected for admission · ${seetPendingCount} pending SEET test scores`}
+                  </p>
+                </div>
 
+                {/* Snapshot Switcher Dropdown */}
+                {snapshots.length > 0 && (
+                  <div className="flex items-center gap-2 shrink-0 self-start lg:self-center">
+                    <label htmlFor="snapshot-select" className="text-xs font-semibold text-slate-600 whitespace-nowrap">
+                      Select List:
+                    </label>
+                    <select
+                      id="snapshot-select"
+                      value={currentSnapshotId || 'dry_run'}
+                      onChange={(e) => {
+                        if (e.target.value === 'dry_run') {
+                          runDryRunCalculation();
+                        } else {
+                          loadSnapshotDetails(Number(e.target.value));
+                        }
+                      }}
+                      className="h-9 min-w-[220px] max-w-sm rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                    >
+                      <option value="dry_run">⚡ Live Preview (Dry Run)</option>
+                      {snapshots.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.snapshotTitle} {s.isLocked ? '[Locked]' : '[Draft]'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Dedicated Actions & Operations Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
+              {/* Primary Calculations Actions */}
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="subtle"
                   size="sm"
                   onClick={runDryRunCalculation}
                   disabled={calculating}
-                  title="Run live aggregate calculation"
+                  title="Run live aggregate calculation from latest verified candidate records"
+                  className="border border-slate-300 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-800"
                 >
-                  <IconCalculator className="size-3.5" />
-                  <span>Preview calculation</span>
+                  <IconCalculator className="size-3.5 text-blue-700" />
+                  <span>Preview Calculation</span>
                 </Button>
 
                 <Button
@@ -614,20 +644,25 @@ export function MeritModuleView() {
                   size="sm"
                   onClick={() => setShowGenerateModal(true)}
                   disabled={calculating}
+                  className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow-xs px-3.5"
                 >
                   <IconAcademicCap className="size-3.5" />
-                  <span>Generate official snapshot</span>
+                  <span>Generate Official Snapshot</span>
                 </Button>
+              </div>
 
+              {/* Secondary Operations (Export, Notices, Lock) */}
+              <div className="flex flex-wrap items-center gap-2">
                 {currentSnapshotId && (
                   <>
                     <Button
                       variant="subtle"
                       size="sm"
                       onClick={handleExportCsv}
-                      title="Download as Excel/CSV"
+                      title="Download merit list as CSV spreadsheet"
+                      className="border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700"
                     >
-                      <IconDownload className="size-3.5" />
+                      <IconDownload className="size-3.5 text-slate-500" />
                       <span>Export CSV</span>
                     </Button>
 
@@ -635,10 +670,11 @@ export function MeritModuleView() {
                       variant="subtle"
                       size="sm"
                       onClick={() => setShowNotifyModal(true)}
-                      title="Send WhatsApp selection notices"
+                      title="Dispatch WhatsApp selection notifications to eligible applicants"
+                      className="border border-slate-300 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700"
                     >
-                      <IconSend className="size-3.5" />
-                      <span>WhatsApp notices</span>
+                      <IconSend className="size-3.5 text-emerald-600" />
+                      <span>WhatsApp Notices</span>
                     </Button>
 
                     {isSuperAdmin && !isLocked && (
@@ -646,23 +682,23 @@ export function MeritModuleView() {
                         type="button"
                         onClick={handleLockSnapshot}
                         disabled={loading}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 px-3 text-xs font-semibold text-white transition shadow-xs cursor-pointer"
-                        title="Lock official merit list (Permanent & Immutable)"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 px-3 text-xs font-bold text-white transition shadow-xs cursor-pointer"
+                        title="Lock official merit list (Permanent & Immutable legal record)"
                       >
                         <IconLockClosed className="size-3.5" />
-                        <span>Lock snapshot</span>
+                        <span>Lock Snapshot</span>
                       </button>
                     )}
                   </>
                 )}
               </div>
-            )}
-          >
+            </div>
+
             {/* Lock status banner */}
             {isLocked && (
-              <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50/80 px-5 py-2.5 text-xs text-amber-900">
-                <IconLockClosed className="size-4 text-amber-700" />
-                <span className="font-semibold">Official Snapshot Locked:</span>
+              <div className="flex items-center gap-2.5 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-xs text-amber-900 font-medium">
+                <IconLockClosed className="size-4 text-amber-700 shrink-0" />
+                <span className="font-bold">Official Snapshot Locked:</span>
                 <span>This merit list has been officially approved and locked by administration. It is permanently immutable.</span>
               </div>
             )}
@@ -819,30 +855,31 @@ export function MeritModuleView() {
             {/* Table */}
             {loading || calculating ? (
               <div className="grid min-h-52 place-content-center justify-items-center gap-3 text-sm text-slate-500">
-                <span className="size-6 animate-spin rounded-full border-2 border-blue-100 border-t-blue-600" />
-                <span>Computing weighted merit rankings…</span>
+                <span className="size-6 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
+                <span className="text-xs font-semibold text-slate-700">Computing weighted merit rankings…</span>
               </div>
             ) : !allEntries.length ? (
-              <div className="grid min-h-56 place-content-center justify-items-center p-8 text-center space-y-3">
-                <IconAcademicCap className="size-12 text-slate-400" />
-                <div>
-                  <p className="text-sm font-bold text-slate-800">
-                    {currentSnapshotId ? 'No Candidates in this Saved Snapshot' : 'No Verified Candidates Found'}
-                  </p>
-                  <p className="text-xs text-slate-500 max-w-md mt-1 leading-relaxed">
-                    {currentSnapshotId
-                      ? 'This snapshot was created earlier when no candidates were verified. Switch to Live Preview to calculate current rankings with newly verified students.'
-                      : 'The merit engine strictly ranks candidates whose overall status is VERIFIED. In Module 3, a candidate becomes VERIFIED only after ALL 3 mandatory documents (CNIC Front, FSc Marksheet, Matric Marksheet) are verified.'}
-                  </p>
+              <div className="flex flex-col items-center justify-center p-12 text-center">
+                <div className="mb-4 grid size-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-400 shadow-2xs">
+                  <IconAcademicCap className="size-8 text-slate-500" />
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                <h3 className="m-0 text-base font-bold tracking-tight text-slate-900">
+                  {currentSnapshotId ? 'No Candidates in this Saved Snapshot' : 'No Verified Candidates Evaluated'}
+                </h3>
+                <p className="mt-2 mb-0 max-w-lg text-xs leading-relaxed text-slate-500">
+                  {currentSnapshotId
+                    ? 'This snapshot was created earlier when no candidates were verified. Switch to Live Preview to calculate current rankings with newly verified students.'
+                    : 'The merit engine strictly ranks candidates whose overall status is VERIFIED. In Module 3 (Document Verification), a candidate becomes verified once all mandatory admission documents (CNIC Front, FSc, Matric) are validated.'}
+                </p>
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                   <Button
                     variant="primary"
                     size="sm"
                     onClick={runDryRunCalculation}
                     disabled={calculating}
+                    className="bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-xs"
                   >
-                    <IconCalculator className="size-4" />
+                    <IconCalculator className="size-3.5" />
                     <span>Run Live Preview Calculation</span>
                   </Button>
                 </div>
@@ -876,8 +913,8 @@ export function MeritModuleView() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[850px] text-left text-xs text-slate-700">
-                  <thead className="border-b border-slate-200/80 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                <table className="w-full min-w-[850px] text-left text-xs text-slate-700 border-collapse">
+                  <thead className="border-b border-slate-300 bg-slate-100/90 text-[11px] font-bold uppercase tracking-wider text-slate-700">
                     <tr>
                       <th className="px-4 py-3.5 text-center w-16">Rank</th>
                       <th className="px-4 py-3.5">Applicant details</th>
@@ -1016,7 +1053,7 @@ export function MeritModuleView() {
                 </table>
               </div>
             )}
-          </WorkspacePanel>
+          </section>
         </div>
       )}
 

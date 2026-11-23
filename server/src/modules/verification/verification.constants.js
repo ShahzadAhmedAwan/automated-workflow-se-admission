@@ -68,5 +68,5 @@ export const TOKEN_CONFIG = Object.freeze({
 
 export const OCR_CONFIG = Object.freeze({
   THROTTLE_MS: 4500, // Mandated 4.5s sequential throttle for 15 RPM Free Tier compliance
-  MODEL_NAME: 'gemini-3.1-flash-lite',
+  MODEL_NAME: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
 });

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { pool } from '../../../core/db/pool.js';
 import { TOKEN_CONFIG } from '../verification.constants.js';
 import { AppError } from '../../../core/errors/app-error.js';
+import { encryptAtRest } from '../../../core/security/tokens.js';
 
 export class IntakeTokenService {
   /**
@@ -33,11 +34,12 @@ export class IntakeTokenService {
     const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
 
     let result;
+    const encryptedRawToken = encryptAtRest(rawToken);
     try {
       const [res] = await connection.execute(
         `INSERT INTO adm_intake_tokens (student_id, token_hash, allowed_doc_types, attempt_count, expires_at, raw_token)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt, rawToken]
+        [studentId, tokenHash, JSON.stringify(allowedDocTypes), attemptCount, expiresAt, encryptedRawToken]
       );
       result = res;
     } catch (err) {

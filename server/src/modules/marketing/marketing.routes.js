@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { rateLimit } from 'express-rate-limit';
+import { config } from '../../core/config/env.js';
 import { CampaignController } from './controllers/campaign.controller.js';
 import { authenticate, requirePermission } from '../auth/index.js';
 import { MARKETING_PERMISSIONS } from './marketing.constants.js';
@@ -122,9 +124,29 @@ marketingRoutes.post(
   CampaignController.broadcastNumbers
 );
 
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: config.NODE_ENV === 'test' ? 1000 : 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many incoming messages. Please slow down.' } },
+});
+
+function verifyWebhookSecret(req, res, next) {
+  const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
+  if (!secret) return next();
+  const provided = req.headers['x-webhook-secret'] || req.query.secret;
+  if (provided !== secret) {
+    return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or missing webhook secret.' } });
+  }
+  next();
+}
+
 // Incoming WhatsApp webhook (simulated or connected from Baileys)
 marketingRoutes.post(
   '/webhook/incoming-message',
+  webhookLimiter,
+  verifyWebhookSecret,
   CampaignController.handleIncomingMessage
 );
 
@@ -133,6 +155,21 @@ marketingRoutes.get(
   '/whatsapp/status',
   authenticate,
   CampaignController.getWhatsAppStatus
+);
+
+// Staff-accessible WhatsApp fresh QR retrieval
+marketingRoutes.get(
+  '/whatsapp/qr',
+  authenticate,
+  CampaignController.getWhatsAppQr
+);
+
+// Staff-accessible WhatsApp session reset (disconnects and generates fresh QR for new number)
+marketingRoutes.post(
+  '/whatsapp/reset',
+  authenticate,
+  requirePermission(MARKETING_PERMISSIONS.CAMPAIGNS_MANAGE),
+  CampaignController.resetWhatsAppSession
 );
 
 // Staff-accessible WhatsApp custom number update

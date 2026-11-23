@@ -1,6 +1,13 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { z } from 'zod';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config();
+dotenv.config({ path: path.resolve(here, '../../../.env') });
+dotenv.config({ path: path.resolve(process.cwd(), 'server/.env') });
 
 function resolveLocalAppOrigin(configuredOrigin) {
   if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') return configuredOrigin;

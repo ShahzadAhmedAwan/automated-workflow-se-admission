@@ -119,6 +119,7 @@ export class CampaignService {
         const batch = leads.slice(i, i + batchSize);
         const values = [];
         const placeholders = batch.map((lead) => {
+          const isEligible = lead.fscMarks && (Number(lead.fscMarks) >= 550 || Number(lead.fscMarks) >= 50) && lead.hasMaths !== false;
           values.push(
             campaignId,
             lead.fullName,
@@ -131,8 +132,8 @@ export class CampaignService {
             lead.priorDegree || null,
             lead.fscMarks !== undefined && lead.fscMarks !== null ? lead.fscMarks : null,
             lead.hasMaths !== undefined && lead.hasMaths !== null ? (lead.hasMaths ? 1 : 0) : null,
-            lead.eligibleFor || null,
-            CONVERSATION_STATE.IDLE
+            lead.eligibleFor || (isEligible ? 'SE' : null),
+            isEligible ? CONVERSATION_STATE.QUALIFIED : CONVERSATION_STATE.IDLE
           );
           return '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         });
@@ -145,6 +146,38 @@ export class CampaignService {
           values
         );
         insertedCount += batch.length;
+
+        // Auto-provision candidates into adm_students for eligible leads
+        for (const lead of batch) {
+          const isEligible = lead.fscMarks && (Number(lead.fscMarks) >= 550 || Number(lead.fscMarks) >= 50) && lead.hasMaths !== false;
+          if (isEligible && lead.phoneNormalized) {
+            try {
+              await connection.query(
+                `INSERT INTO adm_students
+                   (full_name, father_name, phone_normalized, cnic, email, city, prior_degree, eligible_for, fsc_obtained_marks, overall_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DOCS_REQUESTED')
+                 ON DUPLICATE KEY UPDATE
+                   full_name = VALUES(full_name),
+                   father_name = COALESCE(VALUES(father_name), father_name),
+                   cnic = COALESCE(VALUES(cnic), cnic),
+                   fsc_obtained_marks = COALESCE(VALUES(fsc_obtained_marks), fsc_obtained_marks)`,
+                [
+                  lead.fullName,
+                  lead.fatherName || null,
+                  lead.phoneNormalized,
+                  lead.cnic || null,
+                  lead.email || null,
+                  lead.city || null,
+                  lead.priorDegree || null,
+                  lead.eligibleFor || 'SE',
+                  lead.fscMarks,
+                ]
+              );
+            } catch (admissionsSyncErr) {
+              // Non-blocking if table is temporarily busy
+            }
+          }
+        }
       }
 
       await connection.execute(

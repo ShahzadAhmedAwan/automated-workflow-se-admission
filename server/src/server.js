@@ -2,10 +2,12 @@ import cron from 'node-cron';
 import { createApp } from './app.js';
 import { config } from './core/config/env.js';
 import { closePool } from './core/db/pool.js';
+import { ensureDatabaseMigrations } from './core/db/migrate-schema.js';
 import { startOutboxWorker, registerJobHandler } from './core/queue/outboxBus.js';
 import { EVENT_TYPES } from './contracts/event-types.js';
 import { sendUserWelcomeEmail } from './core/mail/mailer.js';
 import { AdmissionIntakeService, ExpirationReminderService } from './modules/verification/index.js';
+import { WhatsAppManager } from './core/baileys/whatsapp-manager.service.js';
 
 // Register background handlers for the Outbox worker
 registerJobHandler(EVENT_TYPES.USER_WELCOME_EMAIL, async (payload) => {
@@ -19,7 +21,12 @@ registerJobHandler(EVENT_TYPES.PROCESS_OCR_DOCUMENT, async (payload, metadata) =
     await AdmissionIntakeService.processOcrDocumentJob(payload);
     console.info(`[OCR Worker] Processed document #${payload.documentId} for student #${payload.studentId}`);
   } catch (error) {
-    if (metadata.attempts >= 4) await AdmissionIntakeService.markOcrJobFailed({ ...payload, reason: error.message });
+    console.error(`[OCR Worker] Failed processing document #${payload.documentId} (attempt ${metadata.attempts}):`, error.message);
+    if (metadata.attempts >= 2) {
+      await AdmissionIntakeService.markOcrJobFailed({ ...payload, reason: error.message });
+      console.warn(`[OCR Worker] Escalated document #${payload.documentId} to manual review after ${metadata.attempts} attempts.`);
+      return;
+    }
     throw error;
   }
 });
@@ -50,8 +57,18 @@ const reminderCron = cron.schedule('*/15 * * * *', async () => {
 
 const app = createApp();
 const stopOutboxWorker = startOutboxWorker();
+
+// Ensure database schema has all latest columns on boot
+ensureDatabaseMigrations().catch((err) => {
+  console.warn('[Startup Migration] Schema migration deferred:', err.message);
+});
+
 const server = app.listen(config.PORT, () => {
   console.info(`SE Admissions API listening on port ${config.PORT}`);
+  // Start WhatsApp Manager background service
+  WhatsAppManager.startSocket().catch((err) => {
+    console.warn('[WhatsApp Service] Background start deferred:', err.message);
+  });
 });
 
 let shuttingDown = false;

@@ -1,4 +1,5 @@
 import { pool } from '../../../core/db/pool.js';
+import { ensureDatabaseMigrations } from '../../../core/db/migrate-schema.js';
 import { AppError } from '../../../core/errors/app-error.js';
 import { StorageService } from './storage/storage.service.js';
 
@@ -6,23 +7,92 @@ function normalizeBoard(value) {
   return String(value || '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 }
 
+export function getBoardFamily(value) {
+  const s = String(value || '').toLowerCase();
+  if (s.includes('federal') || s.includes('fbise') || s.includes('islamabad')) return 'fbise';
+  if (s.includes('ajk') || s.includes('mirpur') || s.includes('kashmir')) return 'ajk';
+  if (s.includes('lahore')) return 'lahore';
+  if (s.includes('rawalpindi') || s.includes('rwp')) return 'rawalpindi';
+  if (s.includes('gujranwala')) return 'gujranwala';
+  if (s.includes('multan')) return 'multan';
+  if (s.includes('faisalabad')) return 'faisalabad';
+  if (s.includes('sargodha')) return 'sargodha';
+  if (s.includes('sahiwal')) return 'sahiwal';
+  if (s.includes('bahawalpur')) return 'bahawalpur';
+  if (s.includes('dg khan') || s.includes('deraghazikhan') || s.includes('d.g. khan')) return 'dgkhan';
+  if (s.includes('peshawar')) return 'peshawar';
+  if (s.includes('abbottabad')) return 'abbottabad';
+  if (s.includes('mardan')) return 'mardan';
+  if (s.includes('swat') || s.includes('malakand')) return 'swat';
+  if (s.includes('karachi') || s.includes('bsek') || s.includes('biek')) return 'karachi';
+  if (s.includes('hyderabad')) return 'hyderabad';
+  if (s.includes('sukkur')) return 'sukkur';
+  if (s.includes('quetta')) return 'quetta';
+  return null;
+}
+
 export class BoardSourceService {
   static async list({ activeOnly = false } = {}, db = pool) {
-    const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
-              source_type, portal_adapter, result_url, gazette_filename, is_active, created_at, updated_at
-         FROM adm_board_sources ${activeOnly ? 'WHERE is_active = TRUE' : ''}
-        ORDER BY board_name ASC, academic_year DESC`
-    );
+    let rows;
+    try {
+      const [res] = await db.execute(
+        `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+                source_type, portal_adapter, result_url, gazette_filename, is_active, created_at, updated_at
+           FROM adm_board_sources ${activeOnly ? 'WHERE is_active = TRUE' : ''}
+          ORDER BY board_name ASC, academic_year DESC`
+      );
+      rows = res;
+    } catch (err) {
+      if (err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054) {
+        ensureDatabaseMigrations(db).catch(() => {});
+        const [res] = await db.execute(
+          `SELECT id, board_name, board_aliases, academic_year,
+                  source_type, result_url, gazette_filename, is_active, created_at, updated_at
+             FROM adm_board_sources ${activeOnly ? 'WHERE is_active = TRUE' : ''}
+            ORDER BY board_name ASC, academic_year DESC`
+        );
+        rows = res.map((r) => ({
+          ...r,
+          exam_level: 'ALL',
+          exam_session: 'ALL',
+          exam_part: 'ALL',
+          portal_adapter: 'AUTO_FORM',
+        }));
+      } else {
+        throw err;
+      }
+    }
     return rows;
   }
 
   static async findForBoard(boardName, academicYear, db = pool) {
-    const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
-              source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
-         FROM adm_board_sources WHERE is_active = TRUE ORDER BY (source_type = 'PORTAL_URL') DESC, academic_year DESC, id DESC`
-    );
+    let rows;
+    try {
+      const [res] = await db.execute(
+        `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+                source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
+           FROM adm_board_sources WHERE is_active = TRUE ORDER BY (source_type = 'PORTAL_URL') DESC, academic_year DESC, id DESC`
+      );
+      rows = res;
+    } catch (err) {
+      if (err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054) {
+        ensureDatabaseMigrations(db).catch(() => {});
+        const [res] = await db.execute(
+          `SELECT id, board_name, board_aliases, academic_year,
+                  source_type, result_url, gazette_filename, storage_provider, storage_key
+             FROM adm_board_sources WHERE is_active = TRUE ORDER BY (source_type = 'PORTAL_URL') DESC, academic_year DESC, id DESC`
+        );
+        rows = res.map((r) => ({
+          ...r,
+          exam_level: 'ALL',
+          exam_session: 'ALL',
+          exam_part: 'ALL',
+          portal_adapter: 'AUTO_FORM',
+        }));
+      } else {
+        throw err;
+      }
+    }
     const input = normalizeBoard(boardName);
     const matches = rows.filter((row) => {
       const aliases = typeof row.board_aliases === 'string' ? JSON.parse(row.board_aliases) : (row.board_aliases || []);
@@ -38,35 +108,119 @@ export class BoardSourceService {
   }
 
   static async findMatchingSources({ boardName, academicYear, examLevel, examSession, examPart, sourceType }, db = pool) {
-    const [rows] = await db.execute(
-      `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
-              source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
-         FROM adm_board_sources WHERE is_active = TRUE AND source_type = ?
-        ORDER BY academic_year DESC, id DESC`,
-      [sourceType]
-    );
+    let rows;
+    try {
+      const [res] = await db.execute(
+        `SELECT id, board_name, board_aliases, academic_year, exam_level, exam_session, exam_part,
+                source_type, portal_adapter, result_url, gazette_filename, storage_provider, storage_key
+           FROM adm_board_sources WHERE is_active = TRUE AND source_type = ?
+          ORDER BY academic_year DESC, id DESC`,
+        [sourceType]
+      );
+      rows = res;
+    } catch (err) {
+      if (err.code === 'ER_BAD_FIELD_ERROR' || err.errno === 1054) {
+        ensureDatabaseMigrations(db).catch(() => {});
+        const [res] = await db.execute(
+          `SELECT id, board_name, board_aliases, academic_year,
+                  source_type, result_url, gazette_filename, storage_provider, storage_key
+             FROM adm_board_sources WHERE is_active = TRUE AND source_type = ?
+            ORDER BY academic_year DESC, id DESC`,
+          [sourceType]
+        );
+        rows = res.map((r) => ({
+          ...r,
+          exam_level: 'ALL',
+          exam_session: 'ALL',
+          exam_part: 'ALL',
+          portal_adapter: 'AUTO_FORM',
+        }));
+      } else {
+        throw err;
+      }
+    }
     const input = normalizeBoard(boardName);
-    const metadataMatches = (sourceValue, requestedValue) => !sourceValue || sourceValue === 'ALL'
-      || (requestedValue && String(sourceValue).toUpperCase() === String(requestedValue).toUpperCase());
-    return rows.filter((row) => {
+    const metadataMatches = (sourceValue, requestedValue) => {
+      if (!sourceValue || sourceValue === 'ALL') return true;
+      if (!requestedValue || requestedValue === 'ALL' || requestedValue === 'UNKNOWN') return true;
+      return String(sourceValue).toUpperCase() === String(requestedValue).toUpperCase();
+    };
+
+    const GENERIC_BOARD_WORDS = new Set(['bise', 'board', 'intermediate', 'secondary', 'education']);
+    const inputTokens = String(boardName || '').toLowerCase().split(/[\s,._-]+/).filter((t) => t.length >= 3 && !GENERIC_BOARD_WORDS.has(t));
+
+    const inputFamily = getBoardFamily(boardName);
+
+    const matches = rows.filter((row) => {
       const aliases = typeof row.board_aliases === 'string' ? JSON.parse(row.board_aliases) : (row.board_aliases || []);
       const boardMatches = [row.board_name, ...aliases].some((name) => {
         const candidate = normalizeBoard(name);
-        return input && (candidate === input || (candidate.length >= 5 && (input.includes(candidate) || candidate.includes(input))));
+        if (!input && !candidate) return true;
+        if (input && candidate === input) return true;
+        if (input && candidate.length >= 3 && (input.includes(candidate) || candidate.includes(input))) return true;
+        // Board family matching (e.g. 'fbise' vs 'federal board islamabad', 'ajk' vs 'aj&k mirpur')
+        const nameFamily = getBoardFamily(name);
+        if (inputFamily && nameFamily && inputFamily === nameFamily) return true;
+        // Check non-generic word token overlap (e.g. 'ajk', 'mirpur', 'lahore', 'rawalpindi')
+        const nameTokens = String(name || '').toLowerCase().split(/[\s,._-]+/).filter((t) => t.length >= 3 && !GENERIC_BOARD_WORDS.has(t));
+        return inputTokens.length > 0 && nameTokens.length > 0 && inputTokens.some((it) => nameTokens.includes(it));
       });
-      const yearMatches = String(row.academic_year) === String(academicYear) || row.academic_year === 'ALL';
+
+      const parsedDocYear = parseInt(academicYear, 10);
+      const parsedRowYear = parseInt(row.academic_year, 10);
+      const isYearClose = Number.isFinite(parsedDocYear) && Number.isFinite(parsedRowYear) && Math.abs(parsedDocYear - parsedRowYear) <= 2;
+
+      const yearMatches = !academicYear || academicYear === 'ALL'
+        || String(row.academic_year) === String(academicYear)
+        || row.academic_year === 'ALL'
+        || isYearClose;
+
       return boardMatches && yearMatches
         && metadataMatches(row.exam_level, examLevel)
         && metadataMatches(row.exam_session, examSession)
         && metadataMatches(row.exam_part, examPart);
     }).sort((left, right) => {
-      const specificity = (row) => [row.academic_year !== 'ALL', Boolean(row.exam_level), Boolean(row.exam_session), Boolean(row.exam_part)]
-        .reduce((score, value) => score + Number(value), 0);
+      const specificity = (row) => [
+        row.academic_year === String(academicYear) ? 10 : 0,
+        Math.abs(parseInt(row.academic_year, 10) - parseInt(academicYear, 10)) <= 1 ? 5 : 0,
+        row.academic_year !== 'ALL' ? 2 : 0,
+        Boolean(row.exam_level && row.exam_level !== 'ALL') ? 2 : 0,
+        Boolean(row.exam_session && row.exam_session !== 'ALL') ? 1 : 0,
+        Boolean(row.exam_part && row.exam_part !== 'ALL') ? 1 : 0,
+      ].reduce((score, value) => score + Number(value), 0);
       return specificity(right) - specificity(left);
     });
+
+    // Fallback: If no sources matched the specific year or session, but sources exist for the board & level,
+    // return all active sources for that board and exam level so gazette cross-check is never missed.
+    if (!matches.length && rows.length > 0) {
+      const fallback = rows.filter((row) => {
+        const aliases = typeof row.board_aliases === 'string' ? JSON.parse(row.board_aliases) : (row.board_aliases || []);
+        const boardMatches = [row.board_name, ...aliases].some((name) => {
+          const candidate = normalizeBoard(name);
+          if (input && (candidate === input || (candidate.length >= 3 && (input.includes(candidate) || candidate.includes(input))))) return true;
+          const nameFamily = getBoardFamily(name);
+          if (inputFamily && nameFamily && inputFamily === nameFamily) return true;
+          const nameTokens = String(name || '').toLowerCase().split(/[\s,._-]+/).filter((t) => t.length >= 3 && !GENERIC_BOARD_WORDS.has(t));
+          return inputTokens.length > 0 && nameTokens.length > 0 && inputTokens.some((it) => nameTokens.includes(it));
+        });
+        return boardMatches && metadataMatches(row.exam_level, examLevel);
+      });
+      if (fallback.length > 0) return fallback;
+
+      // Secondary fallback for gazettes: if examLevel matches (e.g. HSSC for FSc, SSC for Matric),
+      // return active gazettes for that level so roll numbers are never missed even if board spelling varies
+      if (sourceType === 'GAZETTE') {
+        const levelMatches = rows.filter((row) => metadataMatches(row.exam_level, examLevel));
+        return levelMatches;
+      }
+    }
+
+    return matches;
   }
 
   static async save({ id, boardName, boardAliases, academicYear, examLevel, examSession, examPart, sourceType, portalAdapter, resultUrl, file, actorId }, db = pool) {
+    await ensureDatabaseMigrations(db).catch(() => {});
     const normalizedName = String(boardName || '').trim().replace(/\s+/g, ' ');
     const year = String(academicYear || '').trim();
     if (id !== undefined && !/^\d+$/.test(String(id))) throw new AppError(400, 'INVALID_BOARD_SOURCE', 'Board source ID is invalid.');
@@ -162,7 +316,48 @@ export class BoardSourceService {
     if (oldSource?.storage_key && oldSource.storage_key !== newKey) {
       await StorageService.deleteFile(oldSource.storage_key, oldSource.storage_provider).catch((error) => console.error('Could not remove replaced board gazette:', error.message));
     }
+
+    if (sourceType === 'GAZETTE') {
+      this.triggerAutoVerificationForGazette({ examLevel: level, actorId, db }).catch((err) =>
+        console.warn('[Gazette Auto-Verification] Error triggering scan:', err.message)
+      );
+    }
+
     return { success: true };
+  }
+
+  /**
+   * Auto-scan all pending or manual-review candidate marksheets matching a newly uploaded or updated gazette
+   */
+  static async triggerAutoVerificationForGazette({ examLevel, actorId, db = pool }) {
+    try {
+      const targetDocTypes = examLevel === 'SSC' ? ['MATRIC_MARKSHEET']
+        : examLevel === 'HSSC' ? ['FSC_MARKSHEET']
+        : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'];
+
+      const placeholders = targetDocTypes.map(() => '?').join(',');
+      const [docs] = await db.query(
+        `SELECT d.id, d.student_id, d.doc_type, d.extracted_data
+           FROM adm_student_documents d
+          WHERE d.doc_type IN (${placeholders})
+            AND d.verification_status NOT IN ('MATCHED', 'PORTAL_VERIFIED')`,
+        targetDocTypes
+      );
+
+      const { AdmissionIntakeService } = await import('./admission-intake.service.js');
+      for (const doc of docs) {
+        const extracted = typeof doc.extracted_data === 'string' ? JSON.parse(doc.extracted_data) : (doc.extracted_data || {});
+        if (extracted?.rollNumber) {
+          await AdmissionIntakeService.searchGazetteForDocument({
+            documentId: doc.id,
+            actorId: actorId || null,
+            db,
+          }).catch((err) => console.warn(`[Gazette Auto-Verification] Error on doc ${doc.id}:`, err.message));
+        }
+      }
+    } catch (err) {
+      console.warn('[Gazette Auto-Verification] Failed to scan candidate marksheets:', err.message);
+    }
   }
 
   static async deactivate(id, actorId, db = pool) {

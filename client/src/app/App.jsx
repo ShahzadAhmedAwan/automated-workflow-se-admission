@@ -47,10 +47,12 @@ export function App() {
   const [currentNav, setCurrentNav] = useState('marketing');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [waStatus, setWaStatus] = useState({ connected: false, status: 'CHECKING', phone: null });
+  const [waStatus, setWaStatus] = useState({ connected: false, status: 'CHECKING', phone: null, qrDataUrl: null });
   const [showWaModal, setShowWaModal] = useState(false);
   const [waPhoneInput, setWaPhoneInput] = useState('');
   const [savingWaNumber, setSavingWaNumber] = useState(false);
+  const [loadingQr, setLoadingQr] = useState(false);
+  const [requestingReset, setRequestingReset] = useState(false);
   const [waModalMsg, setWaModalMsg] = useState({ error: '', success: '' });
 
   useEffect(() => {
@@ -62,17 +64,48 @@ export function App() {
         const data = await marketingApi.getWhatsAppStatus();
         if (mounted && data) setWaStatus(data);
       } catch {
-        if (mounted) setWaStatus({ connected: false, status: 'OFFLINE', phone: null });
+        if (mounted) setWaStatus((prev) => ({ ...prev, connected: false, status: 'OFFLINE' }));
       }
     }
 
     checkWhatsAppStatus();
-    const interval = setInterval(checkWhatsAppStatus, 20000);
+    const interval = setInterval(checkWhatsAppStatus, showWaModal ? 2500 : 20000);
     return () => {
       mounted = false;
       clearInterval(interval);
     };
-  }, [user]);
+  }, [user, showWaModal]);
+
+  async function handleLinkNewNumber() {
+    setRequestingReset(true);
+    setWaModalMsg({ error: '', success: '' });
+    try {
+      const res = await marketingApi.resetWhatsAppSession();
+      if (res?.qrDataUrl) {
+        setWaStatus((prev) => ({ ...prev, connected: false, status: 'NEEDS_QR', qrDataUrl: res.qrDataUrl }));
+      }
+      setWaModalMsg({ error: '', success: 'Pairing session reset. Scan the QR code below.' });
+    } catch (err) {
+      setWaModalMsg({ error: err.message || 'Failed to start pairing session', success: '' });
+    } finally {
+      setRequestingReset(false);
+    }
+  }
+
+  async function handleRefreshQr() {
+    setLoadingQr(true);
+    setWaModalMsg({ error: '', success: '' });
+    try {
+      const res = await marketingApi.getWhatsAppQr();
+      if (res?.qrDataUrl) {
+        setWaStatus((prev) => ({ ...prev, qrDataUrl: res.qrDataUrl, status: 'NEEDS_QR' }));
+      }
+    } catch (err) {
+      setWaModalMsg({ error: err.message || 'Failed to refresh QR code', success: '' });
+    } finally {
+      setLoadingQr(false);
+    }
+  }
 
   async function handleSaveWhatsAppNumber(e) {
     e.preventDefault();
@@ -335,14 +368,14 @@ export function App() {
         </main>
       </div>
 
-      {/* WhatsApp Configuration & Number Modal */}
+      {/* WhatsApp Configuration & QR Login Modal */}
       {showWaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs">
-          <div className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <span className={`size-2.5 rounded-full ${waStatus.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                <h3 className="text-base font-bold text-slate-900">WhatsApp Configuration</h3>
+                <h3 className="text-base font-bold text-slate-900">WhatsApp Bot Login & Number Settings</h3>
               </div>
               <button
                 type="button"
@@ -354,21 +387,7 @@ export function App() {
             </div>
 
             <div className="mt-4 space-y-4">
-              <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Connection Status:</span>
-                  <span className={`font-semibold ${waStatus.connected ? 'text-emerald-700' : 'text-slate-600'}`}>
-                    {waStatus.connected ? '🟢 Connected (Online)' : waStatus.status === 'NEEDS_QR' ? '🟡 QR Scan Needed' : '⚪ Offline / Standby'}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Active Bot Phone:</span>
-                  <span className="font-mono font-semibold text-slate-800">
-                    +{waStatus.phone || waStatus.adminNumber || 'Not set'}
-                  </span>
-                </div>
-              </div>
-
+              {/* Feedback messages */}
               {waModalMsg.error && (
                 <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
                   {waModalMsg.error}
@@ -381,41 +400,151 @@ export function App() {
                 </div>
               )}
 
-              <form onSubmit={handleSaveWhatsAppNumber} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Change WhatsApp Number
-                  </label>
-                  <input
-                    type="text"
-                    value={waPhoneInput}
-                    onChange={(e) => setWaPhoneInput(e.target.value)}
-                    placeholder="e.g. 923408195018 or 03408195018"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none"
-                    required
-                  />
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    Enter the WhatsApp phone number (with country code 92 or standard mobile format).
-                  </p>
+              {/* Status Header Box */}
+              <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Connection Status:</span>
+                  <span className={`font-semibold ${waStatus.connected ? 'text-emerald-700' : 'text-slate-600'}`}>
+                    {waStatus.connected ? '🟢 Connected (Online)' : waStatus.status === 'NEEDS_QR' ? '🟡 Scan QR to Pair' : '⚪ Offline / Standby'}
+                  </span>
                 </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Paired WhatsApp Number:</span>
+                  <span className="font-mono font-semibold text-slate-800 text-sm">
+                    {waStatus.phone ? `+${waStatus.phone}` : (waStatus.adminNumber ? `+${waStatus.adminNumber} (Configured)` : 'Not paired')}
+                  </span>
+                </div>
+              </div>
 
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="submit"
-                    disabled={savingWaNumber || !waPhoneInput.trim()}
-                    className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 transition"
-                  >
-                    {savingWaNumber ? 'Saving…' : 'Update WhatsApp Number'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowWaModal(false)}
-                    className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Close
-                  </button>
+              {/* Connected Banner OR Live QR Code Box */}
+              {waStatus.connected ? (
+                <div className="rounded-xl bg-emerald-50/80 border border-emerald-200 p-4 space-y-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white font-bold text-sm">
+                      ✓
+                    </div>
+                    <div>
+                      <h4 className="m-0 text-xs font-bold text-emerald-950">
+                        WhatsApp Active on +{waStatus.phone}
+                      </h4>
+                      <p className="m-0 text-[11px] text-emerald-800">
+                        Bot is ready to broadcast campaigns, qualify applicant leads, and send reminder notices.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-emerald-200/60 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={requestingReset}
+                      onClick={handleLinkNewNumber}
+                      className="rounded-lg bg-white border border-emerald-300 px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 shadow-2xs cursor-pointer transition disabled:opacity-50"
+                    >
+                      {requestingReset ? 'Resetting…' : '🔄 Change WhatsApp Number (Scan New QR)'}
+                    </button>
+                  </div>
                 </div>
-              </form>
+              ) : (
+                /* QR Code Display Card */
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                  <div className="text-center space-y-1">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                      <span className="size-2 rounded-full bg-amber-600 animate-ping" />
+                      Scan QR Code with WhatsApp to Log In
+                    </span>
+                    <p className="text-[11px] text-slate-500 mb-0">
+                      Log in with your own number or any admissions department number.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-center py-1">
+                    {waStatus.qrDataUrl ? (
+                      <div className="space-y-1.5 text-center">
+                        <img
+                          src={waStatus.qrDataUrl}
+                          alt="WhatsApp Login QR Code"
+                          className="size-64 rounded-xl border border-slate-300 bg-white p-2.5 shadow-md mx-auto"
+                        />
+                        <span className="inline-block text-[10px] font-mono text-slate-500">
+                          Auto-refreshes every 20 seconds
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="size-64 rounded-xl border border-dashed border-slate-300 bg-white flex flex-col items-center justify-center p-4 text-center">
+                        <span className="size-7 animate-spin rounded-full border-2 border-blue-600 border-t-transparent mb-2.5" />
+                        <span className="text-xs text-slate-700 font-semibold">Generating WhatsApp QR code…</span>
+                        <span className="text-[11px] text-slate-400 mt-1 max-w-[200px]">
+                          Ensure server is running with <code className="text-blue-700">npm run dev:server</code>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Step-by-step connection guide */}
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-[11px] text-slate-700 space-y-1">
+                    <p className="font-bold text-slate-800 text-xs mb-1">How to scan and pair:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-600">
+                      <li>Open <strong>WhatsApp</strong> on your mobile phone</li>
+                      <li>Tap <strong>Settings</strong> (iPhone) or <strong>Menu (⋮)</strong> (Android)</li>
+                      <li>Tap <strong>Linked Devices</strong> → <strong>Link a Device</strong></li>
+                      <li>Point your camera at the QR code above</li>
+                    </ol>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={loadingQr}
+                      onClick={handleRefreshQr}
+                      className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 cursor-pointer shadow-2xs"
+                    >
+                      {loadingQr ? 'Refreshing…' : '🔄 Refresh QR Code'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={requestingReset}
+                      onClick={handleLinkNewNumber}
+                      className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer shadow-2xs transition"
+                    >
+                      {requestingReset ? 'Generating…' : 'Generate New QR'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Optional: Manual Phone Override */}
+              <div className="border-t border-slate-200 pt-3">
+                <form onSubmit={handleSaveWhatsAppNumber} className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Admin Notification Phone (Optional)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={waPhoneInput}
+                      onChange={(e) => setWaPhoneInput(e.target.value)}
+                      placeholder="e.g. 923408195018 or 03408195018"
+                      className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-900 focus:border-blue-600 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingWaNumber || !waPhoneInput.trim()}
+                      className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-900 disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingWaNumber ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowWaModal(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

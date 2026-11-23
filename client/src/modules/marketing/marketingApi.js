@@ -106,6 +106,18 @@ export const marketingApi = {
     return res.data;
   },
 
+  async getWhatsAppQr() {
+    const res = await apiRequest('/marketing/whatsapp/qr', {}, true);
+    return res.data;
+  },
+
+  async resetWhatsAppSession() {
+    const res = await apiRequest('/marketing/whatsapp/reset', {
+      method: 'POST',
+    }, true);
+    return res.data;
+  },
+
   async updateWhatsAppNumber(phone) {
     const res = await apiRequest('/marketing/whatsapp/number', {
       method: 'POST',

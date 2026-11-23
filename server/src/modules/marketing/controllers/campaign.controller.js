@@ -2,6 +2,7 @@ import { pool } from '../../../core/db/pool.js';
 import { CampaignService } from '../services/campaign.service.js';
 import { parseAndPreviewLeads } from '../services/csv-parser.service.js';
 import { LeadBotService } from '../services/lead-bot.service.js';
+import { WhatsAppManager } from '../../../core/baileys/whatsapp-manager.service.js';
 import {
   createCampaignSchema,
   leadImportSchema,
@@ -209,6 +210,8 @@ export class CampaignController {
               connected,
               status: val.status || (connected ? 'CONNECTED' : 'DISCONNECTED'),
               phone: val.phone || null,
+              qrDataUrl: val.qrDataUrl || null,
+              qrString: val.qrString || null,
               updatedAt: updatedAt.toISOString(),
               error: val.error || null,
             },
@@ -248,6 +251,8 @@ export class CampaignController {
                 connected: true,
                 status: 'CONNECTED',
                 phone: fallbackPhone,
+                qrDataUrl: null,
+                qrString: null,
                 updatedAt: lastActive.toISOString(),
                 error: null,
               },
@@ -284,8 +289,62 @@ export class CampaignController {
           phone: activePhone,
           adminNumber: process.env.ADMIN_NUMBER || null,
           customPhone,
+          qrDataUrl: lastVal?.qrDataUrl || null,
+          qrString: lastVal?.qrString || null,
           updatedAt: lastKnown?.updated_at ? new Date(lastKnown.updated_at).toISOString() : null,
           error: lastVal?.error || null,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Resets active WhatsApp session, clears credentials, and emits fresh QR code
+   */
+  static async resetWhatsAppSession(_req, res, next, db = pool) {
+    try {
+      const result = await WhatsAppManager.resetSession(db);
+      res.json({
+        status: 'success',
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Retrieves or initiates fresh QR code for WhatsApp pairing
+   */
+  static async getWhatsAppQr(_req, res, next, db = pool) {
+    try {
+      const current = await WhatsAppManager.getStatus(db);
+      if (current.connected) {
+        return res.json({
+          status: 'success',
+          data: {
+            connected: true,
+            status: 'CONNECTED',
+            phone: current.phone,
+            message: 'WhatsApp is already connected.',
+          },
+        });
+      }
+
+      if (!current.qrDataUrl) {
+        await WhatsAppManager.startSocket(db);
+      }
+
+      const refreshed = await WhatsAppManager.getStatus(db);
+      res.json({
+        status: 'success',
+        data: {
+          connected: refreshed.connected,
+          status: refreshed.status,
+          qrDataUrl: refreshed.qrDataUrl,
+          qrString: refreshed.qrString,
         },
       });
     } catch (err) {

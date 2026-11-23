@@ -3,6 +3,7 @@ import { dispatchJob } from '../../../core/queue/outboxBus.js';
 import { EVENT_TYPES } from '../../../contracts/event-types.js';
 import { MANDATORY_ADMISSION_DOCUMENTS } from '../verification.constants.js';
 import { config } from '../../../core/config/env.js';
+import { decryptAtRest } from '../../../core/security/tokens.js';
 import {
   buildPortalUrl,
   formatReminderMessage,
@@ -84,8 +85,9 @@ export class ExpirationReminderService {
         continue;
       }
 
-      const uploadUrl = t.raw_token
-        ? buildPortalUrl(t.raw_token)
+      const plainToken = t.raw_token ? decryptAtRest(t.raw_token) : null;
+      const uploadUrl = plainToken
+        ? buildPortalUrl(plainToken)
         : `${config.APP_ORIGIN}/u`;
 
       const hoursLeft = Math.max(1, Math.round((new Date(t.expires_at).getTime() - Date.now()) / (1000 * 60 * 60)));

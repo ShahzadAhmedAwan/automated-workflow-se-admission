@@ -38,8 +38,18 @@ export class GeminiOcrService {
       // Apply sequential rate-limit guard
       await this._throttle();
 
+      // Normalize MIME type to standard IANA media types required by Gemini API
+      let normalizedMime = String(mimeType || 'image/jpeg').toLowerCase();
+      if (normalizedMime === 'image/jpg' || normalizedMime === 'image/pjpeg') normalizedMime = 'image/jpeg';
+      if (normalizedMime === 'application/octet-stream') {
+        if (fileBuffer.slice(0, 4).toString('ascii').startsWith('%PDF')) normalizedMime = 'application/pdf';
+        else if (fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50) normalizedMime = 'image/png';
+        else normalizedMime = 'image/jpeg';
+      }
+
       const base64Data = fileBuffer.toString('base64');
       const isCnic = docType === 'CNIC_FRONT' || docType === 'CNIC_BACK';
+      const isDomicile = docType === 'DOMICILE';
       const prompt = isCnic ? `
 You are an expert OCR parser for Pakistani National Identity Cards (CNIC / Smart Card / B-Form).
 Extract structured identity information strictly as legible from this document image into valid JSON without any markdown or code blocks.
@@ -53,6 +63,21 @@ Expected JSON Schema:
   "dob": "Date of birth if visible, e.g. YYYY-MM-DD or DD.MM.YYYY",
   "gender": "M or F if visible",
   "expiry_date": "Card expiry date if visible"
+}
+` : isDomicile ? `
+You are an expert OCR parser for Pakistani Domicile Certificates and PRC (Permanent Residence Certificates).
+Extract structured candidate identity and residence/domicile district information strictly as legible from this document image/PDF into valid, pure JSON without any markdown code block formatting.
+Document type: ${docType}
+
+Expected JSON Schema:
+{
+  "candidate_name": "Candidate Full Name in English as on Domicile Certificate",
+  "father_name": "Father or Guardian Name in English",
+  "district": "Domicile District Name (e.g. Mirpur, Islamabad, Lahore, Rawalpindi, Muzaffarabad, Faisalabad, etc.)",
+  "city": "City, Town, or Tehsil Name (e.g. Mirpur, Dadyal, Islamabad, Rawalpindi)",
+  "province": "Province or Territory (e.g. Azad Kashmir, Punjab, Islamabad Capital Territory, KPK, Sindh)",
+  "cnic": "CNIC or B-Form number if visible",
+  "issue_date": "Date of issue if visible"
 }
 ` : `
 You are an expert OCR parser for Pakistani Educational Board Marksheets and Certificates.
@@ -81,7 +106,14 @@ Expected JSON Schema:
 }
 `;
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${OCR_CONFIG.MODEL_NAME}:generateContent?key=${apiKey}`;
+      const candidateModels = [
+        OCR_CONFIG.MODEL_NAME,
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-flash-latest',
+        'gemini-3.8-flash',
+      ];
+      const modelsToTry = [...new Set(candidateModels.filter(Boolean))];
 
       const requestBody = {
         contents: [
@@ -90,7 +122,7 @@ Expected JSON Schema:
               { text: prompt },
               {
                 inline_data: {
-                  mime_type: mimeType,
+                  mime_type: normalizedMime,
                   data: base64Data,
                 },
               },
@@ -103,34 +135,82 @@ Expected JSON Schema:
         },
       };
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+      let lastError = null;
+      let result = null;
+      let usedModel = null;
 
-      if (!res.ok) {
-        const err = await res.text().catch(() => '');
-        throw new Error(`Gemini Flash OCR API failed with status ${res.status}: ${err}`);
+      for (const model of modelsToTry) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(20000),
+          });
+
+          if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            // If model is not found (404) or temporarily overloaded (503), try next candidate
+            if (res.status === 404 || res.status === 503) {
+              console.warn(`[Gemini OCR] Model ${model} returned HTTP ${res.status}. Trying next candidate model...`);
+              lastError = new Error(`Model ${model} returned HTTP ${res.status}: ${errText}`);
+              continue;
+            }
+            throw new Error(`Gemini Flash OCR API failed with status ${res.status}: ${errText}`);
+          }
+
+          const json = await res.json();
+          const candidateText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!candidateText) {
+            throw new Error(`Gemini model ${model} returned an empty candidate text response.`);
+          }
+
+          result = json;
+          usedModel = model;
+          break;
+        } catch (callErr) {
+          lastError = callErr;
+          console.warn(`[Gemini OCR] Error attempting model ${model}: ${callErr.message}`);
+        }
       }
 
-      const result = await res.json();
+      if (!result) {
+        throw lastError || new Error('All configured Gemini OCR models failed to respond.');
+      }
+
       const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!candidateText) {
-        throw new Error('Gemini OCR returned an empty candidate text response.');
-      }
-
       const cleanedJson = candidateText.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-      const parsedData = JSON.parse(cleanedJson);
+      let parsedData;
+      try {
+        parsedData = JSON.parse(cleanedJson);
+      } catch {
+        const jsonBlock = candidateText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (jsonBlock) {
+          parsedData = JSON.parse(jsonBlock[1].trim());
+        } else {
+          const start = candidateText.indexOf('{');
+          const end = candidateText.lastIndexOf('}');
+          if (start !== -1 && end > start) {
+            parsedData = JSON.parse(candidateText.substring(start, end + 1).trim());
+          } else {
+            throw new Error(`Invalid JSON returned from Gemini OCR: ${candidateText.slice(0, 200)}`);
+          }
+        }
+      }
 
       return {
         raw: result,
         extracted: this._normalizeExtractedData(parsedData),
-        model: OCR_CONFIG.MODEL_NAME,
+        model: usedModel,
         source: 'GEMINI',
         isMock: false,
       };
     } catch (networkOrApiError) {
+      if (process.env.NODE_ENV !== 'production' && process.env.STRICT_LIVE_OCR !== '1' && process.env.USE_MOCK_OCR === '1') {
+        console.warn(`[Gemini OCR] Live OCR failed (${networkOrApiError.message}). Falling back to development mock extraction.`);
+        return this._extractWithMock({ docType, studentContext });
+      }
       throw new Error(`Live OCR failed: ${networkOrApiError.message}`, { cause: networkOrApiError });
     }
   }
@@ -141,7 +221,7 @@ Expected JSON Schema:
   static async _extractWithMock({ docType, studentContext = {} }) {
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    const base = {
+    let base = {
       candidate_name: studentContext.fullName || 'Muhammad Usman',
       father_name: studentContext.fatherName || 'Tariq Mahmood',
       roll_number: studentContext.fscRollNo || '542198',
@@ -151,6 +231,25 @@ Expected JSON Schema:
       obtained_marks: studentContext.fscMarks || 940,
       is_pass: true,
     };
+
+    if (docType === 'CNIC_FRONT' || docType === 'CNIC_BACK') {
+      base = {
+        candidate_name: studentContext.fullName || 'Muhammad Usman',
+        father_name: studentContext.fatherName || 'Tariq Mahmood',
+        cnic: studentContext.cnic || '3740512345671',
+        dob: '2005-08-14',
+        gender: 'M',
+        expiry_date: '2030-08-14',
+      };
+    } else if (docType === 'DOMICILE') {
+      base = {
+        candidate_name: studentContext.fullName || 'Muhammad Usman',
+        father_name: studentContext.fatherName || 'Tariq Mahmood',
+        district: studentContext.city || 'Mirpur',
+        city: studentContext.city || 'Mirpur',
+        province: 'Azad Kashmir',
+      };
+    }
 
     return {
       raw: { mock: true, timestamp: new Date().toISOString() },
@@ -183,6 +282,10 @@ Expected JSON Schema:
       dob: data.dob ? String(data.dob).trim() : null,
       gender: data.gender ? String(data.gender).trim() : null,
       expiryDate: (data.expiry_date || data.expiryDate) ? String(data.expiry_date || data.expiryDate).trim() : null,
+      district: String(data.district || '').trim(),
+      city: String(data.city || data.district || data.tehsil || '').trim(),
+      tehsil: String(data.tehsil || '').trim(),
+      province: String(data.province || '').trim(),
       subjects: Array.isArray(data.subjects) ? data.subjects : [],
     };
   }

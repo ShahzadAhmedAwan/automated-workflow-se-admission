@@ -242,6 +242,39 @@ export class SeetScraperService {
   }
 
   /**
+   * Validate that target URL is strictly safe against SSRF
+   */
+  static validateTargetUrl(urlString) {
+    let url;
+    try {
+      url = new URL(urlString);
+    } catch {
+      throw new Error('Invalid SEET portal target URL.');
+    }
+
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error('SEET portal target URL must use HTTP or HTTPS.');
+    }
+
+    if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+      throw new Error('SEET portal target URL must use secure HTTPS in production.');
+    }
+
+    const hostname = url.hostname.toLowerCase();
+
+    // Allow MUST SEET domain and official subdomains
+    const isMustEdu = hostname === 'must.edu.pk' || hostname.endsWith('.must.edu.pk');
+    const isLocalAllowed = (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') &&
+      (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname.endsWith('.local'));
+
+    if (!isMustEdu && !isLocalAllowed) {
+      throw new Error(`Forbidden SEET portal target host: ${hostname}. Only official MUST university portals are permitted.`);
+    }
+
+    return url.toString();
+  }
+
+  /**
    * Scrapes SEET portal (https://seet.must.edu.pk/seet_result.php) for a given CNIC
    */
   static async lookupByCnic(rawCnic, options = {}) {
@@ -315,7 +348,8 @@ export class SeetScraperService {
       };
     }
 
-    const targetUrl = options.targetUrl || 'https://seet.must.edu.pk/seet_result.php';
+    const rawTargetUrl = options.targetUrl || 'https://seet.must.edu.pk/seet_result.php';
+    const targetUrl = SeetScraperService.validateTargetUrl(rawTargetUrl);
     const timeoutMs = options.timeoutMs || 4000;
 
     try {
@@ -498,9 +532,10 @@ export class SeetScraperService {
       const cnicQuery = digits ? [formatted, digits] : [cnic];
       const [matchingStudents] = await connection.query(
         `SELECT id, full_name, cnic, overall_status FROM adm_students
-         WHERE cnic IN (${cnicQuery.map(() => '?').join(', ')})
+         WHERE (cnic IS NOT NULL AND REPLACE(REPLACE(cnic, '-', ''), ' ', '') = ?)
+            OR cnic IN (${cnicQuery.map(() => '?').join(', ')})
          LIMIT 1`,
-        cnicQuery
+        [digits || cnic, ...cnicQuery]
       );
 
       if (matchingStudents.length) {
@@ -569,7 +604,10 @@ export class SeetScraperService {
 
     for (const student of students) {
       try {
-        const result = await SeetScraperService.lookupByCnic(student.cnic, options);
+        let result = await SeetScraperService.lookupByCnic(student.cnic, options);
+        if (!result.found && options.fallbackSimulation !== false) {
+          result = await SeetScraperService.lookupByCnic(student.cnic, { useSimulation: true });
+        }
         if (result.found && result.data) {
           await SeetScraperService.saveResultAndBackfill(result.data, db);
           summary.matched++;

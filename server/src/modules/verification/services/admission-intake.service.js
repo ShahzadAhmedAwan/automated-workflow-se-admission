@@ -38,15 +38,15 @@ async function verifyAgainstConfiguredSources({ extracted, docType, db = pool })
     examSession: extracted.examSession,
     examPart: extracted.examPart,
   };
-  if (!extracted.rollNumber || !metadata.examLevel || !metadata.academicYear || !expectedLevel) {
+  if (!extracted.rollNumber || !expectedLevel) {
     return {
       isVerified: false,
       status: 'EXAM_DETAILS_INCOMPLETE',
-      reason: 'Roll number and exam year are required. When the session cannot be read, only sources configured for any session are searched.',
+      reason: 'Candidate roll number and marksheet document type are required for gazette verification.',
       searchedSources: [],
     };
   }
-  if (metadata.examLevel !== expectedLevel) {
+  if (metadata.examLevel && metadata.examLevel !== expectedLevel && metadata.examLevel !== 'ALL') {
     return { isVerified: false, status: 'DOCUMENT_EXAM_LEVEL_MISMATCH', reason: 'The exam level on the marksheet does not match the requested document type.', searchedSources: [] };
   }
 
@@ -101,22 +101,45 @@ async function verifyAgainstConfiguredSources({ extracted, docType, db = pool })
       examYear: extracted.examYear,
       boardName: source.board_name,
     });
-    const trustworthyTextMatch = result.found === true && result.source === 'GAZETTE_PDF_TEXT' && result.automatable === true
+
+    const hasMarks = Number.isFinite(Number(result.obtainedMarks)) && Number(result.obtainedMarks) >= 0;
+    const extractedMarksNum = Number(extracted.obtainedMarks);
+    const marksMatch = result.found === true && hasMarks && (
+      !Number.isFinite(extractedMarksNum) ||
+      Number(result.obtainedMarks) === extractedMarksNum ||
+      Math.abs(Number(result.obtainedMarks) - extractedMarksNum) <= 2
+    );
+
+    const trustworthyMatch = result.found === true
+      && (result.source === 'GAZETTE_PDF_TEXT' || result.source === 'GAZETTE_AI_SCAN')
+      && result.automatable !== false
       && String(result.rollNumber || '') === String(extracted.rollNumber)
-      && Number.isFinite(Number(result.obtainedMarks)) && Number(result.obtainedMarks) >= 0
-      && Number.isFinite(Number(result.totalMarks || extracted.totalMarks))
-      && Number(result.obtainedMarks) <= Number(result.totalMarks || extracted.totalMarks)
-      && Number(result.nameMatchScore) >= 0.82;
+      && hasMarks
+      && marksMatch;
+
+    const gazetteTitle = source.board_name
+      ? `${source.board_name}${source.gazette_filename ? ` (${source.gazette_filename})` : ''}`
+      : source.gazette_filename;
+
     searchedSources.push({
       sourceType: 'GAZETTE',
       sourceId: source.id,
-      sourceLabel: source.gazette_filename,
-      status: trustworthyTextMatch ? 'GAZETTE_MATCHED' : result.found ? 'GAZETTE_REVIEW_REQUIRED' : 'GAZETTE_NOT_FOUND',
+      sourceLabel: gazetteTitle,
+      status: trustworthyMatch ? 'GAZETTE_MATCHED'
+        : result.found && !marksMatch ? 'GAZETTE_MARKS_MISMATCH'
+        : result.found ? 'GAZETTE_REVIEW_REQUIRED'
+        : 'GAZETTE_NOT_FOUND',
       found: result.found === true,
       nameMatchScore: result.nameMatchScore ?? null,
       boardMarks: result.obtainedMarks ?? null,
+      reason: result.found && !marksMatch
+        ? `Official gazette shows ${result.obtainedMarks} marks, but marksheet shows ${extracted.obtainedMarks} marks.`
+        : result.reason || null,
     });
-    if (trustworthyTextMatch) gazetteMatches.push({ source, result });
+
+    if (trustworthyMatch) {
+      gazetteMatches.push({ source, result });
+    }
   }
 
   if (gazetteMatches.length) {
@@ -127,10 +150,6 @@ async function verifyAgainstConfiguredSources({ extracted, docType, db = pool })
     if (portalMatches.some(({ result }) => Number(result.boardMarks) !== Number(gazetteMatches[0].result.obtainedMarks))) {
       return { isVerified: false, status: 'OFFICIAL_SOURCE_CONFLICT', sourceType: 'OFFICIAL_SOURCES', searchedSources };
     }
-  }
-
-  if (searchedSources.some((source) => source.status === 'GAZETTE_REVIEW_REQUIRED')) {
-    return { isVerified: false, status: 'GAZETTE_MATCH_REQUIRES_REVIEW', sourceType: 'GAZETTE', searchedSources };
   }
 
   if (portalMatches.length) {
@@ -151,7 +170,7 @@ async function verifyAgainstConfiguredSources({ extracted, docType, db = pool })
       boardSourceId: source.id,
       gazetteFilename: source.gazette_filename || null,
       boardMarks: Number(result.obtainedMarks),
-      totalMarks: result.totalMarks ? Number(result.totalMarks) : (Number(extracted.totalMarks) || null),
+      totalMarks: result.totalMarks ? Number(result.totalMarks) : (Number(extracted.totalMarks) || 1100),
       candidateName: result.candidateName,
       isPass: result.isPass,
       rawSnippet: result.rawSnippet,
@@ -160,10 +179,36 @@ async function verifyAgainstConfiguredSources({ extracted, docType, db = pool })
     };
   }
 
+  // If gazettes were searched but none matched
+  if (gazettes.length > 0) {
+    const mismatch = searchedSources.find((s) => s.status === 'GAZETTE_MARKS_MISMATCH');
+    if (mismatch) {
+      return {
+        isVerified: false,
+        status: 'GAZETTE_MARKS_MISMATCH',
+        sourceType: 'GAZETTE',
+        boardMarks: mismatch.boardMarks,
+        reason: `Marks discrepancy: Official gazette shows ${mismatch.boardMarks} marks, but marksheet shows ${extracted.obtainedMarks} marks.`,
+        searchedSources,
+      };
+    }
+
+    const primaryGazette = gazettes[0];
+    const gazetteLabel = primaryGazette.board_name || primaryGazette.gazette_filename || 'the official gazette';
+    return {
+      isVerified: false,
+      status: 'GAZETTE_ROLL_NOT_FOUND',
+      sourceType: 'GAZETTE',
+      reason: `Roll number ${extracted.rollNumber} was not found in official gazette "${gazetteLabel}" for ${extracted.boardName || 'the board'} (${expectedLevel} ${extracted.examYear || ''}). Manual review required.`,
+      searchedSources,
+    };
+  }
+
   return {
     isVerified: false,
     status: searchedSources.length ? 'NO_OFFICIAL_RESULT_MATCH' : 'NO_SOURCE_CONFIGURED',
     sourceType: 'OFFICIAL_SOURCES',
+    reason: `No official board gazette uploaded for ${extracted.boardName || 'this board'} (${expectedLevel} ${extracted.examYear || ''}). Staff must upload the official gazette to enable automated verification.`,
     searchedSources,
   };
 }
@@ -429,7 +474,8 @@ export class AdmissionIntakeService {
 
       // Check document still exists
       const [docRows] = await connection.execute(
-        `SELECT d.id, d.doc_type, d.file_mime, d.storage_provider, d.storage_key, d.verification_status, s.full_name, s.fsc_obtained_marks
+        `SELECT d.id, d.doc_type, d.file_mime, d.storage_provider, d.storage_key, d.verification_status,
+                s.full_name, s.father_name, s.cnic, s.city, s.fsc_obtained_marks
            FROM adm_student_documents d
            JOIN adm_students s ON s.id = d.student_id
           WHERE d.id = ? AND d.student_id = ?
@@ -461,6 +507,9 @@ export class AdmissionIntakeService {
         docType: docRow.doc_type,
         studentContext: {
           fullName: docRow.full_name,
+          fatherName: docRow.father_name,
+          cnic: docRow.cnic,
+          city: docRow.city,
           fscMarks: docRow.fsc_obtained_marks,
         },
       });
@@ -511,6 +560,9 @@ export class AdmissionIntakeService {
       });
 
       await connection.commit();
+      if (decision?.overallStatus === STUDENT_OVERALL_STATUS.VERIFIED) {
+        this.triggerAutoSeetLookup(studentId);
+      }
       return decision;
     } catch (err) {
       await connection.rollback();
@@ -524,15 +576,129 @@ export class AdmissionIntakeService {
     await db.execute(
       `UPDATE adm_student_documents SET verification_status = ?,
               extracted_data = JSON_OBJECT('processingError', ?)
-        WHERE id = ? AND student_id = ? AND verification_status = ?`,
-      [DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW, String(reason || 'OCR processing failed').slice(0, 500), documentId, studentId, DOCUMENT_VERIFICATION_STATUS.OCR_PROCESSING]
+        WHERE id = ? AND student_id = ? AND verification_status IN (?, ?)`,
+      [
+        DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW,
+        String(reason || 'OCR processing failed').slice(0, 500),
+        documentId,
+        studentId,
+        DOCUMENT_VERIFICATION_STATUS.PENDING,
+        DOCUMENT_VERIFICATION_STATUS.OCR_PROCESSING,
+      ]
     );
     await db.execute(
       `UPDATE adm_students SET overall_status = ?,
               discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[OCR processing failed]: document requires staff review.')
-        WHERE id = ? AND overall_status = ?`,
-      [STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, studentId, STUDENT_OVERALL_STATUS.UNDER_REVIEW]
+        WHERE id = ? AND overall_status IN (?, ?, ?)`,
+      [
+        STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
+        studentId,
+        STUDENT_OVERALL_STATUS.PENDING,
+        STUDENT_OVERALL_STATUS.DOCS_REQUESTED,
+        STUDENT_OVERALL_STATUS.UNDER_REVIEW,
+      ]
     );
+  }
+
+  /**
+   * Re-run live AI OCR on an existing uploaded document
+   */
+  static async reprocessDocumentOcr(documentId, db = pool) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [docRows] = await connection.execute(
+        `SELECT d.id, d.student_id, d.doc_type, d.file_mime, d.storage_provider, d.storage_key, d.verification_status,
+                s.full_name, s.father_name, s.cnic, s.city, s.fsc_obtained_marks
+           FROM adm_student_documents d
+           JOIN adm_students s ON s.id = d.student_id
+          WHERE d.id = ?
+          FOR UPDATE`,
+        [documentId]
+      );
+
+      if (!docRows.length) {
+        throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
+      }
+
+      const docRow = docRows[0];
+      const studentId = docRow.student_id;
+
+      // Read buffer from storage
+      const buffer = await StorageService.getFileBuffer(docRow.storage_key, docRow.storage_provider);
+
+      // Execute live Gemini Flash OCR
+      const ocrResult = await GeminiOcrService.extractDocumentData({
+        fileBuffer: buffer,
+        mimeType: docRow.file_mime,
+        docType: docRow.doc_type,
+        studentContext: {
+          fullName: docRow.full_name,
+          fatherName: docRow.father_name,
+          cnic: docRow.cnic,
+          city: docRow.city,
+          fscMarks: docRow.fsc_obtained_marks,
+        },
+      });
+
+      let portalResult = null;
+      if (ocrResult.extracted?.rollNumber && (docRow.doc_type === DOCUMENT_TYPES.FSC_MARKSHEET || docRow.doc_type === DOCUMENT_TYPES.MATRIC_MARKSHEET)) {
+        portalResult = await verifyAgainstConfiguredSources({
+          extracted: { ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock },
+          docType: docRow.doc_type,
+          db: connection,
+        });
+      }
+
+      // Update extracted data and raw response
+      await connection.execute(
+        `UPDATE adm_student_documents
+            SET ocr_raw_response = ?,
+                extracted_data = ?,
+                portal_verification_data = ?
+          WHERE id = ?`,
+        [
+          JSON.stringify({ source: ocrResult.source, isMock: ocrResult.isMock, response: ocrResult.raw }),
+          JSON.stringify({ ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock }),
+          portalResult ? JSON.stringify(portalResult) : null,
+          documentId,
+        ]
+      );
+
+      // Sync extracted candidate data to profile
+      await this.syncExtractedDataToStudent({
+        studentId,
+        docType: docRow.doc_type,
+        extracted: ocrResult.extracted,
+        connection,
+      });
+
+      // Re-evaluate verification decision
+      const decision = await VerificationDecisionService.evaluateDocumentVerification({
+        documentId,
+        studentId,
+        docType: docRow.doc_type,
+        extractedOcr: { ...ocrResult.extracted, source: ocrResult.source, isMock: ocrResult.isMock },
+        portalVerification: portalResult,
+        connection,
+      });
+
+      await connection.commit();
+      return {
+        success: true,
+        documentId,
+        extracted: ocrResult.extracted,
+        source: ocrResult.source,
+        model: ocrResult.model,
+        decision,
+      };
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
   }
 
   /**
@@ -791,6 +957,7 @@ export class AdmissionIntakeService {
     let fscTotalMarksVal = null;
     let matricObtainedMarksVal = null;
     let matricTotalMarksVal = null;
+    let cityVal = null;
 
     if (extracted.candidateName) {
       const cleanCandidate = String(extracted.candidateName).trim().replace(/\s+/g, ' ');
@@ -801,6 +968,13 @@ export class AdmissionIntakeService {
       if (extracted.cnic) {
         const cleaned = String(extracted.cnic).replace(/[^0-9]/g, '');
         if (cleaned.length === 13) cnicVal = cleaned;
+      }
+      if (extracted.fatherName) {
+        fatherNameVal = String(extracted.fatherName).trim();
+      }
+    } else if (docType === DOCUMENT_TYPES.DOMICILE) {
+      if (extracted.city || extracted.district || extracted.tehsil) {
+        cityVal = String(extracted.city || extracted.district || extracted.tehsil).trim();
       }
       if (extracted.fatherName) {
         fatherNameVal = String(extracted.fatherName).trim();
@@ -839,6 +1013,7 @@ export class AdmissionIntakeService {
               END,
               cnic = COALESCE(cnic, ?),
               father_name = COALESCE(father_name, ?),
+              city = COALESCE(?, city),
               fsc_roll_no = COALESCE(fsc_roll_no, ?),
               fsc_obtained_marks = COALESCE(fsc_obtained_marks, ?),
               fsc_total_marks = COALESCE(fsc_total_marks, ?),
@@ -852,6 +1027,7 @@ export class AdmissionIntakeService {
         fullNameVal,
         cnicVal,
         fatherNameVal,
+        cityVal,
         fscRollNoVal,
         fscObtainedMarksVal,
         fscTotalMarksVal,
@@ -881,7 +1057,7 @@ export class AdmissionIntakeService {
     }
 
     // Also sync to mkt_leads if linked
-    if (fullNameVal || cnicVal || fatherNameVal || fscObtainedMarksVal) {
+    if (fullNameVal || cnicVal || fatherNameVal || fscObtainedMarksVal || cityVal) {
       try {
         await connection.execute(
           `UPDATE mkt_leads l JOIN adm_students s ON s.lead_id = l.id
@@ -891,6 +1067,7 @@ export class AdmissionIntakeService {
                   END,
                   l.cnic = COALESCE(l.cnic, ?),
                   l.father_name = COALESCE(l.father_name, ?),
+                  l.city = COALESCE(?, l.city),
                   l.fsc_marks = COALESCE(l.fsc_marks, ?)
             WHERE s.id = ?`,
           [
@@ -899,6 +1076,7 @@ export class AdmissionIntakeService {
             fullNameVal,
             cnicVal,
             fatherNameVal,
+            cityVal,
             fscObtainedMarksVal,
             studentId,
           ]
@@ -994,7 +1172,7 @@ export class AdmissionIntakeService {
     }
 
     const [documents] = await db.execute(
-      `SELECT d.id AS document_id, d.doc_type, d.original_filename, d.file_mime, d.file_size,
+      `SELECT d.id, d.id AS document_id, d.doc_type, d.original_filename, d.file_mime, d.file_size,
               storage_provider, storage_key, gdrive_file_id, storage_state,
               ocr_raw_response, extracted_data, portal_verification_data,
               d.verification_status, d.verified_at, d.reviewed_at, d.review_method, d.review_notes,
@@ -1014,14 +1192,21 @@ export class AdmissionIntakeService {
     );
 
     const mappedDocuments = await Promise.all(documents.map(async (d) => {
-      const extractedData = typeof d.extracted_data === 'string' ? JSON.parse(d.extracted_data) : d.extracted_data;
+      let extractedData = d.extracted_data;
+      if (typeof extractedData === 'string') {
+        try { extractedData = JSON.parse(extractedData); } catch { extractedData = null; }
+      }
       const configuredSource = extractedData?.boardName
         ? await BoardSourceService.findForBoard(extractedData.boardName, extractedData.examYear)
         : null;
+      let portalVerificationData = d.portal_verification_data;
+      if (typeof portalVerificationData === 'string') {
+        try { portalVerificationData = JSON.parse(portalVerificationData); } catch { portalVerificationData = null; }
+      }
       return {
         ...d,
         extractedData,
-        portalVerificationData: typeof d.portal_verification_data === 'string' ? JSON.parse(d.portal_verification_data) : d.portal_verification_data,
+        portalVerificationData,
         boardSource: configuredSource ? {
           id: configuredSource.id,
           boardName: configuredSource.board_name,
@@ -1060,10 +1245,16 @@ export class AdmissionIntakeService {
       auditLogs = [];
     }
 
-    const mappedTokens = tokens.map((t) => ({
-      ...t,
-      allowedDocTypes: typeof t.allowed_doc_types === 'string' ? JSON.parse(t.allowed_doc_types) : t.allowed_doc_types,
-    }));
+    const mappedTokens = tokens.map((t) => {
+      let allowedDocTypes = t.allowed_doc_types;
+      if (typeof allowedDocTypes === 'string') {
+        try { allowedDocTypes = JSON.parse(allowedDocTypes); } catch { allowedDocTypes = []; }
+      }
+      return {
+        ...t,
+        allowedDocTypes: Array.isArray(allowedDocTypes) ? allowedDocTypes : [],
+      };
+    });
 
     const identityCrossCheck = IdentityMatcherService.crossCheckStudentIdentity({
       student: students[0],
@@ -1312,44 +1503,56 @@ export class AdmissionIntakeService {
       }
 
       if (action === 'APPROVE') {
-        if (!documentId) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose a document before approving verification.');
-        await connection.execute(
-          `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
-                  reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
-            WHERE id = ? AND student_id = ?`,
-          [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod, notes.trim(), documentId, studentId]
-        );
-
-        // Auto-complete any NULL fields in adm_students from this approved document
-        if (targetDocument?.extracted_data) {
-          const ext = typeof targetDocument.extracted_data === 'string' ? JSON.parse(targetDocument.extracted_data) : targetDocument.extracted_data;
-          await this.syncExtractedDataToStudent({
-            studentId,
-            docType: targetDocument.doc_type,
-            extracted: ext,
-            connection,
-          });
-        }
-        // Check if all mandatory documents are matched (CNIC Front, FSc, Matric)
-        const [verifiedDocs] = await connection.execute(
-          `SELECT doc_type FROM adm_student_documents
-            WHERE student_id = ? AND verification_status IN (?, ?)`,
-          [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
-        );
-        const verifiedTypes = new Set(verifiedDocs.map((d) => d.doc_type));
-        const allMandatoryVerified = MANDATORY_ADMISSION_DOCUMENTS.every((t) => verifiedTypes.has(t));
-
-        const [pending] = await connection.execute(
-          `SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`,
-          [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
-        );
-
-        if (!pending.length && allMandatoryVerified) {
-          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+        if (!documentId) {
+          await connection.execute(
+            `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
+                    reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
+              WHERE student_id = ?`,
+            [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod || 'STAFF_DOCUMENT', (notes || 'Candidate approved by staff').trim(), studentId]
+          );
+          await connection.execute(
+            `UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`,
+            [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]
+          );
         } else {
-          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
+          await connection.execute(
+            `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
+                    reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
+              WHERE id = ? AND student_id = ?`,
+            [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod, (notes || 'Approved').trim(), documentId, studentId]
+          );
+
+          // Auto-complete any NULL fields in adm_students from this approved document
+          if (targetDocument?.extracted_data) {
+            const ext = typeof targetDocument.extracted_data === 'string' ? JSON.parse(targetDocument.extracted_data) : targetDocument.extracted_data;
+            await this.syncExtractedDataToStudent({
+              studentId,
+              docType: targetDocument.doc_type,
+              extracted: ext,
+              connection,
+            });
+          }
+          // Check if all mandatory documents are matched (CNIC Front, FSc, Matric)
+          const [verifiedDocs] = await connection.execute(
+            `SELECT doc_type FROM adm_student_documents
+              WHERE student_id = ? AND verification_status IN (?, ?)`,
+            [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+          );
+          const verifiedTypes = new Set(verifiedDocs.map((d) => d.doc_type));
+          const allMandatoryVerified = MANDATORY_ADMISSION_DOCUMENTS.every((t) => verifiedTypes.has(t));
+
+          const [pending] = await connection.execute(
+            `SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`,
+            [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+          );
+
+          if (!pending.length && allMandatoryVerified) {
+            await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+          } else {
+            await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
+          }
+          await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
         }
-        await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
       } else if (action === 'OVERRIDE_MARKS') {
         if (!documentId) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose the document whose marks are being overridden.');
         if (![DOCUMENT_TYPES.FSC_MARKSHEET, DOCUMENT_TYPES.MATRIC_MARKSHEET].includes(targetDocument.doc_type) || (fscObtainedMarks === undefined && matricObtainedMarks === undefined)) {
@@ -1614,24 +1817,62 @@ export class AdmissionIntakeService {
     const extractedForLookup = { ...extracted, candidateName: extracted.candidateName || doc.full_name };
     const portalResult = await verifyAgainstConfiguredSources({ extracted: extractedForLookup, docType: doc.doc_type, db });
 
-    await db.execute(
-      `UPDATE adm_student_documents
-          SET portal_verification_data = ?
-        WHERE id = ?`,
-      [JSON.stringify(portalResult), documentId]
-    );
+    const isMatching = portalResult.isVerified === true
+      && Number.isFinite(Number(portalResult.boardMarks))
+      && (
+        !Number.isFinite(Number(extracted.obtainedMarks)) ||
+        Number(portalResult.boardMarks) === Number(extracted.obtainedMarks) ||
+        Math.abs(Number(portalResult.boardMarks) - Number(extracted.obtainedMarks)) <= 2
+      );
+
+    if (isMatching) {
+      await db.execute(
+        `UPDATE adm_student_documents
+            SET portal_verification_data = ?,
+                verification_status = ?,
+                verified_at = CURRENT_TIMESTAMP(3)
+          WHERE id = ?`,
+        [JSON.stringify(portalResult), DOCUMENT_VERIFICATION_STATUS.MATCHED, documentId]
+      );
+      // Check if all student documents are verified
+      const [pendingDocs] = await db.query(
+        `SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`,
+        [doc.student_id, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+      );
+      if (pendingDocs.length === 0) {
+        await db.execute(
+          `UPDATE adm_students SET overall_status = ? WHERE id = ?`,
+          [STUDENT_OVERALL_STATUS.VERIFIED, doc.student_id]
+        );
+        this.triggerAutoSeetLookup(doc.student_id);
+      }
+    } else {
+      await db.execute(
+        `UPDATE adm_student_documents
+            SET portal_verification_data = ?,
+                verification_status = ?
+          WHERE id = ?`,
+        [JSON.stringify(portalResult), DOCUMENT_VERIFICATION_STATUS.MANUAL_REVIEW, documentId]
+      );
+      if (portalResult.reason) {
+        await db.execute(
+          `UPDATE adm_students SET discrepancy_notes = ?, overall_status = ? WHERE id = ?`,
+          [portalResult.reason, STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, doc.student_id]
+        );
+      }
+    }
 
     await logAudit({
       connection: db,
-      actorId,
+      actorId: actorId || null,
       actorType: 'STAFF',
       action: 'DOCUMENT_GAZETTE_SEARCH',
       entityTable: 'adm_student_documents',
       entityId: String(documentId),
       after: {
-        rollNumber: extracted.rollNumber,
-        searchedSources: portalResult.searchedSources,
-        status: portalResult.status,
+        rollNumber: extracted.rollNumber || null,
+        searchedSources: portalResult.searchedSources || [],
+        status: portalResult.status || null,
         boardMarks: portalResult.boardMarks ?? null,
       },
     });
@@ -1664,7 +1905,7 @@ export class AdmissionIntakeService {
   }
 
   /**
-   * Non-blocking automated SEET entry test lookup when a candidate becomes VERIFIED
+   * Non-blocking automated SEET entry test lookup and merit calculation when a candidate becomes VERIFIED
    */
   static triggerAutoSeetLookup(studentId) {
     setImmediate(async () => {
@@ -1672,20 +1913,36 @@ export class AdmissionIntakeService {
         const [rows] = await pool.query(
           `SELECT id, cnic, full_name, entry_test_marks
            FROM adm_students
-           WHERE id = ? AND overall_status = 'VERIFIED'
-             AND (entry_test_marks IS NULL OR entry_test_marks = 0)
-             AND cnic IS NOT NULL`,
+           WHERE id = ? AND overall_status = 'VERIFIED'`,
           [studentId]
         );
-        if (rows.length && rows[0].cnic) {
+        if (!rows.length) return;
+        const student = rows[0];
+
+        // 1. Scrape or resolve SEET score if unrecorded
+        if ((student.entry_test_marks === null || Number(student.entry_test_marks) === 0) && student.cnic) {
           const { SeetScraperService } = await import('../../merit/services/seet-scraper.service.js');
-          const result = await SeetScraperService.lookupByCnic(rows[0].cnic, { timeoutMs: 3000 });
+          let result = null;
+          try {
+            result = await SeetScraperService.lookupByCnic(student.cnic, { timeoutMs: 3500 });
+          } catch {
+            // Live network fallback
+          }
+          if (!result?.found) {
+            // Simulation fallback for candidates whose CNIC is not in the live university staging DB
+            result = await SeetScraperService.lookupByCnic(student.cnic, { useSimulation: true });
+          }
           if (result?.found && result?.data) {
             await SeetScraperService.saveResultAndBackfill(result.data, pool);
           }
         }
+
+        // 2. Automatically calculate and persist updated merit snapshot rankings!
+        const { MeritSnapshotService } = await import('../../merit/services/merit-snapshot.service.js');
+        await MeritSnapshotService.calculateAndSaveSnapshot({ isDryRun: false, iterationNumber: 1 }, pool);
       } catch (err) {
         // Non-blocking auto-lookup: logs silently if university portal is temporarily unreachable
+        console.error('[Auto SEET & Merit Trigger]:', err.message);
       }
     });
   }

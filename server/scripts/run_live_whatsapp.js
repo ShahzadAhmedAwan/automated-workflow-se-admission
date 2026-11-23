@@ -18,6 +18,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
 import path from 'node:path';
 import fs from 'node:fs';
 import { useMySQLAuthState } from '../src/core/baileys/mysql-auth-store.js';
@@ -29,12 +30,14 @@ import { normalizePhoneNumber } from '../src/modules/marketing/services/csv-pars
 
 let sock = null;
 
-async function recordWhatsAppStatus({ status, phone = null, qr = false, error = null }) {
+async function recordWhatsAppStatus({ status, phone = null, qr = false, qrDataUrl = null, qrString = null, error = null }) {
   try {
     const payload = JSON.stringify({
       status,
       phone,
       qr,
+      qrDataUrl,
+      qrString,
       error,
       updatedAt: new Date().toISOString(),
     });
@@ -75,7 +78,11 @@ async function startWhatsAppBot() {
     if (qr) {
       console.log('\n📲 QR CODE GENERATED: Scan this with your WhatsApp:');
       qrcode.generate(qr, { small: true });
-      await recordWhatsAppStatus({ status: 'NEEDS_QR', qr: true });
+      let qrDataUrl = null;
+      try {
+        qrDataUrl = await QRCode.toDataURL(qr, { margin: 2, width: 320 });
+      } catch {}
+      await recordWhatsAppStatus({ status: 'NEEDS_QR', qr: true, qrString: qr, qrDataUrl });
     }
 
     if (connection === 'close') {

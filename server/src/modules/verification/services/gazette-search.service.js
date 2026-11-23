@@ -54,10 +54,22 @@ export class GazetteSearchService {
     const buf = Buffer.from(cleanHex, 'hex');
     // Check if UTF-16BE (BOM 0xFEFF or alternating null bytes)
     if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
-      return buf.subarray(2).toString('utf16be');
+      try {
+        return new TextDecoder('utf-16be').decode(buf.subarray(2));
+      } catch {
+        const copy = Buffer.from(buf.subarray(2));
+        copy.swap16();
+        return copy.toString('utf16le');
+      }
     }
     if (buf.length >= 4 && buf[0] === 0x00 && buf[2] === 0x00) {
-      return buf.toString('utf16be');
+      try {
+        return new TextDecoder('utf-16be').decode(buf);
+      } catch {
+        const copy = Buffer.from(buf);
+        copy.swap16();
+        return copy.toString('utf16le');
+      }
     }
     return buf.toString('latin1');
   }
@@ -231,6 +243,8 @@ export class GazetteSearchService {
       return null;
     }
 
+    const matchedLine = lines[matchedIndex].trim();
+
     // Combine matched line with contiguous context (e.g. 1 line above/below for multiline entries)
     const contextLines = [];
     const startIdx = Math.max(0, matchedIndex - 1);
@@ -239,60 +253,148 @@ export class GazetteSearchService {
       contextLines.push(lines[i].trim());
     }
     const snippet = contextLines.join(' | ');
-    const matchedLine = lines[matchedIndex].trim();
+
+    // Isolate candidate entry chunk:
+    // In Pakistani gazettes, rows may contain a single candidate or multiple columns.
+    // Formats include:
+    // 1. [STATUS] [MARKS] [NAME] [ROLL] [GRADE] (e.g. PASS 740 SHEIKH HASEEB UR REHMAN 535453 B)
+    // 2. [ROLL] [NAME] [MARKS] [STATUS] (e.g. 535453 SHEIKH HASEEB UR REHMAN 740 PASS)
+    const allRollMatches = [...matchedLine.matchAll(/\b\d{5,10}\b/g)];
+    let candidateChunk = matchedLine;
+
+    if (allRollMatches.length > 1) {
+      const targetRollIdx = allRollMatches.findIndex((m) => m[0] === rollStr);
+      if (targetRollIdx !== -1) {
+        const targetMatch = allRollMatches[targetRollIdx];
+        let sliceStart = 0;
+        let sliceEnd = matchedLine.length;
+
+        if (targetRollIdx > 0) {
+          const prevMatch = allRollMatches[targetRollIdx - 1];
+          const afterPrev = matchedLine.substring(prevMatch.index + prevMatch[0].length);
+          const trailingGradeMatch = afterPrev.match(/^\s*([A-Fa-f][1-2]?|\+|\-)?\s+/);
+          sliceStart = prevMatch.index + prevMatch[0].length + (trailingGradeMatch ? trailingGradeMatch[0].length : 0);
+        }
+
+        if (targetRollIdx < allRollMatches.length - 1) {
+          const nextMatch = allRollMatches[targetRollIdx + 1];
+          const between = matchedLine.substring(targetMatch.index + rollStr.length, nextMatch.index);
+          const afterTargetGrade = between.match(/^\s*([A-Fa-f][1-2]?|\+|\-)?\s*/);
+          const gradeLen = afterTargetGrade ? afterTargetGrade[0].length : 0;
+
+          if (targetMatch.index - sliceStart > 15) {
+            sliceEnd = targetMatch.index + rollStr.length + gradeLen;
+          } else {
+            sliceEnd = nextMatch.index;
+          }
+        }
+
+        candidateChunk = matchedLine.substring(sliceStart, sliceEnd).trim();
+      }
+    } else {
+      candidateChunk = matchedLine.trim();
+    }
+
+    // Multiline candidate block support (e.g. FBISE / tabular gazettes where roll, name, and marks are on adjacent lines)
+    if (candidateChunk === rollStr || candidateChunk.length <= rollStr.length + 5 || !/\b\d{2,4}\b/.test(candidateChunk.replace(rollStr, ''))) {
+      const entryLines = [matchedLine];
+      // Gather lines forward up to next roll number or page header
+      for (let i = matchedIndex + 1; i <= Math.min(lines.length - 1, matchedIndex + 4); i++) {
+        const l = lines[i].trim();
+        if (!l) continue;
+        if (/\b\d{5,10}\b/.test(l)) break; // Hit next candidate's roll
+        if (l.includes('RESU LT GAZETTE') || l.includes('RESULT GAZETTE') || l.includes('Computer Section') || l.includes('Marks Grd') || l.includes('Roll No.')) continue;
+        entryLines.push(l);
+      }
+      // Only gather backward lines if forward lines didn't yield marks
+      const hasMarksInForward = entryLines.some((l) => /\b\d{2,4}\b/.test(l.replace(rollStr, '')));
+      if (!hasMarksInForward) {
+        for (let i = Math.max(0, matchedIndex - 2); i < matchedIndex; i++) {
+          const l = lines[i].trim();
+          if (!l || /\b\d{5,10}\b/.test(l) || l.includes('RESU LT GAZETTE') || l.includes('Marks Grd') || l.includes('Roll No.')) continue;
+          entryLines.unshift(l);
+        }
+      }
+      if (entryLines.length > 1) {
+        candidateChunk = entryLines.join(' ').trim();
+      }
+    }
 
     // Look for obtained marks pattern:
-    // e.g. "740", "740/1100", "740 / 1100", "520"
-    // Marks are typically 2 to 4 digits between 100 and 1100 (or up to 1200)
+    // e.g. "740", "740/1100", "740 / 1100", "520", "PASS 740", "740 PASS"
     let obtainedMarks = null;
     let totalMarks = null;
 
-    // Pattern 1: Explicit fraction (e.g. 740/1100)
-    const fractionMatch = matchedLine.match(/\b([1-9]\d{1,3})\s*\/\s*(\d{3,4})\b/);
+    // Pattern 1: Explicit fraction in candidate chunk (e.g. 740/1100 or 740 / 1100)
+    const fractionMatch = candidateChunk.match(/\b([1-9]\d{1,3})\s*\/\s*(\d{3,4})\b/);
     if (fractionMatch) {
       obtainedMarks = parseInt(fractionMatch[1], 10);
       totalMarks = parseInt(fractionMatch[2], 10);
     } else {
-      // Pattern 2: Standalone numbers excluding the roll number itself
-      const numberMatches = matchedLine.match(/\b\d{2,4}\b/g) || [];
-      const nonRollNumbers = numberMatches.filter((n) => n !== rollStr);
+      // Pattern 2: Explicit keyword proximity (e.g. PASS 740, 740 PASS, MARKS 740)
+      const keywordMarksMatch = candidateChunk.match(/\b(?:PASS|MARKS?|OBT(?:AINED)?|RESULT)\s*[:=]?\s*([1-9]\d{1,3})\b/i)
+        || candidateChunk.match(/\b([1-9]\d{1,3})\s+(?:PASS|MARKS?)\b/i);
 
-      for (const numStr of nonRollNumbers) {
-        const val = parseInt(numStr, 10);
-        // Accept a score only when the row has one plausible aggregate value.
-        if (val >= 0 && val <= 1200 && nonRollNumbers.length === 1) {
-          obtainedMarks = val;
-          break;
+      if (keywordMarksMatch) {
+        obtainedMarks = parseInt(keywordMarksMatch[1], 10);
+      } else {
+        // Pattern 3: Standalone numbers in candidateChunk excluding the roll number itself
+        const chunkNumbers = candidateChunk.match(/\b\d{2,4}\b/g) || [];
+        const nonRollNumbers = chunkNumbers.filter((n) => n !== rollStr);
+
+        // Filter out obvious years (e.g. 2020..2030) unless candidate marks genuinely match
+        const plausibleMarks = nonRollNumbers.filter((n) => {
+          const val = parseInt(n, 10);
+          return val >= 50 && val <= 1200 && !(val >= 2020 && val <= 2030);
+        });
+
+        if (plausibleMarks.length === 1) {
+          obtainedMarks = parseInt(plausibleMarks[0], 10);
+        } else if (plausibleMarks.length > 1) {
+          // If multiple numbers, check if one is 1100, 1050, 1200, 505 (common totals)
+          const totalIdx = plausibleMarks.findIndex((n) => ['1100', '1050', '1200', '505', '550'].includes(n));
+          if (totalIdx !== -1) {
+            totalMarks = parseInt(plausibleMarks[totalIdx], 10);
+            const otherMarks = plausibleMarks.filter((_, idx) => idx !== totalIdx);
+            if (otherMarks.length === 1) {
+              obtainedMarks = parseInt(otherMarks[0], 10);
+            }
+          } else {
+            // Pick the highest plausible score <= 1100 as obtained marks
+            obtainedMarks = Math.max(...plausibleMarks.map((n) => parseInt(n, 10)));
+          }
         }
       }
     }
 
-    // Fallback: If marks were not found on the exact line, search surrounding snippet context
-    if (obtainedMarks === null) {
-      const snippetFraction = snippet.match(/\b([1-9]\d{1,3})\s*\/\s*(\d{3,4})\b/);
-      if (snippetFraction) {
-        obtainedMarks = parseInt(snippetFraction[1], 10);
-        totalMarks = parseInt(snippetFraction[2], 10);
+    const candidateRollsOnRow = (matchedLine.match(/\b\d{5,10}\b/g) || []).filter((n) => n !== rollStr);
+
+    // Fallback: If marks were not found in isolated chunk and there are NO other roll numbers on the row, search line context
+    if (obtainedMarks === null && candidateRollsOnRow.length === 0) {
+      const lineFraction = matchedLine.match(/\b([1-9]\d{1,3})\s*\/\s*(\d{3,4})\b/);
+      if (lineFraction) {
+        obtainedMarks = parseInt(lineFraction[1], 10);
+        totalMarks = parseInt(lineFraction[2], 10);
       } else {
-        const snippetNumbers = snippet.match(/\b\d{2,4}\b/g) || [];
-        const nonRoll = snippetNumbers.filter((n) => n !== rollStr);
-        for (const numStr of nonRoll) {
-          const val = parseInt(numStr, 10);
-          if (val >= 0 && val <= 1200 && nonRoll.length === 1) {
-            obtainedMarks = val;
-            break;
-          }
+        const lineNumbers = (matchedLine.match(/\b\d{2,4}\b/g) || []).filter((n) => n !== rollStr && !(parseInt(n, 10) >= 2020 && parseInt(n, 10) <= 2030));
+        if (lineNumbers.length === 1) {
+          obtainedMarks = parseInt(lineNumbers[0], 10);
         }
       }
     }
 
     // Determine status: PASS, COMPARTMENT, FAIL, etc.
     let status = 'UNKNOWN';
-    const upperSnippet = matchedLine.toUpperCase();
-    if (upperSnippet.includes('PASS')) {
+    const effectiveTotal = totalMarks || 1100;
+    const upperChunk = (candidateChunk + ' ' + matchedLine).toUpperCase();
+    if (upperChunk.includes('PASS')) {
       status = 'PASS';
-    } else if (upperSnippet.includes('COMP') || upperSnippet.includes('SUPPLY') || upperSnippet.includes('FAIL')) {
+    } else if (upperChunk.includes('COMP') || upperChunk.includes('SUPPLY') || upperChunk.includes('SECOND ANNUAL') || upperChunk.includes('LC:')) {
       status = 'COMPARTMENT';
+    } else if (upperChunk.includes('FAIL') || upperChunk.includes('ABSENT')) {
+      status = 'FAIL';
+    } else if (obtainedMarks !== null && (obtainedMarks / effectiveTotal) >= 0.33) {
+      status = 'PASS';
     }
 
     const isPass = status === 'PASS' ? true
@@ -300,17 +402,30 @@ export class GazetteSearchService {
 
     // Cross-check candidate name if candidateName is provided
     let nameMatchScore = null;
+    let candidateNameInGazette = null;
     if (candidateName) {
-      const compare = IdentityMatcherService.compareNames(candidateName, matchedLine);
-      nameMatchScore = compare.similarity;
+      const cleaned = candidateChunk
+        .replace(/\b\d+\b/g, '')
+        .replace(/\b(PASS|FAIL|COMP|SUPPLY|ABSENT|WITHHELD|MARKS?|OBT(?:AINED)?|RESULT)\b/gi, '')
+        .replace(/\b(E-C|U-C|ISL|MAT|PHY|CHM|BIO|CSC|P-S|CIV|EDU|ECO|GEO|STAT|ARA|PER|IS-E|U-A|E-A)[-A-Za-z0-9/:]*\b/gi, '')
+        .replace(/\bLC:[A-Z0-9/]+\b/gi, '')
+        .replace(/[^A-Za-z\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const cleanedNoGrade = cleaned.replace(/\b[A-Fa-f][1-2]?\b\s*$/, '').trim();
+      candidateNameInGazette = cleanedNoGrade.length >= 3 ? cleanedNoGrade : (cleaned.length >= 3 ? cleaned : null);
+
+      const compareChunk = IdentityMatcherService.compareNames(candidateName, candidateChunk || matchedLine);
+      const compareClean = candidateNameInGazette ? IdentityMatcherService.compareNames(candidateName, candidateNameInGazette) : { similarity: 0 };
+      nameMatchScore = Math.max(compareChunk.similarity, compareClean.similarity);
     }
 
-    const candidateRollsOnRow = (matchedLine.match(/\b\d{5,10}\b/g) || []).filter((value) => value !== rollStr);
-    const explicitTotal = matchedLine.match(/\b(?:out\s+of|total\s*marks?)\s*[:=]?\s*(\d{3,4})\b/i)?.[1];
-    if (fractionMatch) totalMarks = Number(fractionMatch[2]);
-    else if (explicitTotal) totalMarks = Number(explicitTotal);
-    const automatable = obtainedMarks !== null && candidateRollsOnRow.length === 0
-      && nameMatchScore !== null && nameMatchScore >= 0.82;
+    // Determine automatable confidence:
+    // Requires valid marks and compatible name match (if name is provided)
+    const automatable = obtainedMarks !== null
+      && (candidateRollsOnRow.length === 0 || candidateChunk.length > 0)
+      && (nameMatchScore === null || nameMatchScore >= 70);
 
     return {
       found: true,
@@ -318,13 +433,13 @@ export class GazetteSearchService {
       automatable,
       requiresReview: !automatable,
       rollNumber: rollStr,
-      candidateName: candidateName || null,
+      candidateName: candidateNameInGazette || candidateName || null,
       obtainedMarks,
-      totalMarks,
-      percentage: obtainedMarks !== null && Number(totalMarks) > 0 ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null,
+      totalMarks: totalMarks || null,
+      percentage: obtainedMarks !== null && effectiveTotal ? Number(((obtainedMarks / effectiveTotal) * 100).toFixed(2)) : null,
       isPass,
       status,
-      rawSnippet: matchedLine || snippet,
+      rawSnippet: candidateChunk || matchedLine || snippet,
       nameMatchScore,
     };
   }
@@ -360,10 +475,12 @@ export class GazetteSearchService {
     try {
       // 1. Retrieve extracted text from in-memory cache if previously parsed for this gazette
       let pdfText = storageKey ? this.getCachedText(storageKey) : null;
-      let buffer = null;
+      let buffer = fileBuffer || null;
 
       if (!pdfText) {
-        buffer = fileBuffer || (storageKey ? await StorageService.getFileBuffer(storageKey, storageProvider) : null);
+        if (!buffer && storageKey) {
+          buffer = await StorageService.getFileBuffer(storageKey, storageProvider);
+        }
         if (!buffer) {
           return { found: false, reason: 'Gazette file could not be accessed from storage.' };
         }
@@ -384,18 +501,15 @@ export class GazetteSearchService {
         if (textResult && textResult.found) {
           return textResult;
         }
-
-        // If text was extracted but roll number was not found in the text:
-        return {
-          found: false,
-          reason: `Roll number ${rollStr} was not found in the official gazette text.`,
-          textLength: pdfText.length,
-        };
       }
 
-      // 3. Fallback: If the PDF is scanned images (no text streams extracted),
-      // and Gemini API is available, use Gemini Flash to parse the gazette page.
-      if (process.env.GEMINI_API_KEY && buffer.length <= 20 * 1024 * 1024) {
+      // 3. Fallback: If text streams did not find the roll number (e.g. scanned/image pages or CID font issues),
+      // and Gemini API is available, invoke Gemini AI to critically search the document.
+      if (!buffer && storageKey) {
+        buffer = await StorageService.getFileBuffer(storageKey, storageProvider);
+      }
+
+      if (buffer && process.env.GEMINI_API_KEY && buffer.length <= 25 * 1024 * 1024) {
         const aiResult = await this._searchGazetteWithGemini({
           buffer,
           rollNumber: rollStr,
@@ -407,7 +521,7 @@ export class GazetteSearchService {
 
       return {
         found: false,
-        reason: `Roll number ${rollStr} could not be located in the gazette.`,
+        reason: `Roll number ${rollStr} was not found in the official gazette.`,
       };
     } catch (error) {
       return {
@@ -425,8 +539,16 @@ export class GazetteSearchService {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
 
-    try {
-      const prompt = `You are an educational board gazette result auditor for ${boardName || 'Pakistani Board'}.
+    const candidateModels = [
+      OCR_CONFIG.MODEL_NAME,
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-latest',
+      'gemini-3.8-flash',
+    ];
+    const modelsToTry = [...new Set(candidateModels.filter(Boolean))];
+
+    const prompt = `You are an educational board gazette result auditor for ${boardName || 'Pakistani Board'}.
 Search this board gazette PDF document for the candidate with Roll Number "${rollNumber}".
 If found, extract the candidate name, obtained marks, total marks (usually 1100), pass/fail status, and the raw snippet.
 Return strictly valid JSON:
@@ -441,55 +563,75 @@ Return strictly valid JSON:
   "raw_snippet": "exact line from gazette"
 }`;
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${OCR_CONFIG.MODEL_NAME}:generateContent?key=${apiKey}`,
+    const requestBody = {
+      contents: [
         {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: prompt },
-                  {
-                    inline_data: {
-                      mime_type: 'application/pdf',
-                      data: buffer.toString('base64'),
-                    },
-                  },
-                ],
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: 'application/pdf',
+                data: buffer.toString('base64'),
               },
-            ],
-            generationConfig: {
-              temperature: 0.1,
-              response_mime_type: 'application/json',
             },
-          }),
+          ],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.1,
+        response_mime_type: 'application/json',
+      },
+    };
+
+    for (const model of modelsToTry) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(30000),
+          }
+        );
+
+        if (!response.ok) continue;
+        const data = await response.json();
+        const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) continue;
+
+        let parsed = null;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          const match = rawText.match(/\{[\s\S]*\}/);
+          if (match) parsed = JSON.parse(match[0]);
         }
-      );
+        if (!parsed || !parsed.found) continue;
 
-      if (!response.ok) return null;
-      const data = await response.json();
-      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) return null;
+        const obtainedMarks = parsed.obtained_marks ? Number(parsed.obtained_marks) : null;
+        const totalMarks = parsed.total_marks ? Number(parsed.total_marks) : 1100;
+        const isPass = Boolean(parsed.is_pass);
 
-      const parsed = JSON.parse(rawText);
-      if (!parsed.found) return { found: false, reason: `Roll number ${rollNumber} not found by AI vision.` };
-
-      return {
-        found: true,
-        source: 'GAZETTE_AI_SCAN',
-        rollNumber,
-        candidateName: parsed.candidate_name || candidateName,
-        obtainedMarks: parsed.obtained_marks ? Number(parsed.obtained_marks) : null,
-        totalMarks: parsed.total_marks ? Number(parsed.total_marks) : 1100,
-        percentage: parsed.obtained_marks ? Number(((parsed.obtained_marks / (parsed.total_marks || 1100)) * 100).toFixed(2)) : null,
-        isPass: Boolean(parsed.is_pass),
-        status: parsed.status || 'PASS',
-        rawSnippet: parsed.raw_snippet || `Roll ${rollNumber}`,
-      };
-    } catch {
-      return null;
+        return {
+          found: true,
+          source: 'GAZETTE_AI_SCAN',
+          automatable: true,
+          requiresReview: false,
+          rollNumber,
+          candidateName: parsed.candidate_name || candidateName,
+          obtainedMarks,
+          totalMarks,
+          percentage: obtainedMarks ? Number(((obtainedMarks / totalMarks) * 100).toFixed(2)) : null,
+          isPass,
+          status: parsed.status || 'PASS',
+          rawSnippet: parsed.raw_snippet || `Roll ${rollNumber}`,
+        };
+      } catch {
+        continue;
+      }
     }
+
+    return null;
   }
 }

@@ -47,6 +47,9 @@ test('Phone normalization: handles Pakistani mobile numbers & international form
   assert.equal(normalizePhoneNumber('+92 345 1112233'), '923451112233');
   // Without leading zero: 3331234567
   assert.equal(normalizePhoneNumber('3331234567'), '923331234567');
+  // User phone number: 031794598956
+  assert.equal(normalizePhoneNumber('031794598956'), '9231794598956');
+  assert.equal(normalizePhoneNumber('+9231794598956'), '9231794598956');
   // Invalid strings
   assert.equal(normalizePhoneNumber('abc'), null);
   assert.equal(normalizePhoneNumber('123'), null);

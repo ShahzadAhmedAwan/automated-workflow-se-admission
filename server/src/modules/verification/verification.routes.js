@@ -38,7 +38,7 @@ const discrepancyCsvUpload = multer({
 
 const gazetteUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => file.mimetype === 'application/pdf'
     ? cb(null, true)
     : cb(new Error('Board gazettes must be uploaded as PDF files.')),
@@ -103,6 +103,12 @@ verificationRoutes.get(
   authenticate,
   requirePermission(VERIFICATION_PERMISSIONS.DOCUMENTS_REVIEW),
   StaffVerificationController.downloadBoardGazette
+);
+verificationRoutes.post(
+  '/board-sources/:sourceId/test-roll',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.DOCUMENTS_REVIEW),
+  StaffVerificationController.testRollInGazette
 );
 
 // Get student verification dossier (side-by-side docs, OCR, portal results)
@@ -175,4 +181,12 @@ verificationRoutes.post(
   authenticate,
   requirePermission(VERIFICATION_PERMISSIONS.DOCUMENTS_REVIEW),
   StaffVerificationController.searchGazette
+);
+
+// On-demand live AI OCR extraction re-run for a marksheet or CNIC document
+verificationRoutes.post(
+  '/documents/:documentId/reprocess-ocr',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.DOCUMENTS_REVIEW),
+  StaffVerificationController.reprocessOcr
 );

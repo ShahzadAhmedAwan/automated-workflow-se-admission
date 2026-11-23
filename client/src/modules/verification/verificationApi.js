@@ -125,6 +125,17 @@ export const verificationApi = {
     return apiRequestFile(`/verification/board-sources/${sourceId}/gazette`);
   },
 
+  /**
+   * Staff: Test candidate roll number in configured gazette
+   */
+  async testRollInGazette(sourceId, rollNumber, candidateName = '') {
+    const res = await apiRequest(`/verification/board-sources/${sourceId}/test-roll`, {
+      method: 'POST',
+      body: JSON.stringify({ rollNumber, candidateName }),
+    }, true);
+    return res.data;
+  },
+
   async downloadStudentDocument(studentId, documentId) {
     return apiRequestFile(`/verification/students/${studentId}/documents/${documentId}/file`);
   },
@@ -134,6 +145,16 @@ export const verificationApi = {
    */
   async searchGazette(documentId) {
     const res = await apiRequest(`/verification/documents/${documentId}/search-gazette`, {
+      method: 'POST',
+    }, true);
+    return res.data;
+  },
+
+  /**
+   * Staff: Re-run live AI OCR on uploaded document
+   */
+  async reprocessOcr(documentId) {
+    const res = await apiRequest(`/verification/documents/${documentId}/reprocess-ocr`, {
       method: 'POST',
     }, true);
     return res.data;

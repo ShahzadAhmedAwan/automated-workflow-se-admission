@@ -11,13 +11,13 @@ export function normalizePhoneNumber(raw) {
   let digits = String(raw).replace(/\D/g, '');
   if (!digits) return null;
 
-  // Local Pakistani format: 03001234567 -> 923001234567 (11 digits starting with 0)
-  if (digits.startsWith('0') && digits.length === 11) {
-    digits = '92' + digits.slice(1);
-  } else if (digits.startsWith('00')) {
+  // Local Pakistani format: 03001234567 or 031794598956 -> 92...
+  if (digits.startsWith('00')) {
     digits = digits.slice(2);
-  } else if (digits.length === 10 && digits.startsWith('3')) {
-    // Missing country code: 3001234567 -> 923001234567
+  } else if (digits.startsWith('0') && (digits.startsWith('03') || digits.length === 11 || digits.length === 12)) {
+    digits = '92' + digits.slice(1);
+  } else if (digits.startsWith('3') && (digits.length === 10 || digits.length === 11)) {
+    // Missing country code: 3001234567 or 31794598956 -> 92...
     digits = '92' + digits;
   }
 

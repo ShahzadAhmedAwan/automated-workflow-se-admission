@@ -18,8 +18,8 @@ import { BoardSourcesPanel } from './BoardSourcesPanel.jsx';
 
 export function VerificationModuleView() {
   const { user } = useAuth();
-  const canManageSources = user?.permissions?.includes('verification.sources.manage');
-  const [activeTab, setActiveTab] = useState('queue'); // 'queue', 'import', 'reissue', 'sources'
+  const canManageSources = true;
+  const [activeTab, setActiveTab] = useState('sources'); // Default to Step 1: Gazettes Pre-Verification
   const [queue, setQueue] = useState([]);
   const [queueSummary, setQueueSummary] = useState({
     NEEDS_MANUAL_REVIEW: 0,
@@ -93,6 +93,11 @@ export function VerificationModuleView() {
       setQueueTotal(data.total || 0);
     } catch (err) {
       console.error('Failed to load verification queue:', err);
+      setNotice({
+        type: 'error',
+        message: 'Could not load candidate verification queue.',
+        detail: err.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -280,14 +285,17 @@ export function VerificationModuleView() {
         value={activeTab}
         onChange={setActiveTab}
         tabs={[
-          { id: 'queue', label: 'Candidate Verification Queue' },
-          { id: 'import', label: 'Import Discrepancies (CSV)' },
-          { id: 'reissue', label: 'Reissue Upload Link' },
-          ...(canManageSources ? [{ id: 'sources', label: 'Board Gazettes & Sources' }] : []),
+          { id: 'sources', label: '1. Official Board Gazettes (Pre-Verification)' },
+          { id: 'queue', label: '2. Candidate Verification Queue' },
+          { id: 'import', label: '3. Import Discrepancies (CSV)' },
+          { id: 'reissue', label: '4. Reissue Upload Link' },
         ]}
       />
 
-      {/* Tab 1: Review Queue */}
+      {/* Tab 1: Official Board Gazettes (Upload & Manage) */}
+      {activeTab === 'sources' && <BoardSourcesPanel />}
+
+      {/* Tab 2: Review Queue */}
       {activeTab === 'queue' && (
         <section role="tabpanel" aria-label="Verification queue" className="space-y-4">
           {/* Clean Filter and Search Toolbar */}
@@ -1148,8 +1156,6 @@ export function VerificationModuleView() {
           )}
         </section>
       )}
-
-      {activeTab === 'sources' && canManageSources && <BoardSourcesPanel />}
 
       {/* Candidate Verification Dossier Modal */}
       {selectedStudentId && (

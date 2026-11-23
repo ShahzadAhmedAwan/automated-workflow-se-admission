@@ -136,20 +136,39 @@ export class StorageService {
   }
 
   static _resolveLocalPath(storageKey) {
-    if (typeof storageKey !== 'string' || path.isAbsolute(storageKey)) throw new Error('Invalid storage key.');
-    const base = path.resolve(LOCAL_STORAGE_DIR);
-    const target = path.resolve(base, storageKey);
-    if (fs.existsSync(target)) return target;
+    if (typeof storageKey !== 'string' || !storageKey.trim() || path.isAbsolute(storageKey)) {
+      throw new Error('Invalid storage key.');
+    }
+    // Strict defense against null bytes and path traversal patterns
+    if (storageKey.includes('\0')) {
+      throw new Error('Invalid storage key: null byte detected.');
+    }
+    const segments = storageKey.split(/[/\\]/);
+    if (segments.some((seg) => seg === '..')) {
+      throw new Error('Invalid storage key: path traversal detected.');
+    }
 
-    // Check fallback in server/data/uploads or workspace root data/uploads
-    const altTarget = path.resolve(process.cwd(), 'server', 'data', 'uploads', storageKey);
-    if (fs.existsSync(altTarget)) return altTarget;
+    const candidateBases = [
+      path.resolve(LOCAL_STORAGE_DIR),
+      path.resolve(process.cwd(), 'server', 'data', 'uploads'),
+      path.resolve(process.cwd(), 'data', 'uploads'),
+    ];
 
-    const altTarget2 = path.resolve(process.cwd(), 'data', 'uploads', storageKey);
-    if (fs.existsSync(altTarget2)) return altTarget2;
+    for (const base of candidateBases) {
+      const target = path.resolve(base, storageKey);
+      if (target === base || target.startsWith(`${base}${path.sep}`)) {
+        if (fs.existsSync(target)) {
+          return target;
+        }
+      }
+    }
 
-    if (target !== base && !target.startsWith(`${base}${path.sep}`)) throw new Error('Invalid storage key.');
-    return target;
+    const defaultBase = candidateBases[0];
+    const defaultTarget = path.resolve(defaultBase, storageKey);
+    if (defaultTarget !== defaultBase && !defaultTarget.startsWith(`${defaultBase}${path.sep}`)) {
+      throw new Error('Invalid storage key: path traversal detected.');
+    }
+    return defaultTarget;
   }
 
   /**

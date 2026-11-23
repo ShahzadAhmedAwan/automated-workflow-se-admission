@@ -25,15 +25,16 @@ export class DiscrepancyParserService {
 
     return records.map((row) => {
       // Fuzzy header matching
-      const appNo = row['Application No'] || row['application_no'] || row['AppNo'] || null;
-      const cnic = row['CNIC'] || row['cnic'] || null;
-      const fullName = row['Full Name'] || row['Name'] || row['Student Name'] || row['full_name'] || '';
-      const fatherName = row['Father Name'] || row['father_name'] || null;
-      const phoneRaw = row['Phone'] || row['Mobile'] || row['Contact'] || row['phone'] || '';
-      const email = row['Email'] || row['email'] || null;
-      const fscMarks = row['FSc Marks'] || row['fsc_marks'] || row['HSSC Marks'] || null;
-      const matricMarks = row['Matric Marks'] || row['matric_marks'] || row['SSC Marks'] || null;
-      const issues = row['Issues'] || row['Missing Documents'] || row['Discrepancies'] || row['issues'] || '';
+      const appNo = row['Application No'] || row['application_no'] || row['AppNo'] || row['app_no'] || row['Application Number'] || null;
+      const cnic = row['CNIC'] || row['cnic'] || row['B-Form'] || row['BForm'] || row['b_form'] || row['National ID'] || null;
+      const fullName = row['Full Name'] || row['Name'] || row['Student Name'] || row['full_name'] || row['Applicant Name'] || row['student_name'] || '';
+      const fatherName = row['Father Name'] || row['father_name'] || row['Father'] || row['Guardian'] || null;
+      const phoneRaw = row['Phone'] || row['Mobile'] || row['Contact'] || row['phone'] || row['Phone Number'] || row['phone_number'] || row['Contact Number'] || row['WhatsApp'] || '';
+      const email = row['Email'] || row['email'] || row['Email Address'] || null;
+      const fscMarks = row['FSc Marks'] || row['fsc_marks'] || row['HSSC Marks'] || row['FSc'] || row['Inter Marks'] || null;
+      const matricMarks = row['Matric Marks'] || row['matric_marks'] || row['SSC Marks'] || row['Matric'] || null;
+      const issues = row['Issues'] || row['Missing Documents'] || row['Discrepancies'] || row['issues'] || row['missing_documents'] || '';
+      const eligibleFor = row['Program'] || row['Eligible For'] || row['eligible_for'] || row['Applied For'] || 'SE';
 
       const phoneNormalized = normalizePhoneNumber(phoneRaw);
       const mappedDocs = this.mapIssueStringToDocTypes(issues);
@@ -48,6 +49,7 @@ export class DiscrepancyParserService {
         email: email ? email.trim() : null,
         fscMarks: fscMarks ? Number(fscMarks) : null,
         matricMarks: matricMarks ? Number(matricMarks) : null,
+        eligibleFor: eligibleFor || 'SE',
         allowedDocTypes: mappedDocs,
       };
     });
@@ -114,10 +116,18 @@ export class DiscrepancyParserService {
         try {
           // Check if student exists by phone or CNIC
           let studentId = null;
-          let [existing] = await connection.execute(
-            `SELECT id, overall_status FROM adm_students WHERE phone_normalized = ? OR (cnic IS NOT NULL AND cnic = ?) LIMIT 1 FOR UPDATE`,
-            [rec.phoneNormalized, rec.cnic || '']
-          );
+          let existing = [];
+          if (rec.cnic && String(rec.cnic).trim()) {
+            [existing] = await connection.execute(
+              `SELECT id, overall_status FROM adm_students WHERE phone_normalized = ? OR cnic = ? LIMIT 1 FOR UPDATE`,
+              [rec.phoneNormalized, String(rec.cnic).trim()]
+            );
+          } else {
+            [existing] = await connection.execute(
+              `SELECT id, overall_status FROM adm_students WHERE phone_normalized = ? LIMIT 1 FOR UPDATE`,
+              [rec.phoneNormalized]
+            );
+          }
 
           if (existing.length) {
             studentId = existing[0].id;
@@ -128,6 +138,7 @@ export class DiscrepancyParserService {
                       application_no = COALESCE(?, application_no),
                       cnic = COALESCE(?, cnic),
                       email = COALESCE(?, email),
+                      eligible_for = COALESCE(?, eligible_for),
                       fsc_obtained_marks = COALESCE(?, fsc_obtained_marks),
                       matric_obtained_marks = COALESCE(?, matric_obtained_marks),
                       overall_status = ?
@@ -138,6 +149,7 @@ export class DiscrepancyParserService {
                 rec.applicationNo || null,
                 rec.cnic || null,
                 rec.email || null,
+                rec.eligibleFor || null,
                 rec.fscMarks || null,
                 rec.matricMarks || null,
                 STUDENT_OVERALL_STATUS.DOCS_REQUESTED,
@@ -148,8 +160,8 @@ export class DiscrepancyParserService {
           } else {
             const [insertResult] = await connection.execute(
               `INSERT INTO adm_students (application_no, cnic, full_name, father_name, phone_normalized, email,
-                                         fsc_obtained_marks, matric_obtained_marks, overall_status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                         eligible_for, fsc_obtained_marks, matric_obtained_marks, overall_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 rec.applicationNo || null,
                 rec.cnic || null,
@@ -157,6 +169,7 @@ export class DiscrepancyParserService {
                 rec.fatherName || null,
                 rec.phoneNormalized,
                 rec.email || null,
+                rec.eligibleFor || 'SE',
                 rec.fscMarks || null,
                 rec.matricMarks || null,
                 STUDENT_OVERALL_STATUS.DOCS_REQUESTED,

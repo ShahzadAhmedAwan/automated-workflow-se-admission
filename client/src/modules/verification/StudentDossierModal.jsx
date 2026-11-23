@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button, StatusBadge, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
-import { IconDocumentCheck, IconShield } from '../../core/icons/Icons.jsx';
+import { IconDocumentCheck, IconShield, IconAlertTriangle, IconRefresh } from '../../core/icons/Icons.jsx';
 
 export function StudentDossierModal({ studentId, isOpen, onClose, onActionComplete }) {
   const [loading, setLoading] = useState(true);
@@ -13,6 +13,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
   const [reviewMethod, setReviewMethod] = useState('STAFF_DOCUMENT');
   const [reviewNotes, setReviewNotes] = useState('');
   const [searchingGazetteDocId, setSearchingGazetteDocId] = useState(null);
+  const [reprocessingDocId, setReprocessingDocId] = useState(null);
   const [timelineExpanded, setTimelineExpanded] = useState(true);
 
   // Production-grade inline feedback & modal states
@@ -69,14 +70,32 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
     }
   }
 
+  async function handleReprocessOcr(documentId) {
+    setReprocessingDocId(documentId);
+    setNotice(null);
+    try {
+      const result = await verificationApi.reprocessOcr(documentId);
+      setNotice({
+        type: 'success',
+        message: 'Live AI OCR Extraction Complete',
+        detail: `Successfully parsed document using Gemini AI (${result.model || 'Gemini Flash'}).`,
+      });
+      await loadDossier(true);
+    } catch (err) {
+      setNotice({ type: 'error', message: 'Live OCR extraction failed.', detail: err.message });
+    } finally {
+      setReprocessingDocId(null);
+    }
+  }
+
   useEffect(() => {
     loadDossier();
   }, [studentId, isOpen]);
 
-  // Auto-poll if any document is still in PENDING OCR state
+  // Auto-poll if any document is still in PENDING or OCR_PROCESSING state
   useEffect(() => {
     if (!dossier?.documents) return;
-    const hasPending = dossier.documents.some((d) => d.verification_status === 'PENDING');
+    const hasPending = dossier.documents.some((d) => d.verification_status === 'PENDING' || d.verification_status === 'OCR_PROCESSING');
     if (!hasPending) return;
 
     const interval = setInterval(() => {
@@ -320,13 +339,19 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
             </span>
             <div>
               <h2 className="text-sm font-bold text-slate-900">
-                {student ? `${student.full_name} — Verification Dossier` : 'Loading Dossier…'}
+                {student ? `${student.full_name} — Verification Dossier` : loading ? 'Loading Dossier…' : 'Verification Dossier'}
               </h2>
-              <p className="text-[11px] text-slate-500">
-                {student?.application_no ? `App #${student.application_no}` : ''} | CNIC: {student?.cnic || 'N/A'} | Phone: {student?.phone_normalized}
-                {student?.email ? ` | Email: ${student.email}` : ''}
-                {student?.city ? ` | City: ${student.city}` : ''}
-              </p>
+              {student ? (
+                <p className="text-[11px] text-slate-500">
+                  {student.application_no ? `App #${student.application_no}` : ''} | CNIC: {student.cnic || 'N/A'} | Phone: {student.phone_normalized || 'N/A'}
+                  {student.email ? ` | Email: ${student.email}` : ''}
+                  {student.city ? ` | City: ${student.city}` : ''}
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-400">
+                  {loading ? 'Retrieving candidate records…' : 'Candidate dossier unavailable'}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -360,6 +385,24 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
             <div className="grid place-content-center py-16 text-slate-400">
               <span className="mx-auto size-7 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
               <p className="mt-3 text-xs">Retrieving candidate records and OCR transcripts…</p>
+            </div>
+          ) : !dossier ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
+              <div className="grid size-12 place-items-center rounded-full bg-rose-50 text-rose-600 mb-3">
+                <IconAlertTriangle className="size-6" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-800">Could not load candidate verification dossier</h3>
+              <p className="mt-1 max-w-md text-xs text-slate-500">
+                The candidate record or documents could not be retrieved from the server. Ensure that the API server is running (<code className="font-mono text-slate-700 bg-slate-100 px-1 py-0.5 rounded">npm run dev:server</code>) and try again.
+              </p>
+              <div className="mt-4 flex items-center gap-2">
+                <Button variant="primary" size="sm" onClick={() => loadDossier(false)}>
+                  Retry Loading
+                </Button>
+                <Button variant="subtle" size="sm" onClick={onClose}>
+                  Close
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="space-y-6">
@@ -573,7 +616,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                   documents.map((doc) => {
                     const ocr = doc.extractedData || (typeof doc.extracted_data === 'string' ? JSON.parse(doc.extracted_data) : doc.extracted_data) || {};
                     const portal = doc.portalVerificationData || {};
-                    const isPending = doc.verification_status === 'PENDING';
+                    const isPending = doc.verification_status === 'PENDING' || doc.verification_status === 'OCR_PROCESSING';
                     const isFsc = doc.doc_type === 'FSC_MARKSHEET';
                     const isMatric = doc.doc_type === 'MATRIC_MARKSHEET';
                     const isMarksheet = isFsc || isMatric;
@@ -586,11 +629,13 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                           <span className="text-xs font-bold text-slate-800">{doc.doc_type.replace(/_/g, ' ')}</span>
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
-                              doc.verification_status === 'MATCHED'
+                              doc.verification_status === 'MATCHED' || doc.verification_status === 'PORTAL_VERIFIED'
                                 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : doc.verification_status === 'PENDING'
+                                : isPending
                                   ? 'bg-amber-50 text-amber-800 border border-amber-200 animate-pulse'
-                                  : 'bg-slate-100 text-slate-700'
+                                  : doc.verification_status === 'MANUAL_REVIEW'
+                                    ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                                    : 'bg-slate-100 text-slate-700'
                             }`}>
                               {doc.verification_status}
                             </span>
@@ -615,22 +660,50 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                         <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                           {/* Left: OCR Extracted Fields */}
                           <div className="rounded-md border border-slate-100 bg-slate-50/60 p-3 text-xs space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <p className="font-bold text-slate-700 mb-0">AI OCR Extracted Data</p>
-                              {ocr.source && (
-                                <span className="text-[10px] font-mono text-slate-400">({ocr.source})</span>
-                              )}
+                            <div className="flex items-center justify-between pb-1.5 mb-1 border-b border-slate-200">
+                              <div className="flex items-center gap-1.5">
+                                <p className="font-bold text-slate-800 mb-0">AI OCR Extracted Data</p>
+                                {ocr.source && (
+                                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                                    ocr.source === 'MOCK' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-emerald-100 text-emerald-800'
+                                  }`}>
+                                    {ocr.source === 'MOCK' ? 'MOCK DATA' : ocr.source}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                disabled={reprocessingDocId === (doc.document_id || doc.id) || doc.verification_status === 'OCR_PROCESSING'}
+                                onClick={() => handleReprocessOcr(doc.document_id || doc.id)}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 border border-blue-200 bg-blue-50/70 hover:bg-blue-100 px-2 py-0.5 rounded cursor-pointer transition disabled:opacity-50"
+                                title="Run live Gemini AI OCR on this uploaded document"
+                              >
+                                <IconRefresh className={`size-3 ${reprocessingDocId === (doc.document_id || doc.id) ? 'animate-spin' : ''}`} />
+                                <span>{reprocessingDocId === (doc.document_id || doc.id) ? 'Extracting…' : 'Re-run Live OCR'}</span>
+                              </button>
                             </div>
 
                             {isPending ? (
-                              <div className="flex items-center gap-2.5 rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                                <span className="size-3.5 animate-spin rounded-full border-2 border-amber-400 border-t-amber-900" />
-                                <div>
+                              <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-amber-900 space-y-2">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="size-3.5 animate-spin rounded-full border-2 border-amber-500 border-t-amber-900" />
                                   <strong className="text-xs">Extraction in Progress</strong>
-                                  <p className="mb-0 mt-0.5 text-[11px] text-amber-800">
-                                    Neural transcript analysis is reading this document. This view updates automatically.
-                                  </p>
                                 </div>
+                                <p className="mb-0 text-[11px] text-amber-800 leading-relaxed">
+                                  Neural transcript analysis is reading this document. If this takes longer than expected, you can inspect the original file directly and perform a manual review below.
+                                </p>
+                              </div>
+                            ) : ocr.processingError ? (
+                              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 space-y-1">
+                                <strong className="font-semibold flex items-center gap-1.5">
+                                  <span>⚠️</span> OCR Extraction Incomplete
+                                </strong>
+                                <p className="mb-0 text-[11px] text-rose-700">
+                                  {ocr.processingError}
+                                </p>
+                                <p className="mb-0 text-[11px] text-slate-600 font-medium pt-1">
+                                  Use the <em>View original</em> button above to inspect the document and enter candidate marks manually below.
+                                </p>
                               </div>
                             ) : doc.doc_type === 'CNIC_FRONT' || doc.doc_type === 'CNIC_BACK' ? (
                               <>
@@ -770,6 +843,38 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                     {doc.verification_status === 'MATCHED' ? 'VERIFIED MATCH' : 'PENDING REVIEW'}
                                   </strong>
                                 </div>
+                                {doc.verification_status === 'MANUAL_REVIEW' && student?.discrepancy_notes && (
+                                  <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                                    <strong>Reason:</strong> {student.discrepancy_notes}
+                                  </div>
+                                )}
+                              </>
+                            ) : doc.doc_type === 'DOMICILE' ? (
+                              <>
+                                <p className="font-bold text-slate-700">Domicile Residence Check</p>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Applicant Name:</span>
+                                  <strong className="text-slate-800">{student?.full_name || '—'}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Extracted Domicile City/District:</span>
+                                  <strong className="text-slate-800 font-bold">{ocr.district || ocr.city || '—'}</strong>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-500">Student City in Database:</span>
+                                  <strong className="text-blue-800 font-bold">{student?.city || 'Not recorded'}</strong>
+                                </div>
+                                <div className="mt-2 pt-1 border-t border-slate-200">
+                                  <span className="text-slate-500">Domicile Status: </span>
+                                  <strong className={doc.verification_status === 'MATCHED' ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>
+                                    {doc.verification_status === 'MATCHED' ? 'VERIFIED MATCH' : 'PENDING REVIEW'}
+                                  </strong>
+                                </div>
+                                {doc.verification_status === 'MANUAL_REVIEW' && student?.discrepancy_notes && (
+                                  <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                                    <strong>Reason:</strong> {student.discrepancy_notes}
+                                  </div>
+                                )}
                               </>
                             ) : (
                               <>
@@ -838,11 +943,11 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                   {ocr?.rollNumber && (
                                     <button
                                       type="button"
-                                      disabled={searchingGazetteDocId === doc.document_id}
-                                      onClick={() => handleSearchGazette(doc.document_id)}
+                                      disabled={searchingGazetteDocId === (doc.document_id || doc.id)}
+                                      onClick={() => handleSearchGazette(doc.document_id || doc.id)}
                                       className="mt-2 inline-flex items-center rounded border border-blue-600 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 cursor-pointer"
                                     >
-                                      {searchingGazetteDocId === doc.document_id ? 'Checking official sources…' : 'Run official result checks'}
+                                      {searchingGazetteDocId === (doc.document_id || doc.id) ? 'Checking official sources…' : 'Run official result checks'}
                                     </button>
                                   )}
                                   {Array.isArray(portal.searchedSources) && portal.searchedSources.length > 0 && (

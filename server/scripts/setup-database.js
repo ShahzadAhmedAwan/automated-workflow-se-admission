@@ -119,6 +119,19 @@ try {
         await connection.query(`ALTER TABLE adm_students ADD COLUMN quota_category VARCHAR(80) NOT NULL DEFAULT 'OPEN_MERIT' AFTER dob`);
         console.info('Added quota_category column to adm_students');
       }
+
+      const [tokenCols] = await connection.query(`SHOW COLUMNS FROM adm_intake_tokens`);
+      const tokenColNames = tokenCols.map((c) => c.Field.toLowerCase());
+      if (!tokenColNames.includes('raw_token')) {
+        await connection.query(`ALTER TABLE adm_intake_tokens ADD COLUMN raw_token VARCHAR(512) NULL AFTER token_hash`);
+        console.info('Added raw_token column to adm_intake_tokens');
+      } else {
+        await connection.query(`ALTER TABLE adm_intake_tokens MODIFY COLUMN raw_token VARCHAR(512) NULL`);
+      }
+      if (!tokenColNames.includes('reminder_sent_at')) {
+        await connection.query(`ALTER TABLE adm_intake_tokens ADD COLUMN reminder_sent_at DATETIME(3) NULL AFTER expires_at`);
+        console.info('Added reminder_sent_at column to adm_intake_tokens');
+      }
     } catch {
       // Table might not exist yet if fresh install
     }

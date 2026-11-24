@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button, StatusBadge, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
-import { IconDocumentCheck, IconShield, IconAlertTriangle, IconRefresh } from '../../core/icons/Icons.jsx';
+import { IconDocumentCheck, IconShield, IconAlertTriangle, IconRefresh, IconCheck, IconClose } from '../../core/icons/Icons.jsx';
 
 export function StudentDossierModal({ studentId, isOpen, onClose, onActionComplete }) {
   const [loading, setLoading] = useState(true);
@@ -339,7 +339,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
             </span>
             <div>
               <h2 className="text-sm font-bold text-slate-900">
-                {student ? `${student.full_name} — Verification Dossier` : loading ? 'Loading Dossier…' : 'Verification Dossier'}
+                {student ? `${student.full_name} — Verification Dossier` : loading ? 'Loading Dossier...' : 'Verification Dossier'}
               </h2>
               {student ? (
                 <p className="text-[11px] text-slate-500">
@@ -349,7 +349,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                 </p>
               ) : (
                 <p className="text-[11px] text-slate-400">
-                  {loading ? 'Retrieving candidate records…' : 'Candidate dossier unavailable'}
+                  {loading ? 'Retrieving candidate records...' : 'Candidate dossier unavailable'}
                 </p>
               )}
             </div>
@@ -359,16 +359,17 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
               type="button"
               onClick={() => loadDossier(false)}
               disabled={loading}
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
               Refresh
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md p-1.5 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700 cursor-pointer"
+              className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+              aria-label="Close dossier"
             >
-              ✕
+              <IconClose className="size-4" />
             </button>
           </div>
         </div>
@@ -384,7 +385,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
           {loading ? (
             <div className="grid place-content-center py-16 text-slate-400">
               <span className="mx-auto size-7 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
-              <p className="mt-3 text-xs">Retrieving candidate records and OCR transcripts…</p>
+              <p className="mt-3 text-xs">Retrieving candidate records and OCR transcripts...</p>
             </div>
           ) : !dossier ? (
             <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
@@ -408,29 +409,29 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
             <div className="space-y-6">
               {/* Summary Cards */}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-2xs">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Declared FSc</span>
                   <p className="mt-1 text-base font-bold text-slate-900">{student?.fsc_obtained_marks || '—'} / 1100</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-2xs">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Declared Matric</span>
                   <p className="mt-1 text-base font-bold text-slate-900">{student?.matric_obtained_marks || '—'} / 1100</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-2xs">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Status</span>
                   <p className="mt-1 text-xs font-bold text-blue-700">{student?.overall_status}</p>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 shadow-2xs">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Documents</span>
                   <p className="mt-1 text-base font-bold text-slate-900">{documents.length} Uploaded</p>
                 </div>
               </div>
 
               {/* Program Eligibility & Academic Background */}
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-xs text-blue-900">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-xs text-blue-900">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-blue-800">Program Eligibility:</span>
-                  <span className="inline-flex items-center rounded-md bg-blue-600 px-2.5 py-0.5 text-xs font-bold text-white shadow-xs">
+                  <span className="inline-flex items-center rounded-md bg-blue-600 px-2.5 py-0.5 text-xs font-bold text-white shadow-2xs">
                     {student?.eligible_for || 'SE, SET, CET'}
                   </span>
                 </div>
@@ -463,8 +464,18 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                       : 'border-amber-200 bg-amber-50/70 text-amber-900'
                   }`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-bold flex items-center gap-1.5">
-                        {isCandidateOverallVerified ? '✓ Qualified for Module 4 Merit Calculations' : '⚠ Action Required for Module 4 Merit Ranking'}
+                      <div className="font-bold flex items-center gap-2">
+                        {isCandidateOverallVerified ? (
+                          <>
+                            <IconCheck className="size-4 text-emerald-600 shrink-0" />
+                            <span>Qualified for Merit Calculations</span>
+                          </>
+                        ) : (
+                          <>
+                            <IconAlertTriangle className="size-4 text-amber-600 shrink-0" />
+                            <span>Action Required for Merit Calculations</span>
+                          </>
+                        )}
                       </div>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                         isCandidateOverallVerified ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
@@ -489,7 +500,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                 : 'border-amber-300 bg-white text-amber-900 shadow-2xs'
                             }`}
                           >
-                            <span>{isDone ? '✓' : '○'}</span>
+                            <span className={`size-1.5 rounded-full ${isDone ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                             <span>{m.label}</span>
                             <span className="text-[10px] opacity-75">({isDone ? 'Verified' : 'Pending'})</span>
                           </span>
@@ -530,7 +541,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
               {/* Cross-Document Identity & Fuzzy Name Matching Analysis */}
               {dossier?.identityCrossCheck && dossier.identityCrossCheck.totalComparisons > 0 && (
-                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
                       <span className="grid size-7 place-items-center rounded-md bg-blue-50 text-blue-700">
@@ -564,7 +575,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                     {dossier.identityCrossCheck.comparisons.map((item, idx) => (
                       <div
                         key={idx}
-                        className={`rounded-md border p-2.5 text-xs ${
+                        className={`rounded-lg border p-2.5 text-xs ${
                           item.score >= 90
                             ? 'border-emerald-100 bg-emerald-50/40'
                             : item.score >= 75
@@ -590,7 +601,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                           <span className="font-medium text-slate-800 truncate max-w-[45%]" title={item.nameA}>
                             "{item.nameA}"
                           </span>
-                          <span className="text-slate-400">⟷</span>
+                          <span className="text-slate-400 text-[10px] font-semibold">vs</span>
                           <span className="font-medium text-slate-800 truncate max-w-[45%]" title={item.nameB}>
                             "{item.nameB}"
                           </span>
@@ -609,7 +620,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Document Transcripts & OCR Analysis</h3>
 
                 {documents.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                  <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
                     No documents uploaded yet by this candidate.
                   </p>
                 ) : (
@@ -624,7 +635,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                     const hasMarksDiscrepancy = isMarksheet && ocr.obtainedMarks !== null && ocr.obtainedMarks !== undefined && declaredMarks !== null && Number(ocr.obtainedMarks) !== Number(declaredMarks);
 
                     return (
-                      <div key={doc.document_id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-xs">
+                      <div key={doc.document_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                         <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                           <span className="text-xs font-bold text-slate-800">{doc.doc_type.replace(/_/g, ' ')}</span>
                           <div className="flex items-center gap-2">
@@ -659,7 +670,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
                         <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                           {/* Left: OCR Extracted Fields */}
-                          <div className="rounded-md border border-slate-100 bg-slate-50/60 p-3 text-xs space-y-1.5">
+                          <div className="rounded-lg border border-slate-200/80 bg-slate-50/60 p-3.5 text-xs space-y-1.5">
                             <div className="flex items-center justify-between pb-1.5 mb-1 border-b border-slate-200">
                               <div className="flex items-center gap-1.5">
                                 <p className="font-bold text-slate-800 mb-0">AI OCR Extracted Data</p>
@@ -679,7 +690,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                 title="Run live Gemini AI OCR on this uploaded document"
                               >
                                 <IconRefresh className={`size-3 ${reprocessingDocId === (doc.document_id || doc.id) ? 'animate-spin' : ''}`} />
-                                <span>{reprocessingDocId === (doc.document_id || doc.id) ? 'Extracting…' : 'Re-run Live OCR'}</span>
+                                <span>{reprocessingDocId === (doc.document_id || doc.id) ? 'Extracting...' : 'Re-run Live OCR'}</span>
                               </button>
                             </div>
 
@@ -695,8 +706,9 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                               </div>
                             ) : ocr.processingError ? (
                               <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 space-y-1">
-                                <strong className="font-semibold flex items-center gap-1.5">
-                                  <span>⚠️</span> OCR Extraction Incomplete
+                                <strong className="font-semibold flex items-center gap-1.5 text-rose-700">
+                                  <IconAlertTriangle className="size-3.5 text-rose-600 shrink-0" />
+                                  <span>OCR Extraction Incomplete</span>
                                 </strong>
                                 <p className="mb-0 text-[11px] text-rose-700">
                                   {ocr.processingError}
@@ -903,7 +915,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                         })}
                                         className="rounded bg-amber-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-amber-700 disabled:opacity-50 cursor-pointer shadow-xs"
                                       >
-                                        {actionLoading ? 'Updating…' : `Use Marksheet Score (${ocr.obtainedMarks}) to Override`}
+                                        {actionLoading ? 'Updating...' : `Use Marksheet Score (${ocr.obtainedMarks}) to Override`}
                                       </button>
                                       <button
                                         type="button"
@@ -918,7 +930,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                         }}
                                         className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
                                       >
-                                        Custom Edit…
+                                        Custom Edit...
                                       </button>
                                     </div>
                                   </div>
@@ -947,7 +959,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                       onClick={() => handleSearchGazette(doc.document_id || doc.id)}
                                       className="mt-2 inline-flex items-center rounded border border-blue-600 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50 cursor-pointer"
                                     >
-                                      {searchingGazetteDocId === (doc.document_id || doc.id) ? 'Checking official sources…' : 'Run official result checks'}
+                                      {searchingGazetteDocId === (doc.document_id || doc.id) ? 'Checking official sources...' : 'Run official result checks'}
                                     </button>
                                   )}
                                   {Array.isArray(portal.searchedSources) && portal.searchedSources.length > 0 && (
@@ -973,15 +985,15 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                 </div>
 
                                 {doc.boardSource?.sourceType === 'PORTAL_URL' && (
-                                  <a href={doc.boardSource.resultUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex font-semibold text-blue-700 hover:underline">
-                                    Open {doc.boardSource.boardName} result page ↗
+                                  <a href={doc.boardSource.resultUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline">
+                                    <span>Open {doc.boardSource.boardName} result page</span>
                                   </a>
                                 )}
                                 {doc.boardSource?.sourceType === 'GAZETTE' && (
                                   <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
-                                      <button type="button" onClick={() => openGazette(doc.boardSource.id)} className="inline-flex font-semibold text-blue-700 hover:underline text-xs">
-                                        Open gazette: {doc.boardSource.gazetteFilename} ↗
+                                      <button type="button" onClick={() => openGazette(doc.boardSource.id)} className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline text-xs cursor-pointer">
+                                        <span>Open gazette: {doc.boardSource.gazetteFilename}</span>
                                       </button>
                                     </div>
 
@@ -1007,7 +1019,7 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                                             })}
                                             className="mt-1.5 block rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:opacity-50 cursor-pointer shadow-xs"
                                           >
-                                            {actionLoading ? 'Updating…' : `Use Official Gazette Score (${portal.boardMarks}) to Override`}
+                                            {actionLoading ? 'Updating...' : `Use Official Gazette Score (${portal.boardMarks}) to Override`}
                                           </button>
                                         )}
                                       </div>
@@ -1035,19 +1047,19 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                 )}
               </div>
 
-              <section className="rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+              <section className="rounded-xl border border-blue-200 bg-blue-50/30 p-4">
                 <h4 className="m-0 text-xs font-bold text-slate-800">Record your review</h4>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="text-xs font-medium text-slate-700">
                     Document
-                    <select value={selectedDocumentId} onChange={(event) => setSelectedDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3">
+                    <select value={selectedDocumentId} onChange={(event) => setSelectedDocumentId(event.target.value)} className="mt-1 block min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-slate-800 focus:border-blue-600 focus:outline-none">
                       <option value="">Select a document</option>
                       {documents.map((document) => <option key={document.document_id} value={document.document_id}>{document.doc_type.replace(/_/g, ' ')} · {document.verification_status}</option>)}
                     </select>
                   </label>
                   <label className="text-xs font-medium text-slate-700">
                     Evidence checked
-                    <select value={reviewMethod} onChange={(event) => setReviewMethod(event.target.value)} className="mt-1 block min-h-10 w-full rounded-md border border-slate-300 bg-white px-3">
+                    <select value={reviewMethod} onChange={(event) => setReviewMethod(event.target.value)} className="mt-1 block min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-slate-800 focus:border-blue-600 focus:outline-none">
                       <option value="STAFF_DOCUMENT">Original document</option>
                       <option value="STAFF_PORTAL">Official board portal</option>
                       <option value="STAFF_GAZETTE">Board gazette</option>
@@ -1055,13 +1067,13 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                   </label>
                   <label className="text-xs font-medium text-slate-700 sm:col-span-2">
                     Review note
-                    <textarea value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} maxLength={1000} rows={2} placeholder="Record what you checked and the result." className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-normal" />
+                    <textarea value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} maxLength={1000} rows={2} placeholder="Record what you checked and the result." className="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-800 font-normal focus:border-blue-600 focus:outline-none" />
                   </label>
                 </div>
               </section>
 
               {/* Audit Trail & Lifecycle Timeline */}
-              <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+              <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                 <div
                   className="flex items-center justify-between cursor-pointer select-none"
                   onClick={() => setTimelineExpanded(!timelineExpanded)}
@@ -1074,8 +1086,8 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
                       {(dossier?.timeline || []).length} events
                     </span>
                   </div>
-                  <span className="text-xs text-blue-700 font-semibold hover:underline">
-                    {timelineExpanded ? '▲ Hide Timeline' : '▼ Expand Timeline'}
+                  <span className="text-xs text-blue-600 font-medium hover:underline">
+                    {timelineExpanded ? 'Hide timeline' : 'View timeline'}
                   </span>
                 </div>
 
@@ -1134,36 +1146,36 @@ export function StudentDossierModal({ studentId, isOpen, onClose, onActionComple
 
               {/* Override Inputs (toggled) */}
               {showOverrideInputs && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 text-xs">
+                <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 text-xs">
                   <h4 className="font-bold text-blue-900">Manual Marks Override</h4>
-                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div className="mt-3 grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-slate-600">Verified FSc Marks</label>
+                      <label className="block text-slate-600 font-medium">Verified FSc Marks</label>
                       <input
                         type="number"
                         value={overrideMarks.fsc}
                         onChange={(e) => setOverrideMarks((prev) => ({ ...prev, fsc: e.target.value }))}
-                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-600">Verified Matric Marks</label>
+                      <label className="block text-slate-600 font-medium">Verified Matric Marks</label>
                       <input
                         type="number"
                         value={overrideMarks.matric}
                         onChange={(e) => setOverrideMarks((prev) => ({ ...prev, matric: e.target.value }))}
-                        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
                       />
                     </div>
                   </div>
                   <div className="mt-3">
-                    <label className="block text-slate-600">Audit Justification Notes</label>
+                    <label className="block text-slate-600 font-medium">Audit Justification Notes</label>
                     <input
                       type="text"
                       value={reviewNotes}
                       onChange={(e) => setReviewNotes(e.target.value)}
                       placeholder="e.g. Verified with original FBISE gazette copy"
-                      className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs"
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-800 focus:border-blue-600 focus:outline-none"
                     />
                   </div>
                   <div className="mt-3 flex gap-2">

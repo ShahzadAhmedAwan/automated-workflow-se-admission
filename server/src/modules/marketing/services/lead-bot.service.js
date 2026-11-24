@@ -324,7 +324,7 @@ export class LeadBotService {
     const greeting = isUpdated
       ? `Your details have been successfully updated, *${fullName || 'Candidate'}*.`
       : `Congratulations *${fullName || 'Candidate'}*,\n\nYour admission interest for the Department of Software Engineering at UAJK has been successfully recorded.`;
-    const summaryTitle = isUpdated ? "*Updated Application Summary for Review:*" : "*Application Summary for Review:*";
+    const summaryTitle = isUpdated ? "*Updated Application Summary:*" : "*Application Summary:*";
 
     return (
       `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
@@ -334,12 +334,11 @@ export class LeadBotService {
       `${summaryTitle}\n` +
       `- Candidate: ${fullName || 'Candidate'}\n` +
       `- Father's Name: ${fatherName || 'On Record'}\n` +
-      `- CNIC/B-Form: ${cnic || 'On Record'}\n` +
+      `- CNIC / B-Form: ${cnic || 'On Record'}\n` +
       `- Email: ${email || 'On Record'}\n` +
       `- FSc Marks: ${marks || 'Recorded'}\n\n` +
-      `⚠️ *Please review your details above carefully.*\n` +
-      `If you made a mistake or want to make a correction (for example reply *"correction krni hai"*, *"can I write my name again"*, or tell us what to update), you can do so now!\n\n` +
-      `⏳ *Next Step:*\n` +
+      `If any correction, tell us.\n\n` +
+      `*Next Step:*\n` +
       `Your official document upload portal link will be sent to you in 1 minute.\n\n` +
       `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime!`
     );

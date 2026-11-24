@@ -153,7 +153,7 @@ export function App() {
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-slate-200 bg-white pb-4 transition-all duration-200 ${sidebarCollapsed ? 'w-[256px] px-3 lg:w-[72px] lg:px-2' : 'w-[256px] px-3'} lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full'}`}
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-slate-200/90 bg-white pb-4 shadow-[8px_0_30px_rgba(45,77,128,0.025)] transition-all duration-200 ${sidebarCollapsed ? 'w-[256px] px-3 lg:w-[72px] lg:px-2' : 'w-[256px] px-3'} lg:translate-x-0 ${mobileNavOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full'}`}
         aria-label="Main navigation"
       >
         <div className={`flex h-16 shrink-0 items-center border-b border-slate-100 ${sidebarCollapsed ? 'justify-center px-2' : 'gap-2.5 px-4'}`}>

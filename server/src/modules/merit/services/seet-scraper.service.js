@@ -76,11 +76,20 @@ export class SeetScraperService {
           let marksObtained = null;
           let totalMarks = 100;
           let status = null;
+          let detectedPhase = null;
 
           for (const [k, v] of Object.entries(kvPairs)) {
             if (k.includes('father')) {
               fatherName = v;
-            } else if (k.includes('name') || k.includes('applicant') || k.includes('candidate')) {
+            } else if (k.includes('phase')) {
+              detectedPhase = SeetScraperService.normalizePhase(v);
+            } else if (
+              (k === 'name' || k.includes('applicant') || k.includes('candidate')) &&
+              !k.includes('father') &&
+              !k.includes('#') &&
+              !k.includes('id') &&
+              !k.includes('no')
+            ) {
               candidateName = v;
             } else if (k.includes('roll')) {
               rollNo = v;
@@ -95,12 +104,17 @@ export class SeetScraperService {
             }
           }
 
+          if (!detectedPhase && rollNo) {
+            detectedPhase = SeetScraperService.normalizePhase(rollNo);
+          }
+
           if (marksObtained !== null) {
             return {
               cnic: targetCnic || tableCnic,
               rollNo,
               candidateName,
               fatherName,
+              phase: detectedPhase,
               marksObtained,
               totalMarks,
               percentage: totalMarks > 0 ? (marksObtained / totalMarks) * 100 : 0,
@@ -139,16 +153,31 @@ export class SeetScraperService {
         let colObtained = -1;
         let colTotal = -1;
         let colStatus = -1;
+        let colPhase = -1;
 
         headers.forEach((h, idx) => {
-          if (h.includes('cnic') || h.includes('b-form')) colCnic = idx;
-          else if (h.includes('roll')) colRoll = idx;
-          else if (h.includes('father')) colFather = idx;
-          else if ((h.includes('name') || h.includes('applicant') || h.includes('candidate')) && colName === -1) colName = idx;
-          else if (h.includes('obtained') || (h.includes('marks') && !h.includes('total'))) {
+          if (h.includes('cnic') || h.includes('b-form')) {
+            colCnic = idx;
+          } else if (h.includes('roll')) {
+            colRoll = idx;
+          } else if (h.includes('father')) {
+            colFather = idx;
+          } else if (h.includes('phase')) {
+            colPhase = idx;
+          } else if (h.includes('applicant#') || h.includes('application#') || h.includes('applicant no') || h.includes('applicant id')) {
+            // Ignore application / applicant ID numbers
+          } else if (
+            (h === 'name' || h.includes('student name') || h.includes('candidate name') || h.includes('applicant name') || (h.includes('name') && !h.includes('father') && !h.includes('phase'))) &&
+            colName === -1
+          ) {
+            colName = idx;
+          } else if (h.includes('obtained') || (h.includes('marks') && !h.includes('total'))) {
             if (colObtained === -1) colObtained = idx;
-          } else if (h.includes('total') || h.includes('max')) colTotal = idx;
-          else if (h.includes('status') || h.includes('result')) colStatus = idx;
+          } else if (h.includes('total') || h.includes('max')) {
+            colTotal = idx;
+          } else if (h.includes('status') || h.includes('result')) {
+            colStatus = idx;
+          }
         });
 
         for (let r = headerRowIndex + 1; r < rows.length; r++) {
@@ -174,6 +203,14 @@ export class SeetScraperService {
             let fatherName = colFather !== -1 ? cells[colFather] : null;
             let marksObtained = null;
             let totalMarks = 100;
+
+            let detectedPhase = null;
+            if (colPhase !== -1 && cells[colPhase]) {
+              detectedPhase = SeetScraperService.normalizePhase(cells[colPhase]);
+            }
+            if (!detectedPhase && rollNo) {
+              detectedPhase = SeetScraperService.normalizePhase(rollNo);
+            }
 
             if (colObtained !== -1 && cells[colObtained]) {
               const num = parseFloat(cells[colObtained]);
@@ -202,6 +239,7 @@ export class SeetScraperService {
                 rollNo,
                 candidateName,
                 fatherName,
+                phase: detectedPhase,
                 marksObtained,
                 totalMarks,
                 percentage: totalMarks > 0 ? (marksObtained / totalMarks) * 100 : 0,
@@ -221,15 +259,23 @@ export class SeetScraperService {
       const rollMatch = plainText.match(/(?:Roll\s*No|Roll\s*Number|Form\s*No)\s*[:=]?\s*([A-Za-z0-9-]+)/i);
       const nameMatch = plainText.match(/(?:Candidate\s*Name|Student\s*Name|Applicant\s*Name)\s*[:=]?\s*([A-Za-z\s.]{3,40})/i);
       const fatherMatch = plainText.match(/(?:Father'?s?\s*Name)\s*[:=]?\s*([A-Za-z\s.]{3,40})/i);
+      const phaseMatch = plainText.match(/(?:Phase|Test\s*Phase|Admission\s*Phase)\s*[:=]?\s*([A-Za-z0-9\s-_]{4,20})/i);
 
       if (obtMatch) {
         const marksObtained = parseFloat(obtMatch[1]);
         const totalMarks = totalMatch ? parseFloat(totalMatch[1]) : 100;
+        const rollNo = rollMatch ? rollMatch[1].trim() : null;
+        let detectedPhase = phaseMatch ? SeetScraperService.normalizePhase(phaseMatch[1]) : null;
+        if (!detectedPhase && rollNo) {
+          detectedPhase = SeetScraperService.normalizePhase(rollNo);
+        }
+
         return {
           cnic: targetCnic,
-          rollNo: rollMatch ? rollMatch[1].trim() : null,
+          rollNo,
           candidateName: nameMatch ? nameMatch[1].trim() : null,
           fatherName: fatherMatch ? fatherMatch[1].trim() : null,
+          phase: detectedPhase,
           marksObtained,
           totalMarks,
           percentage: totalMarks > 0 ? (marksObtained / totalMarks) * 100 : 0,
@@ -272,6 +318,152 @@ export class SeetScraperService {
     }
 
     return url.toString();
+  }
+
+  static _phasesCache = {
+    data: null,
+    timestamp: 0,
+    ttlMs: 30 * 60 * 1000, // 30 minutes
+  };
+
+  /**
+   * Normalizes an exam phase or roll number string into canonical 'SEET{yy}-P{1|2}'
+   * SEET scores are valid for strictly 1 year and only have Phase 1 and Phase 2.
+   */
+  static normalizePhase(text) {
+    if (!text || typeof text !== 'string') return null;
+    const match = text.match(/SEET\s*(?:20)?(\d{2})[-_\s]*P([12])/i);
+    if (match) {
+      return `SEET${match[1]}-P${match[2]}`;
+    }
+    return null;
+  }
+
+  /**
+   * Zero-dependency DOM parser that extracts active test phases from portal HTML.
+   * Enforces official MUST admission rules:
+   * 1. Entry test has strictly Phase 1 and Phase 2 (P1 and P2). No Phase 3 exists.
+   * 2. SEET test scores are valid for strictly 1 year; expired previous years are excluded.
+   * 3. Dynamically adapts when portal shifts to next academic year (e.g. 2027 -> SEET27-P1, SEET27-P2).
+   */
+  static extractPhasesFromHtml(html, targetYear = null) {
+    if (!html || typeof html !== 'string') return [];
+    const selectMatch = html.match(/<select[^>]*name=["']jadmid["'][^>]*>([\s\S]*?)<\/select>/i);
+    if (!selectMatch) return [];
+
+    const optionRegex = /<option\s+([^>]*)>([\s\S]*?)<\/option>/gi;
+    const rawPhases = [];
+    let match;
+
+    while ((match = optionRegex.exec(selectMatch[1])) !== null) {
+      const attrs = match[1];
+      const text = match[2].replace(/<[^>]*>/g, '').trim();
+
+      const valMatch = attrs.match(/value\s*=\s*['"]?(-?[0-9]+)['"]?/i);
+      const val = valMatch ? valMatch[1] : '';
+
+      if (val && val !== '-1') {
+        const cleanLabel = text.replace(/[-–—\s]+$/, '').trim();
+        rawPhases.push({ id: val, label: cleanLabel });
+      }
+    }
+
+    // Filter to valid SEET phases: strictly P1 and P2
+    const validPhases = [];
+    for (const p of rawPhases) {
+      const phaseMatch = p.label.match(/SEET\s*(?:20)?(\d{2})[-_\s]*P([12])/i);
+      if (phaseMatch) {
+        const year = phaseMatch[1];
+        const phaseNum = phaseMatch[2];
+        const standardLabel = `SEET${year}-P${phaseNum}`;
+        validPhases.push({
+          id: p.id,
+          label: standardLabel,
+          year: parseInt(`20${year}`, 10),
+          phaseNum: parseInt(phaseNum, 10),
+        });
+      }
+    }
+
+    if (validPhases.length === 0) return [];
+
+    // Determine active intake year: either targetYear if provided, or highest/latest year in portal options
+    const activeYear = targetYear ? parseInt(targetYear, 10) : Math.max(...validPhases.map((p) => p.year));
+
+    // Keep only the active year's phases (strictly Phase 2 and Phase 1)
+    return validPhases
+      .filter((p) => p.year === activeYear)
+      .sort((a, b) => b.phaseNum - a.phaseNum)
+      .map((p) => ({ id: p.id, label: p.label }));
+  }
+
+  /**
+   * Discovers available SEET phases dynamically from the live portal HTML,
+   * adapting automatically to changing academic years (e.g. SEET26, SEET27, etc.)
+   */
+  static async getOrDiscoverPhases(options = {}) {
+    if (Array.isArray(options.phases) && options.phases.length > 0) {
+      return options.phases;
+    }
+
+    const now = Date.now();
+    if (!options.forceRefresh && SeetScraperService._phasesCache.data && (now - SeetScraperService._phasesCache.timestamp < SeetScraperService._phasesCache.ttlMs)) {
+      return SeetScraperService._phasesCache.data;
+    }
+
+    const rawTargetUrl = options.targetUrl || 'https://seet.must.edu.pk/seet_result.php';
+    const timeoutMs = options.timeoutMs || 4000;
+
+    // 1. Attempt live discovery from official university server
+    if (!options.useSimulation) {
+      try {
+        const targetUrl = SeetScraperService.validateTargetUrl(rawTargetUrl);
+        const res = await fetch(targetUrl, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        if (res.ok) {
+          const html = await res.text();
+          const discovered = SeetScraperService.extractPhasesFromHtml(html, options.academicYear);
+          if (discovered.length > 0) {
+            SeetScraperService._phasesCache = {
+              data: discovered,
+              timestamp: now,
+              ttlMs: 30 * 60 * 1000,
+            };
+            return discovered;
+          }
+        }
+      } catch {
+        // Fall back to year-adaptive calculation below
+      }
+    }
+
+    // 2. Custom environment configuration override
+    if (process.env.SEET_PORTAL_PHASES) {
+      const parsedEnv = process.env.SEET_PORTAL_PHASES.split(',').map((p) => {
+        const [label, id] = p.trim().split(':');
+        return { id: id || label, label: label.trim() };
+      }).filter((p) => p.label);
+      if (parsedEnv.length > 0) return parsedEnv;
+    }
+
+    // 3. Intelligent Dynamic Year-Based Fallback
+    // Computes phases according to active intake year (e.g. 2026 -> SEET26-P2, SEET26-P1; 2027 -> SEET27-P2, SEET27-P1)
+    // SEET scores hold for strictly 1 year and only have Phase 1 & Phase 2.
+    const currentYear = options.academicYear ? parseInt(options.academicYear, 10) : new Date().getFullYear();
+    const yy = String(currentYear).slice(-2);
+
+    const fallback = [
+      { id: '11', label: `SEET${yy}-P2` },
+      { id: '10', label: `SEET${yy}-P1` },
+    ];
+
+    return fallback;
   }
 
   /**
@@ -352,125 +544,120 @@ export class SeetScraperService {
     const targetUrl = SeetScraperService.validateTargetUrl(rawTargetUrl);
     const timeoutMs = options.timeoutMs || 4000;
 
+    // Dynamically discover active test phases (or use provided/cached phases)
+    const phases = await SeetScraperService.getOrDiscoverPhases(options);
+
     try {
-      let response = null;
-      let htmlText = '';
       let lastNetworkError = null;
+      let anyPhaseConnected = false;
 
-      // Step 1: Attempt POST with regular applicant search form fields
-      try {
-        const bodyParams = new URLSearchParams();
-        bodyParams.append('id', '-1');
-        bodyParams.append('action', 'view');
-        bodyParams.append('jadmid', '11');
-        bodyParams.append('tcenter_id', '-1');
-        bodyParams.append('rollno', '0');
-        bodyParams.append('apl_cnic', formatted);
-        bodyParams.append('japl_cnic', formatted);
-        bodyParams.append('cnic', digits);
-        bodyParams.append('txt_cnic', digits);
-        bodyParams.append('submit', 'Search');
-        bodyParams.append('btn_search', 'Search');
+      for (const phase of phases) {
+        let htmlText = '';
+        try {
+          const bodyParams = new URLSearchParams();
+          bodyParams.append('id', '-1');
+          bodyParams.append('action', 'view');
+          bodyParams.append('jadmid', phase.id);
+          bodyParams.append('tcenter_id', '-1');
+          bodyParams.append('rollno', '0');
+          bodyParams.append('apl_cnic', formatted);
+          bodyParams.append('japl_cnic', formatted);
+          bodyParams.append('cnic', digits);
+          bodyParams.append('txt_cnic', digits);
+          bodyParams.append('submit', 'Search');
+          bodyParams.append('btn_search', 'Search');
 
-        response = await fetch(targetUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          },
-          body: bodyParams.toString(),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
+          const response = await fetch(targetUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            },
+            body: bodyParams.toString(),
+            signal: AbortSignal.timeout(timeoutMs),
+          });
 
-        if (response && response.ok) {
-          htmlText = await response.text();
+          if (response && response.ok) {
+            htmlText = await response.text();
+            anyPhaseConnected = true;
+            lastNetworkError = null;
+          }
+        } catch (postErr) {
+          lastNetworkError = postErr;
         }
-      } catch (postErr) {
-        lastNetworkError = postErr;
-        // Only fallback to GET if not a host timeout
-        if (postErr.name !== 'TimeoutError' && postErr.name !== 'AbortError') {
+
+        let parsed = null;
+        if (htmlText) {
+          parsed = SeetScraperService.parseResultHtml(htmlText, formatted);
+        }
+
+        // Secondary search: check walk-in applicant form (action=jview) for this phase
+        if (!parsed) {
           try {
-            response = await fetch(`${targetUrl}?apl_cnic=${encodeURIComponent(formatted)}&cnic=${encodeURIComponent(digits)}`, {
-              method: 'GET',
+            const walkinParams = new URLSearchParams();
+            walkinParams.append('id', '-1');
+            walkinParams.append('action', 'jview');
+            walkinParams.append('jadmid', phase.id);
+            walkinParams.append('japl_cnic', formatted);
+            const walkinRes = await fetch(targetUrl, {
+              method: 'POST',
               headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
               },
+              body: walkinParams.toString(),
               signal: AbortSignal.timeout(timeoutMs),
             });
-            if (response && response.ok) {
-              htmlText = await response.text();
-              lastNetworkError = null;
+            if (walkinRes.ok) {
+              const walkinHtml = await walkinRes.text();
+              anyPhaseConnected = true;
+              parsed = SeetScraperService.parseResultHtml(walkinHtml, formatted);
             }
-          } catch (getErr) {
-            lastNetworkError = getErr;
-          }
+          } catch {}
+        }
+
+        if (parsed) {
+          const actualPhase = parsed.phase || SeetScraperService.normalizePhase(parsed.rollNo) || phase.label;
+          parsed.phase = actualPhase;
+          return {
+            found: true,
+            source: 'LIVE_PORTAL',
+            phase: actualPhase,
+            checkedPhases: phases.map((p) => p.label),
+            data: parsed,
+          };
         }
       }
 
-      if (!htmlText && lastNetworkError) {
+      if (!anyPhaseConnected && lastNetworkError) {
         return {
           found: false,
           source: 'NETWORK_ERROR',
           error: lastNetworkError.code || lastNetworkError.name,
+          checkedPhases: phases.map((p) => p.label),
           message: `Could not connect to SEET portal (${lastNetworkError.message}). Manual entry is available below.`,
           cnic: formatted,
           allowManualEntry: true,
         };
       }
 
-      let parsed = null;
-      if (htmlText) {
-        parsed = SeetScraperService.parseResultHtml(htmlText, formatted);
-      }
-
-      // Step 2: If not found in regular search, attempt walk-in applicant search form (action=jview)
-      if (!parsed && htmlText) {
-        try {
-          const walkinParams = new URLSearchParams();
-          walkinParams.append('id', '-1');
-          walkinParams.append('action', 'jview');
-          walkinParams.append('japl_cnic', formatted);
-          const walkinRes = await fetch(targetUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            },
-            body: walkinParams.toString(),
-            signal: AbortSignal.timeout(timeoutMs),
-          });
-          if (walkinRes.ok) {
-            const walkinHtml = await walkinRes.text();
-            parsed = SeetScraperService.parseResultHtml(walkinHtml, formatted);
-          }
-        } catch {
-          // Ignore secondary query failure, proceed to not found
-        }
-      }
-
-      if (parsed) {
-        return {
-          found: true,
-          source: 'LIVE_PORTAL',
-          data: parsed,
-        };
-      }
-
+      const phaseLabels = phases.map((p) => p.label).join(', ');
       return {
         found: false,
         source: 'LIVE_PORTAL',
-        message: `No SEET test record found on official portal for CNIC ${formatted}. Please verify CNIC or enter marks manually below.`,
+        checkedPhases: phases.map((p) => p.label),
+        message: `No SEET test record found across active test phases (${phaseLabels}) for CNIC ${formatted}. Left empty as SEET Pending.`,
         cnic: formatted,
         allowManualEntry: true,
       };
     } catch (err) {
-      // Graceful offline/network fallback
       return {
         found: false,
         source: 'NETWORK_ERROR',
         error: err.code || err.name,
-        message: `Could not connect to SEET portal (${err.message}). Manual entry is available.`,
+        message: `Could not connect to SEET portal (${err.message}). Left empty as SEET Pending.`,
         cnic: formatted,
+        allowManualEntry: true,
       };
     }
   }
@@ -580,10 +767,13 @@ export class SeetScraperService {
   }
 
   /**
-   * Scans all VERIFIED candidates without SEET marks and queries the portal
+   * Scans all VERIFIED candidates without SEET marks and queries the portal across active phases
    */
   static async syncVerifiedCandidates(options = {}, db = pool) {
     await ensureMeritSchema(db);
+
+    const activePhases = await SeetScraperService.getOrDiscoverPhases(options);
+    const syncOptions = { ...options, phases: activePhases };
 
     const [students] = await db.query(
       `SELECT id, cnic, full_name, entry_test_marks
@@ -599,16 +789,14 @@ export class SeetScraperService {
       matched: 0,
       unmatched: 0,
       errors: 0,
+      activePhases: activePhases.map((p) => p.label),
       details: [],
     };
 
     for (const student of students) {
       try {
-        let result = await SeetScraperService.lookupByCnic(student.cnic, options);
-        if (!result.found && options.fallbackSimulation !== false) {
-          result = await SeetScraperService.lookupByCnic(student.cnic, { useSimulation: true });
-        }
-        if (result.found && result.data) {
+        const result = await SeetScraperService.lookupByCnic(student.cnic, syncOptions);
+        if (result.found && result.data && Number(result.data.marksObtained) >= 0) {
           await SeetScraperService.saveResultAndBackfill(result.data, db);
           summary.matched++;
           summary.details.push({
@@ -616,16 +804,19 @@ export class SeetScraperService {
             name: student.full_name,
             cnic: student.cnic,
             status: 'MATCHED',
+            phase: result.phase || result.data?.phase || 'SEET',
             marks: result.data.marksObtained,
           });
         } else {
+          // Candidate not found on portal across active SEET phases
+          // Do NOT invent or write any score - leave empty so candidate remains SEET Pending
           summary.unmatched++;
           summary.details.push({
             studentId: student.id,
             name: student.full_name,
             cnic: student.cnic,
             status: 'NOT_FOUND',
-            note: result.message || 'No record on portal',
+            note: result.message || `No record on portal across ${activePhases.map((p) => p.label).join(', ')} (SEET Pending)`,
           });
         }
       } catch (err) {

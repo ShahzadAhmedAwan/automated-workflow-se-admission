@@ -569,6 +569,9 @@ test('MeritSnapshotService: generates snapshot, enforces Super Admin lock, and e
       if (sql.includes('UPDATE mrt_snapshots') && sql.includes('is_locked = TRUE')) {
         snapshotLocked = true;
       }
+      if (sql.includes('UPDATE mrt_entries') && sql.includes('notification_sent = TRUE')) {
+        mockEntries[0].notificationSent = true;
+      }
       if (sql.includes('INSERT INTO outbox_jobs')) {
         dispatchedOutbox.push({
           type: params[1],
@@ -618,6 +621,21 @@ test('MeritSnapshotService: generates snapshot, enforces Super Admin lock, and e
   assert.ok(dispatchedOutbox[0].payload.messageText.includes('84.500%'));
   // Ensure no emojis in the selection notice
   assert.doesNotMatch(dispatchedOutbox[0].payload.messageText, /[\u{1F300}-\u{1F6FF}]/u);
+
+  // 5. Subsequent dispatch without forceResend reports no un-notified candidates
+  const repeatRes = await MeritSnapshotService.dispatchSelectedNotifications(10, {}, mockDb);
+  assert.equal(repeatRes.notifiedCount, 0);
+  assert.ok(repeatRes.message.includes('No un-notified selected candidates'));
+
+  // 6. Re-dispatch with forceResend: true successfully enqueues notice again
+  const forceRes = await MeritSnapshotService.dispatchSelectedNotifications(10, { forceResend: true }, mockDb);
+  assert.equal(forceRes.notifiedCount, 1);
+  assert.equal(dispatchedOutbox.length, 2);
+
+  // 7. Single student dispatch with studentId: 1
+  const singleRes = await MeritSnapshotService.dispatchSelectedNotifications(10, { studentId: 1, forceResend: true }, mockDb);
+  assert.equal(singleRes.notifiedCount, 1);
+  assert.equal(dispatchedOutbox.length, 3);
 });
 
 test('GazetteStreamParserService: parses SEET entrance test gazette format with alphanumeric roll and CNIC', () => {
@@ -778,4 +796,166 @@ test('GazetteStreamParserService.processGazetteBuffer: searches and backfills st
   // Student 103 was not in the gazette and must NOT be updated
   const update103 = executedUpdates.find((u) => u.params[2] === 103);
   assert.equal(update103, undefined, 'Student 103 was not in gazette and must remain pending');
+});
+
+test('SeetScraperService: checks multiple phases (SEET26-P1, SEET26-P2) and leaves unfound students without fabricating marks', async () => {
+  const updatedStudents = [];
+  const insertedResults = [];
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM adm_students')) {
+        return [[{ id: 99, full_name: 'Unregistered Candidate', cnic: '82203-9999999-9', entry_test_marks: null }]];
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE adm_students')) {
+        updatedStudents.push(params);
+      }
+      if (sql.includes('INSERT INTO mrt_official_results')) {
+        insertedResults.push(params);
+      }
+      return [{ insertId: 1, affectedRows: 1 }];
+    },
+  };
+
+  const originalLookup = SeetScraperService.lookupByCnic;
+  const queriedPhases = [];
+  SeetScraperService.lookupByCnic = async (cnic, opts) => {
+    queriedPhases.push(...(opts.phases || [{ id: '11', label: 'SEET26-P2' }, { id: '10', label: 'SEET26-P1' }]));
+    return {
+      found: false,
+      source: 'LIVE_PORTAL',
+      message: 'No SEET test record found across SEET26-P1 and SEET26-P2',
+      cnic,
+    };
+  };
+
+  try {
+    const syncRes = await SeetScraperService.syncVerifiedCandidates({}, mockDb);
+    assert.equal(syncRes.totalCandidates, 1);
+    assert.equal(syncRes.matched, 0);
+    assert.equal(syncRes.unmatched, 1);
+    // CRITICAL: Ensure NO score was fabricated or written to adm_students or mrt_official_results!
+    assert.equal(updatedStudents.length, 0, 'Must NOT write any score to adm_students for unfound student');
+    assert.equal(insertedResults.length, 0, 'Must NOT write any official result for unfound student');
+  } finally {
+    SeetScraperService.lookupByCnic = originalLookup;
+  }
+});
+
+test('SeetScraperService: dynamic phase auto-discovery strictly enforces 2 phases (P1 and P2) for current year and rejects P3 or expired years', async () => {
+  // Test 1: DOM parsing from live university portal HTML format (with unquoted value= and trailing dashes)
+  // Rejects SEET26-P3 and keeps strictly the 2 active test phases: SEET26-P2 and SEET26-P1
+  const portalHtml = `
+    <div class="col-md-4">
+      <select style='width:120px !important;padding:0px;' class="form-control" name="jadmid" title='Select Admission Phase here'>
+        <option value=-1 Selected>Select Phase</option>
+        <option value=12>SEET26-P3-</option>
+        <option value=11>SEET26-P2-</option>
+        <option value=10>SEET26-P1-</option>
+      </select>
+    </div>
+  `;
+  const discovered = SeetScraperService.extractPhasesFromHtml(portalHtml);
+  assert.equal(discovered.length, 2, 'Must strictly return exactly 2 phases (P1 and P2), filtering out P3');
+  assert.deepEqual(discovered[0], { id: '11', label: 'SEET26-P2' });
+  assert.deepEqual(discovered[1], { id: '10', label: 'SEET26-P1' });
+
+  // Test 2: DOM parsing with future academic year phases (e.g., SEET27 for next year)
+  // Rejects P3, excludes previous expired year (SEET26), and keeps active year (SEET27-P2, SEET27-P1)
+  const futureHtml = `
+    <select name="jadmid">
+      <option value="-1">Choose Admission Phase</option>
+      <option value="15">SEET27-P3</option>
+      <option value="14">SEET27-P2</option>
+      <option value="13">SEET27-P1</option>
+      <option value="11">SEET26-P2</option>
+      <option value="10">SEET26-P1</option>
+    </select>
+  `;
+  const futurePhases = SeetScraperService.extractPhasesFromHtml(futureHtml);
+  assert.equal(futurePhases.length, 2, 'Must strictly extract the 2 active phases for next year 2027');
+  assert.deepEqual(futurePhases[0], { id: '14', label: 'SEET27-P2' });
+  assert.deepEqual(futurePhases[1], { id: '13', label: 'SEET27-P1' });
+
+  // Test 3: Invalid or empty HTML returns empty array gracefully
+  assert.deepEqual(SeetScraperService.extractPhasesFromHtml(''), []);
+  assert.deepEqual(SeetScraperService.extractPhasesFromHtml('<div>No select here</div>'), []);
+
+  // Test 4: Dynamic academic year fallback calculation for next year (2027) strictly returns 2 phases
+  const calculated2027 = await SeetScraperService.getOrDiscoverPhases({
+    useSimulation: true,
+    academicYear: 2027,
+    forceRefresh: true,
+  });
+  assert.equal(calculated2027.length, 2);
+  assert.deepEqual(calculated2027, [
+    { id: '11', label: 'SEET27-P2' },
+    { id: '10', label: 'SEET27-P1' },
+  ]);
+
+  // Test 5: Custom environment variable override
+  const prevEnv = process.env.SEET_PORTAL_PHASES;
+  try {
+    process.env.SEET_PORTAL_PHASES = 'SEET27-P1:13,SEET27-P2:14';
+    const envPhases = await SeetScraperService.getOrDiscoverPhases({
+      useSimulation: true,
+      forceRefresh: true,
+    });
+    assert.deepEqual(envPhases, [
+      { id: '13', label: 'SEET27-P1' },
+      { id: '14', label: 'SEET27-P2' },
+    ]);
+  } finally {
+    if (prevEnv !== undefined) {
+      process.env.SEET_PORTAL_PHASES = prevEnv;
+    } else {
+      delete process.env.SEET_PORTAL_PHASES;
+    }
+  }
+
+  // Test 6: Result HTML parsing extracts true candidate name, roll number, and true phase (SEET26-P2)
+  const resultTableHtml = `
+    <table class="table table-bordered table-stripped">
+      <thead>
+        <tr>
+          <th>Admission Phase</th>
+          <th>Applicant#</th>
+          <th>Application#</th>
+          <th>RollNo</th>
+          <th>Name</th>
+          <th>Father Name</th>
+          <th>CNIC </th>
+          <th>Total Marks</th>
+          <th>Obtained Marks</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SEET 2026 P2</td>
+          <td>7080</td>
+          <td>6850</td>
+          <td>SEET26-P2-UAJK-12</td>
+          <td>Ibtisam Azam</td>
+          <td>Raja Muhammad Azam</td>
+          <td>8270103594165</td>
+          <td>100</td>
+          <td>55</td>
+          <td>Pass</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+  const parsedCandidate = SeetScraperService.parseResultHtml(resultTableHtml, '82701-0359416-5');
+  assert.ok(parsedCandidate, 'Should parse candidate record');
+  assert.equal(parsedCandidate.candidateName, 'Ibtisam Azam', 'Must extract actual Name, NOT Applicant#');
+  assert.equal(parsedCandidate.fatherName, 'Raja Muhammad Azam');
+  assert.equal(parsedCandidate.rollNo, 'SEET26-P2-UAJK-12');
+  assert.equal(parsedCandidate.phase, 'SEET26-P2', 'Must extract exact phase from table/rollNo');
+  assert.equal(parsedCandidate.marksObtained, 55);
+  assert.equal(parsedCandidate.totalMarks, 100);
+  assert.equal(parsedCandidate.status, 'PASS');
 });

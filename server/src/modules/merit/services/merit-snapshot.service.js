@@ -333,15 +333,15 @@ export class MeritSnapshotService {
       `${e.matricScoreUsed}/${e.matricTotalUsed}`,
       `${e.fscScoreUsed}/${e.fscTotalUsed}`,
       `${e.entryTestScoreUsed}/${e.entryTestTotalUsed}`,
-      e.aggregateScore.toFixed(3),
-      `"${e.quotaCategory}"`,
-      e.decisionStatus,
+      (Number(e.aggregateScore) || 0).toFixed(3),
+      `"${e.quotaCategory || ''}"`,
+      `"${e.decisionStatus || ''}"`,
       e.tieBreakLevel > 0 ? `Tier ${e.tieBreakLevel}` : 'None',
     ]);
 
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
     return {
-      filename: `${snapshot.snapshotTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`,
+      filename: `${(snapshot.snapshotTitle || `merit_snapshot_${snapshotId}`).replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`,
       csvContent,
     };
   }
@@ -350,15 +350,42 @@ export class MeritSnapshotService {
    * Dispatches WhatsApp notifications to SELECTED candidates via outbox_jobs
    */
   static async dispatchSelectedNotifications(snapshotId, options = {}, db = pool) {
-    const { customMessage = null, duePaymentDate = 'Friday, 4:00 PM' } = options;
+    const { customMessage = null, duePaymentDate = 'Friday, 4:00 PM', studentId = null, forceResend = false } = options;
     const { snapshot, entries } = await MeritSnapshotService.getSnapshotDetails(snapshotId, db);
 
-    const selectedEntries = entries.filter((e) => e.decisionStatus === DECISION_STATUS.SELECTED && !e.notificationSent);
+    let selectedEntries = entries.filter((e) => e.decisionStatus === DECISION_STATUS.SELECTED);
+
+    if (studentId) {
+      selectedEntries = selectedEntries.filter((e) => Number(e.studentId) === Number(studentId));
+    } else if (!forceResend) {
+      // Find entries that haven't been notified OR whose last outbox job FAILED
+      const [failedJobs] = await db.query(
+        `SELECT payload FROM outbox_jobs
+         WHERE job_type = ? AND status = 'FAILED'
+         ORDER BY id DESC`,
+        [EVENT_TYPES.WHATSAPP_MESSAGE]
+      ).catch(() => [[]]);
+
+      const failedStudentIds = new Set();
+      for (const j of failedJobs) {
+        try {
+          const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : j.payload;
+          if (p?.metadata?.snapshotId === snapshotId && p?.metadata?.studentId) {
+            failedStudentIds.add(Number(p.metadata.studentId));
+          }
+        } catch {}
+      }
+
+      selectedEntries = selectedEntries.filter((e) => !e.notificationSent || failedStudentIds.has(Number(e.studentId)));
+    }
 
     if (!selectedEntries.length) {
       return {
+        snapshotId,
         notifiedCount: 0,
-        message: 'No un-notified selected candidates found in this snapshot.',
+        message: studentId
+          ? 'Selected candidate already notified. Enable re-send to dispatch again.'
+          : 'No un-notified selected candidates found in this snapshot. Check "Re-send notices" to re-notify previously contacted candidates.',
       };
     }
 

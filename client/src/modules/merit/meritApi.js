@@ -1,4 +1,4 @@
-import { apiRequest } from '../../core/api/apiClient.js';
+import { apiRequest, apiRequestFile } from '../../core/api/apiClient.js';
 
 export const meritApi = {
   async getActivePolicy(programCode = 'SE') {
@@ -24,6 +24,12 @@ export const meritApi = {
       method: 'PUT',
       body: JSON.stringify(policyData),
     }, true);
+    return res.data;
+  },
+
+  async getSeetPhases(forceRefresh = false) {
+    const q = forceRefresh ? '?refresh=true' : '';
+    const res = await apiRequest(`/merit/seet/phases${q}`, {}, true);
     return res.data;
   },
 
@@ -89,5 +95,9 @@ export const meritApi = {
       body: JSON.stringify(data),
     }, true);
     return res.data;
+  },
+
+  async exportSnapshotCsv(id) {
+    return apiRequestFile(`/merit/snapshots/${id}/export`);
   },
 };

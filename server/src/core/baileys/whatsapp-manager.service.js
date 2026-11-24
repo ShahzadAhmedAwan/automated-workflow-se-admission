@@ -23,6 +23,25 @@ class WhatsAppManagerService {
     this.isPolling = false;
     this.isStarting = false;
     this.qrListeners = [];
+    this.studentQueues = new Map();
+  }
+
+  /**
+   * Enqueues tasks per student phone number so that:
+   * 1. Different students run concurrently in parallel with zero blocking
+   * 2. Multiple rapid messages from the SAME student are processed in strict FIFO order
+   */
+  enqueueForStudent(phone, task) {
+    const key = String(phone);
+    const prev = this.studentQueues.get(key) || Promise.resolve();
+    const next = prev.catch(() => {}).then(task);
+    this.studentQueues.set(key, next);
+    next.finally(() => {
+      if (this.studentQueues.get(key) === next) {
+        this.studentQueues.delete(key);
+      }
+    });
+    return next;
   }
 
   async recordStatus({ status, phone = null, qr = false, qrDataUrl = null, qrString = null, error = null }, db = pool) {
@@ -149,6 +168,7 @@ class WhatsAppManagerService {
         if (connection === 'close') {
           const statusCode = lastDisconnect?.error?.output?.statusCode;
           const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+          this.status = shouldReconnect ? 'RECONNECTING' : 'DISCONNECTED';
           await this.recordStatus({
             status: shouldReconnect ? 'RECONNECTING' : 'DISCONNECTED',
             error: statusCode ? `Closed code ${statusCode}` : 'Disconnected',
@@ -175,47 +195,53 @@ class WhatsAppManagerService {
 
       // Listen to inbound messages
       this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
-        if (type !== 'notify') return;
+        if (type !== 'notify' || !Array.isArray(messages)) return;
 
-        for (const msg of messages) {
-          if (!msg.message || msg.key.fromMe) continue;
-          const jid = msg.key.remoteJid;
-          if (isJidGroup(jid) || jid.endsWith('@broadcast')) continue;
+        // Process all inbound student messages in parallel across students
+        await Promise.allSettled(
+          messages.map(async (msg) => {
+            if (!msg.message || msg.key?.fromMe) return;
+            const jid = msg.key?.remoteJid;
+            if (!jid || isJidGroup(jid) || jid.endsWith('@broadcast')) return;
 
-          const rawText =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.imageMessage?.caption ||
-            '';
+            const rawText =
+              msg.message.conversation ||
+              msg.message.extendedTextMessage?.text ||
+              msg.message.imageMessage?.caption ||
+              '';
 
-          if (!rawText.trim()) continue;
+            if (!rawText.trim()) return;
 
-          let senderPhone = null;
-          if (jid.endsWith('@lid')) {
-            const alt = msg.key.remoteJidAlt || msg.key.participantAlt || msg.key.participant;
-            if (alt && (alt.endsWith('@s.whatsapp.net') || alt.includes('@s.whatsapp.net'))) {
-              senderPhone = normalizePhoneNumber(alt.split('@')[0]);
+            let senderPhone = null;
+            if (jid.endsWith('@lid')) {
+              const alt = msg.key.remoteJidAlt || msg.key.participantAlt || msg.key.participant;
+              if (alt && (alt.endsWith('@s.whatsapp.net') || alt.includes('@s.whatsapp.net'))) {
+                senderPhone = normalizePhoneNumber(alt.split('@')[0]);
+              }
             }
-          }
-          if (!senderPhone) {
-            senderPhone = normalizePhoneNumber(jid.split('@')[0]);
-          }
-          if (!senderPhone) continue;
+            if (!senderPhone) {
+              senderPhone = normalizePhoneNumber(jid.split('@')[0]);
+            }
+            if (!senderPhone) return;
 
-          try {
-            await this.sock.sendPresenceUpdate('composing', jid);
-            const turnResult = await LeadBotService.processIncomingMessage({
-              fromPhone: senderPhone,
-              messageBody: rawText,
-              queueReply: false,
-            }, db);
+            // Enqueue sequentially for this specific student, but concurrently across other students
+            return this.enqueueForStudent(senderPhone, async () => {
+              try {
+                await this.sock.sendPresenceUpdate('composing', jid);
+                const turnResult = await LeadBotService.processIncomingMessage({
+                  fromPhone: senderPhone,
+                  messageBody: rawText,
+                  queueReply: false,
+                }, db);
 
-            await this.sock.sendMessage(jid, { text: turnResult.reply });
-            await this.sock.sendPresenceUpdate('paused', jid);
-          } catch (err) {
-            console.error(`[LeadBot Error for ${senderPhone}]:`, err.message);
-          }
-        }
+                await this.sock.sendMessage(jid, { text: turnResult.reply });
+                await this.sock.sendPresenceUpdate('paused', jid);
+              } catch (err) {
+                console.error(`[LeadBot Error for ${senderPhone}]:`, err.message);
+              }
+            });
+          })
+        );
       });
 
       this.startOutboxPollingLoop(db);
@@ -275,7 +301,7 @@ class WhatsAppManagerService {
     this.isPolling = true;
 
     setInterval(async () => {
-      if (!this.sock || !this.sock.user) return;
+      if (!this.sock || !this.sock.user || this.status !== 'CONNECTED') return;
 
       try {
         const { jobs, lockOwner } = await claimJobs({
@@ -296,6 +322,14 @@ class WhatsAppManagerService {
             await this.sock.sendMessage(jid, { text: messageText });
             await this.sock.sendPresenceUpdate('paused', jid);
             await completeJob(job.id, lockOwner);
+
+            if (job.payload?.metadata?.snapshotId && job.payload?.metadata?.studentId) {
+              await pool.execute(
+                `UPDATE mrt_entries SET notification_sent = TRUE, notification_sent_at = CURRENT_TIMESTAMP(3)
+                 WHERE snapshot_id = ? AND student_id = ?`,
+                [job.payload.metadata.snapshotId, job.payload.metadata.studentId]
+              ).catch(() => {});
+            }
           } catch (deliveryErr) {
             let fallbackDelivered = false;
             if (!jid.endsWith('@lid') && recipientPhone.length >= 14) {
@@ -304,10 +338,27 @@ class WhatsAppManagerService {
                 await this.sock.sendMessage(lidJid, { text: messageText });
                 await completeJob(job.id, lockOwner);
                 fallbackDelivered = true;
+                if (job.payload?.metadata?.snapshotId && job.payload?.metadata?.studentId) {
+                  await pool.execute(
+                    `UPDATE mrt_entries SET notification_sent = TRUE, notification_sent_at = CURRENT_TIMESTAMP(3)
+                     WHERE snapshot_id = ? AND student_id = ?`,
+                    [job.payload.metadata.snapshotId, job.payload.metadata.studentId]
+                  ).catch(() => {});
+                }
               } catch {}
             }
             if (!fallbackDelivered) {
               await retryJob(job, lockOwner, deliveryErr);
+              if (String(deliveryErr?.message).includes('Closed') || String(deliveryErr?.message).includes('disconnect')) {
+                this.status = 'RECONNECTING';
+              }
+              if (job.attempts >= 4 && job.payload?.metadata?.snapshotId && job.payload?.metadata?.studentId) {
+                await pool.execute(
+                  `UPDATE mrt_entries SET notification_sent = FALSE, notification_sent_at = NULL
+                   WHERE snapshot_id = ? AND student_id = ?`,
+                  [job.payload.metadata.snapshotId, job.payload.metadata.studentId]
+                ).catch(() => {});
+              }
             }
           }
         }

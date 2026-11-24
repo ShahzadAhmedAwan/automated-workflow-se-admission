@@ -17,7 +17,7 @@ import {
   IconChat,
   IconDocumentCheck,
 } from '../../core/icons/Icons.jsx';
-import { MetricStrip, SectionTabs, StatusBadge, WorkspacePanel, ConfirmDialog } from '../../core/ui/primitives.jsx';
+import { MetricStrip, SectionTabs, StatusBadge, WorkspacePanel, ConfirmDialog, ToastBanner } from '../../core/ui/primitives.jsx';
 
 const simulatorStatusLabels = {
   AWAITING_INTEREST: 'Waiting for reply',
@@ -106,6 +106,7 @@ export function MarketingModuleView() {
   const [parsing, setParsing] = useState(false);
   const [selectedTargetCampaign, setSelectedTargetCampaign] = useState('');
   const [committing, setCommitting] = useState(false);
+  const [showSchemaGuide, setShowSchemaGuide] = useState(false);
 
   // Single Applicant Direct Outreach
   const [singleName, setSingleName] = useState('');
@@ -533,40 +534,26 @@ export function MarketingModuleView() {
 
   return (
     <div className="space-y-5">
-      {/* Top Banner Alert Messages */}
+      {/* Top Banner Notifications */}
       {error && (
-        <div className="flex items-center justify-between rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <span>{error}</span>
-          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700 cursor-pointer">
-            <IconClose className="w-4 h-4" />
-          </button>
-        </div>
+        <ToastBanner notice={{ type: 'error', message: error }} onDismiss={() => setError('')} />
       )}
-
       {success && (
-        <div className="flex items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          <span className="flex items-center gap-2 font-medium">
-            <IconCheck className="w-4 h-4 text-emerald-700" />
-            {success}
-          </span>
-          <button onClick={() => setSuccess('')} className="text-emerald-700 hover:text-emerald-900 cursor-pointer">
-            <IconClose className="w-4 h-4" />
-          </button>
-        </div>
+        <ToastBanner notice={{ type: 'success', message: success }} onDismiss={() => setSuccess('')} />
       )}
 
-      {/* Step Sequence Tabs: Ordered per workflow: Campaigns -> CSV -> Single -> Leads -> Simulator -> Knowledge */}
+      {/* Navigation Tabs */}
       <SectionTabs
-        label="Admissions workspace workflow"
+        label="Admissions marketing workflow"
         value={activeTab}
         onChange={setActiveTab}
         tabs={[
-          { id: 'campaigns', label: '1. Broadcast Campaigns', count: campaigns.length },
-          { id: 'csv', label: '2. Import Applicants (CSV)' },
-          { id: 'single', label: '3. Single Lead Outreach' },
-          { id: 'leads', label: '4. Student Leads Directory', count: leadsSummary.total || leadsTotal },
-          { id: 'simulator', label: '5. WhatsApp Bot Simulator' },
-          { id: 'knowledge', label: '6. Bot Knowledge & Rules' },
+          { id: 'campaigns', label: 'Broadcast Campaigns', count: campaigns.length },
+          { id: 'csv', label: 'Import Applicants (CSV)' },
+          { id: 'single', label: 'Single Lead Outreach' },
+          { id: 'leads', label: 'Student Leads Directory', count: leadsSummary.total || leadsTotal },
+          { id: 'simulator', label: 'WhatsApp Bot Simulator' },
+          { id: 'knowledge', label: 'Bot Knowledge & Rules' },
         ]}
       />
 
@@ -664,7 +651,7 @@ export function MarketingModuleView() {
                   className="inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md bg-blue-700 px-4 text-xs font-semibold text-white transition hover:bg-blue-800 disabled:opacity-50 cursor-pointer"
                 >
                   <IconPlus className="w-3.5 h-3.5" />
-                  <span>{creating ? 'Creating…' : 'Save Campaign'}</span>
+                  <span>{creating ? 'Creating...' : 'Save Campaign'}</span>
                 </button>
               </div>
             </form>
@@ -673,7 +660,7 @@ export function MarketingModuleView() {
           {loading ? (
             <div className="grid min-h-52 place-content-center justify-items-center gap-3 text-sm text-slate-500" aria-live="polite">
               <span className="size-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-700" />
-              <span>Loading campaigns…</span>
+              <span>Loading campaigns...</span>
             </div>
           ) : campaigns.length === 0 ? (
             <div className="grid min-h-52 place-content-center justify-items-center px-6 py-10 text-center">
@@ -693,7 +680,7 @@ export function MarketingModuleView() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-xs text-slate-700">
-                <thead className="border-b border-slate-200 bg-[#f4f7fb] text-[11px] font-semibold uppercase tracking-[.055em] text-slate-700">
+                <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
                   <tr>
                     <th className="px-5 py-3 sm:px-6">Campaign Title</th>
                     <th className="px-4 py-3">Status</th>
@@ -753,18 +740,15 @@ export function MarketingModuleView() {
           ========================================================================= */}
       {activeTab === 'csv' && (
         <div className="space-y-6">
-          {/* Institutional Specification Card */}
-          <div className="rounded-xl border border-slate-300 bg-white p-6 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
+          {/* Upload & Dry-Run Preview Card */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200 mb-5">
               <div>
-                <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-700">
-                  Admissions Office Schema Specification
-                </span>
-                <h3 className="text-base font-bold text-slate-900 mt-2">
-                  Standard Applicant Batch Import Specification
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                  Upload & Validate Applicant Spreadsheet
                 </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Prepare applicant spreadsheets using these standard columns. The ingestion engine automatically matches column aliases.
+                <p className="text-xs text-slate-500 mt-1">
+                  Select an applicant CSV file to validate records and check for duplicates before assigning them to a campaign.
                 </p>
               </div>
 
@@ -772,110 +756,20 @@ export function MarketingModuleView() {
                 <button
                   type="button"
                   onClick={downloadSampleCsv}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3.5 py-2 text-xs font-bold text-slate-800 transition hover:bg-slate-100 shadow-2xs cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
                 >
-                  <IconDownload className="size-4 text-slate-700" />
-                  <span>Download Sample CSV Template</span>
+                  <IconDownload className="size-3.5 text-slate-600" />
+                  <span>Download Sample CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSchemaGuide((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 cursor-pointer"
+                >
+                  <span>{showSchemaGuide ? 'Hide Column Guide' : 'View Column Guide'}</span>
                 </button>
               </div>
             </div>
-
-            {/* Format Specification Table */}
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs border border-slate-200">
-                <thead className="bg-[#f4f7fb] border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
-                  <tr>
-                    <th className="px-4 py-2.5">Column Header</th>
-                    <th className="px-3 py-2.5">Requirement</th>
-                    <th className="px-3 py-2.5">Accepted Aliases</th>
-                    <th className="px-4 py-2.5">Format / Example</th>
-                    <th className="px-4 py-2.5">Field Description</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 text-slate-700">
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">fullName</td>
-                    <td className="px-3 py-2"><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">Required</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">name, student_name, candidate</td>
-                    <td className="px-4 py-2 font-medium text-slate-900">Muhammad Ali</td>
-                    <td className="px-4 py-2 text-slate-600">Applicant legal full name</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">phone</td>
-                    <td className="px-3 py-2"><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">Required</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">contact, mobile, cell, whatsapp</td>
-                    <td className="px-4 py-2 font-mono text-slate-900">03001234567 / 923001234567</td>
-                    <td className="px-4 py-2 text-slate-600">Valid mobile number with WhatsApp capability</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">fatherName</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">father, guardian, parent_name</td>
-                    <td className="px-4 py-2 font-medium text-slate-900">Tariq Mahmood</td>
-                    <td className="px-4 py-2 text-slate-600">Father or legal guardian name</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">cnic</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">bform, national_id, id_card</td>
-                    <td className="px-4 py-2 font-mono text-slate-900">82101-1234567-1 (13 digits)</td>
-                    <td className="px-4 py-2 text-slate-600">National identity CNIC or B-Form</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">email</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">email_address, mail</td>
-                    <td className="px-4 py-2 font-mono text-slate-900">ali.tariq@gmail.com</td>
-                    <td className="px-4 py-2 text-slate-600">Applicant email address</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">city</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">district, location, town</td>
-                    <td className="px-4 py-2 font-medium text-slate-900">Mirpur, Rawalpindi</td>
-                    <td className="px-4 py-2 text-slate-600">Domicile or current residence city</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">priorDegree</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">education, group, degree</td>
-                    <td className="px-4 py-2 font-medium text-slate-900">Pre-Engineering, ICS</td>
-                    <td className="px-4 py-2 text-slate-600">Intermediate education background</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">fscMarks</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">marks, score, obtained_marks</td>
-                    <td className="px-4 py-2 font-mono text-slate-900">850 (out of 1100)</td>
-                    <td className="px-4 py-2 text-slate-600">Intermediate obtained marks</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">hasMaths</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">maths, mathematics</td>
-                    <td className="px-4 py-2 font-mono text-slate-900">Yes or No (1 / 0)</td>
-                    <td className="px-4 py-2 text-slate-600">Whether student studied Mathematics</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-2 font-mono font-bold text-blue-900">eligibleFor</td>
-                    <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">program, preferred_program</td>
-                    <td className="px-4 py-2 font-medium text-slate-900">Software Engineering</td>
-                    <td className="px-4 py-2 text-slate-600">Target or admitted academic program</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Upload & Dry-Run Preview Card */}
-          <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs">
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-1">
-              Step 2A: Upload & Validate CSV File
-            </h3>
-            <p className="text-xs text-slate-500 mb-5">
-              Select an applicant CSV file matching the schema above to test and preview normalized records before assigning them to a campaign.
-            </p>
 
             <form onSubmit={handleDryRunPreview} className="flex flex-col sm:flex-row gap-4 items-center">
               <input
@@ -883,40 +777,143 @@ export function MarketingModuleView() {
                 accept=".csv"
                 required
                 onChange={(e) => setFile(e.target.files[0])}
-                className="block w-full text-xs text-slate-600 file:mr-4 file:py-2 file:px-3.5 file:rounded-md file:border file:border-slate-300 file:text-xs file:font-semibold file:bg-slate-50 file:text-slate-800 hover:file:bg-slate-100 cursor-pointer"
+                className="block w-full text-xs text-slate-600 file:mr-4 file:py-2 file:px-3.5 file:rounded-lg file:border file:border-slate-200 file:text-xs file:font-semibold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100 cursor-pointer"
               />
 
               <button
                 type="submit"
                 disabled={parsing || !file}
-                className="w-full sm:w-auto px-5 py-2 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                className="w-full sm:w-auto px-5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition disabled:opacity-50 cursor-pointer whitespace-nowrap"
               >
-                {parsing ? 'Validating…' : 'Preview & Validate'}
+                {parsing ? 'Validating...' : 'Preview & Validate'}
               </button>
             </form>
           </div>
 
+          {/* Collapsible Format Specification Guide */}
+          {showSchemaGuide && (
+            <div className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-xs">
+              <div className="pb-3 border-b border-slate-200">
+                <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-700">
+                  Schema Specification
+                </span>
+                <h4 className="text-sm font-bold text-slate-900 mt-2">
+                  Standard Column Definitions & Aliases
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Prepare applicant spreadsheets using these standard columns. The ingestion engine automatically matches column aliases.
+                </p>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-left text-xs border border-slate-200">
+                  <thead className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
+                    <tr>
+                      <th className="px-4 py-2.5">Column Header</th>
+                      <th className="px-3 py-2.5">Requirement</th>
+                      <th className="px-3 py-2.5">Accepted Aliases</th>
+                      <th className="px-4 py-2.5">Format / Example</th>
+                      <th className="px-4 py-2.5">Field Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-slate-700">
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">fullName</td>
+                      <td className="px-3 py-2"><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">Required</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">name, student_name, candidate</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">Muhammad Ali</td>
+                      <td className="px-4 py-2 text-slate-600">Applicant legal full name</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">phone</td>
+                      <td className="px-3 py-2"><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">Required</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">contact, mobile, cell, whatsapp</td>
+                      <td className="px-4 py-2 font-mono text-slate-900">03001234567 / 923001234567</td>
+                      <td className="px-4 py-2 text-slate-600">Valid mobile number with WhatsApp capability</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">fatherName</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">father, guardian, parent_name</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">Tariq Mahmood</td>
+                      <td className="px-4 py-2 text-slate-600">Father or legal guardian name</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">cnic</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">bform, national_id, id_card</td>
+                      <td className="px-4 py-2 font-mono text-slate-900">82101-1234567-1 (13 digits)</td>
+                      <td className="px-4 py-2 text-slate-600">National identity CNIC or B-Form</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">email</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">email_address, mail</td>
+                      <td className="px-4 py-2 font-mono text-slate-900">ali.tariq@gmail.com</td>
+                      <td className="px-4 py-2 text-slate-600">Applicant email address</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">city</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">district, location, town</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">Mirpur, Rawalpindi</td>
+                      <td className="px-4 py-2 text-slate-600">Domicile or current residence city</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">priorDegree</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">education, group, degree</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">Pre-Engineering, ICS</td>
+                      <td className="px-4 py-2 text-slate-600">Intermediate education background</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">fscMarks</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">marks, score, obtained_marks</td>
+                      <td className="px-4 py-2 font-mono text-slate-900">850 (out of 1100)</td>
+                      <td className="px-4 py-2 text-slate-600">Intermediate obtained marks</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">hasMaths</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">maths, mathematics</td>
+                      <td className="px-4 py-2 font-mono text-slate-900">Yes or No (1 / 0)</td>
+                      <td className="px-4 py-2 text-slate-600">Whether student studied Mathematics</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 font-mono font-bold text-blue-900">eligibleFor</td>
+                      <td className="px-3 py-2"><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">Optional</span></td>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">program, preferred_program</td>
+                      <td className="px-4 py-2 font-medium text-slate-900">Software Engineering</td>
+                      <td className="px-4 py-2 text-slate-600">Target or admitted academic program</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Dry-Run Results & Stage 2 Commit Box */}
           {preview && (
-            <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs space-y-6">
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs space-y-6">
               {/* Stat Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200">
+                <div className="p-3.5 rounded-xl bg-slate-50/70 border border-slate-200/80">
                   <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">File Rows Total</div>
                   <div className="text-2xl font-bold font-mono text-slate-900 mt-1">{preview.totalRows}</div>
                 </div>
 
-                <div className="p-3.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200/80">
                   <div className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">Ready for Ingestion</div>
                   <div className="text-2xl font-bold font-mono text-emerald-700 mt-1">{preview.validCount}</div>
                 </div>
 
-                <div className="p-3.5 rounded-lg bg-amber-50/70 border border-amber-200">
+                <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-200/80">
                   <div className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider">Already in Database</div>
                   <div className="text-2xl font-bold font-mono text-amber-700 mt-1">{preview.duplicateCount}</div>
                 </div>
 
-                <div className="p-3.5 rounded-lg bg-rose-50/70 border border-rose-200">
+                <div className="p-3.5 rounded-xl bg-rose-50/60 border border-rose-200/80">
                   <div className="text-[11px] font-semibold text-rose-800 uppercase tracking-wider">Invalid Phone Numbers</div>
                   <div className="text-2xl font-bold font-mono text-rose-700 mt-1">{preview.invalidPhoneCount}</div>
                 </div>
@@ -927,9 +924,9 @@ export function MarketingModuleView() {
                 <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5">
                   Applicant Sample Preview (First {preview.previewRows.length} rows)
                 </h4>
-                <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <div className="overflow-x-auto border border-slate-200 rounded-xl">
                   <table className="w-full text-left text-xs text-slate-700">
-                    <thead className="bg-[#f4f7fb] text-slate-700 font-semibold border-b border-slate-200">
+                    <thead className="bg-slate-50/80 text-slate-700 font-semibold border-b border-slate-200">
                       <tr>
                         <th className="px-4 py-2.5">Name & Father</th>
                         <th className="px-3 py-2.5">Raw Phone</th>
@@ -971,9 +968,9 @@ export function MarketingModuleView() {
 
               {/* Stage 2 Action Bar */}
               {preview.validCount > 0 && campaigns.length > 0 && (
-                <div className="p-4 rounded-lg bg-slate-50 border border-slate-300 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="p-4 rounded-xl bg-slate-50/80 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div>
-                    <div className="text-xs font-bold uppercase tracking-wider text-slate-800">Step 2B: Ingest Validated Applicants</div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-800">Assign & Ingest Validated Applicants</div>
                     <div className="text-xs text-slate-600 mt-0.5">{preview.validCount} verified applicant records ready to attach to campaign.</div>
                   </div>
 
@@ -981,7 +978,7 @@ export function MarketingModuleView() {
                     <select
                       value={selectedTargetCampaign}
                       onChange={(e) => setSelectedTargetCampaign(e.target.value)}
-                      className="px-3 py-1.5 rounded-md bg-white border border-slate-300 text-slate-900 text-xs focus:border-blue-700 focus:outline-none"
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:border-blue-700 focus:outline-none"
                     >
                       {campaigns.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -994,7 +991,7 @@ export function MarketingModuleView() {
                       type="button"
                       onClick={handleCommitLeads}
                       disabled={committing}
-                      className="px-4 py-1.5 rounded-md bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                      className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
                     >
                       {committing ? 'Adding...' : `Add ${preview.validCount} Applicants`}
                     </button>
@@ -1010,7 +1007,7 @@ export function MarketingModuleView() {
           STEP 3: SINGLE LEAD OUTREACH
           ========================================================================= */}
       {activeTab === 'single' && (
-        <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs max-w-2xl">
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs max-w-2xl">
           <div className="border-b border-slate-200 pb-4 mb-5">
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
               Single Applicant Direct Outreach
@@ -1032,7 +1029,7 @@ export function MarketingModuleView() {
                   value={singleName}
                   onChange={(e) => setSingleName(e.target.value)}
                   placeholder="e.g. Sheikh Haseeb Ur Rehman"
-                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
                 />
               </div>
 
@@ -1046,7 +1043,7 @@ export function MarketingModuleView() {
                   value={singlePhone}
                   onChange={(e) => setSinglePhone(e.target.value)}
                   placeholder="e.g. 03001234567 or 923001234567"
-                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 font-mono focus:border-blue-700 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 font-mono focus:border-blue-700 focus:outline-none"
                 />
               </div>
             </div>
@@ -1059,7 +1056,7 @@ export function MarketingModuleView() {
                 <select
                   value={singleCampaignId}
                   onChange={(e) => setSingleCampaignId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none bg-white"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none bg-white"
                 >
                   <option value="">Default (Direct Outreach)</option>
                   {campaigns.map((c) => (
@@ -1079,7 +1076,7 @@ export function MarketingModuleView() {
                   value={singleCity}
                   onChange={(e) => setSingleCity(e.target.value)}
                   placeholder="e.g. Muzaffarabad"
-                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
                 />
               </div>
 
@@ -1092,7 +1089,7 @@ export function MarketingModuleView() {
                   value={singleDegree}
                   onChange={(e) => setSingleDegree(e.target.value)}
                   placeholder="e.g. Pre-Engineering"
-                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
                 />
               </div>
             </div>
@@ -1106,7 +1103,7 @@ export function MarketingModuleView() {
                 value={singleCustomGreeting}
                 onChange={(e) => setSingleCustomGreeting(e.target.value)}
                 placeholder="Leave blank to use the official department greeting. You can use {name} for student's name."
-                className="w-full px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
               />
             </div>
 
@@ -1114,10 +1111,10 @@ export function MarketingModuleView() {
               <button
                 type="submit"
                 disabled={singleSending || !singleName.trim() || !singlePhone.trim()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer"
               >
                 <IconSend className="size-3.5" />
-                <span>{singleSending ? 'Queueing Message…' : 'Dispatch WhatsApp Greeting'}</span>
+                <span>{singleSending ? 'Queueing Message...' : 'Dispatch WhatsApp Greeting'}</span>
               </button>
             </div>
           </form>
@@ -1129,17 +1126,17 @@ export function MarketingModuleView() {
           ========================================================================= */}
       {activeTab === 'leads' && (
         <section className="space-y-4">
-          <div className="rounded-xl border border-slate-300 bg-white p-4 shadow-xs">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-xs">
             {/* Filter Pills and Search Bar */}
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/90 rounded-xl border border-slate-200/80">
                 <button
                   type="button"
                   onClick={() => { setLeadStatusFilter(''); setLeadStateFilter(''); setLeadsPage(0); }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`rounded-lg px-3 py-1.5 text-xs transition cursor-pointer font-medium ${
                     !leadStatusFilter
-                      ? 'bg-blue-700 text-white shadow-2xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
                   All ({leadsSummary.total || leadsTotal})
@@ -1147,35 +1144,38 @@ export function MarketingModuleView() {
                 <button
                   type="button"
                   onClick={() => { setLeadStatusFilter('ELIGIBLE'); setLeadStateFilter(''); setLeadsPage(0); }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition cursor-pointer font-medium ${
                     leadStatusFilter === 'ELIGIBLE'
-                      ? 'bg-emerald-700 text-white shadow-2xs'
-                      : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                      ? 'bg-white text-emerald-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Qualified ({leadsSummary.qualified || 0})
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  <span>Qualified ({leadsSummary.qualified || 0})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setLeadStatusFilter('PENDING'); setLeadStateFilter(''); setLeadsPage(0); }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition cursor-pointer font-medium ${
                     leadStatusFilter === 'PENDING'
-                      ? 'bg-amber-700 text-white shadow-2xs'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                      ? 'bg-white text-amber-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Pending ({leadsSummary.pending || 0})
+                  <span className="size-2 rounded-full bg-amber-500" />
+                  <span>Pending ({leadsSummary.pending || 0})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setLeadStatusFilter('INELIGIBLE'); setLeadStateFilter(''); setLeadsPage(0); }}
-                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition cursor-pointer font-medium ${
                     leadStatusFilter === 'INELIGIBLE'
-                      ? 'bg-rose-700 text-white shadow-2xs'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+                      ? 'bg-white text-rose-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Ineligible ({leadsSummary.ineligible || 0})
+                  <span className="size-2 rounded-full bg-rose-500" />
+                  <span>Ineligible ({leadsSummary.ineligible || 0})</span>
                 </button>
               </div>
 
@@ -1186,8 +1186,8 @@ export function MarketingModuleView() {
                     type="text"
                     value={leadSearch}
                     onChange={(e) => setLeadSearch(e.target.value)}
-                    placeholder="Search name, phone, CNIC…"
-                    className="w-full rounded-md border border-slate-300 bg-slate-50/50 py-1.5 pl-8 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-700 focus:bg-white focus:outline-none"
+                    placeholder="Search name, phone, CNIC..."
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-8 pr-3 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-700 focus:bg-white focus:outline-none"
                   />
                   {leadSearch && (
                     <button
@@ -1204,7 +1204,7 @@ export function MarketingModuleView() {
                   <select
                     value={leadCampaignFilter}
                     onChange={(e) => { setLeadCampaignFilter(e.target.value); setLeadsPage(0); }}
-                    className="rounded-md border border-slate-300 bg-slate-50/50 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-blue-700 focus:bg-white focus:outline-none"
+                    className="rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-blue-700 focus:bg-white focus:outline-none"
                   >
                     <option value="">All Campaigns</option>
                     {campaigns.map((c) => (
@@ -1215,7 +1215,7 @@ export function MarketingModuleView() {
 
                 <button
                   type="submit"
-                  className="rounded-md bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-800 cursor-pointer"
+                  className="rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-800 cursor-pointer"
                 >
                   Search
                 </button>
@@ -1223,7 +1223,7 @@ export function MarketingModuleView() {
                   type="button"
                   onClick={loadLeads}
                   disabled={leadsLoading}
-                  className="inline-flex size-8 items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex size-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
                   title="Refresh leads list"
                 >
                   <IconRefresh className="size-3.5" />
@@ -1233,11 +1233,11 @@ export function MarketingModuleView() {
           </div>
 
           {/* Leads Table */}
-          <div className="rounded-xl border border-slate-300 bg-white overflow-hidden shadow-xs">
+          <div className="rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-xs">
             {leadsLoading ? (
               <div className="grid min-h-56 place-content-center justify-items-center gap-3 text-sm text-slate-500">
                 <span className="size-6 animate-spin rounded-full border-2 border-slate-200 border-t-blue-700" />
-                <span>Loading student records…</span>
+                <span>Loading student records...</span>
               </div>
             ) : leads.length === 0 ? (
               <div className="grid min-h-56 place-content-center justify-items-center px-6 py-10 text-center">
@@ -1252,7 +1252,7 @@ export function MarketingModuleView() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[850px] text-left text-xs text-slate-700">
-                  <thead className="border-b border-slate-200 bg-[#f4f7fb] text-[11px] font-semibold uppercase tracking-[.05em] text-slate-700">
+                  <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
                     <tr>
                       <th className="px-5 py-3">Student Details</th>
                       <th className="px-4 py-3">Contact</th>
@@ -1342,7 +1342,7 @@ export function MarketingModuleView() {
                             <button
                               type="button"
                               onClick={() => openEditModal(lead)}
-                              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer transition"
                               title="Edit student profile"
                             >
                               <IconPencil className="size-3" />
@@ -1351,7 +1351,7 @@ export function MarketingModuleView() {
                             <button
                               type="button"
                               onClick={() => handleDeleteLead(lead)}
-                              className="inline-flex items-center rounded border border-slate-200 bg-white p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
+                              className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-700 cursor-pointer transition"
                               title="Delete record"
                             >
                               <IconClose className="size-3" />
@@ -1376,7 +1376,7 @@ export function MarketingModuleView() {
                     type="button"
                     disabled={leadsPage === 0 || leadsLoading}
                     onClick={() => setLeadsPage((p) => Math.max(0, p - 1))}
-                    className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer transition"
                   >
                     Previous
                   </button>
@@ -1387,7 +1387,7 @@ export function MarketingModuleView() {
                     type="button"
                     disabled={leadsPage + 1 >= totalLeadPages || leadsLoading}
                     onClick={() => setLeadsPage((p) => Math.min(totalLeadPages - 1, p + 1))}
-                    className="rounded border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer transition"
                   >
                     Next
                   </button>
@@ -1399,14 +1399,14 @@ export function MarketingModuleView() {
       )}
 
       {/* =========================================================================
-          STEP 5: WHATSAPP BOT SIMULATOR (CLEAN & OLD-SCHOOL INSTITUTIONAL)
+          STEP 5: WHATSAPP BOT SIMULATOR
           ========================================================================= */}
       {activeTab === 'simulator' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Main Simulator Pane */}
-          <div className="lg:col-span-2 bg-white border border-slate-300 rounded-xl overflow-hidden shadow-xs flex flex-col h-[640px]">
+          <div className="lg:col-span-2 bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs flex flex-col h-[640px]">
             {/* Header */}
-            <div className="px-5 py-3.5 border-b border-slate-200 bg-[#f4f7fb] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="px-5 py-3.5 border-b border-slate-200 bg-slate-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
                   <IconChat className="size-4 text-blue-700" />
@@ -1424,7 +1424,7 @@ export function MarketingModuleView() {
                 <button
                   type="button"
                   onClick={() => handleSwitchSimPhone(simPhone)}
-                  className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer transition"
                   title="Reset conversation for this number"
                 >
                   <IconRefresh className="size-3" />
@@ -1434,7 +1434,7 @@ export function MarketingModuleView() {
             </div>
 
             {/* Applicant Selector Toolbar */}
-            <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="px-5 py-2.5 bg-slate-50/60 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-700">Test Candidate Line:</span>
                 <input
@@ -1442,12 +1442,12 @@ export function MarketingModuleView() {
                   value={simPhoneInput}
                   onChange={(e) => setSimPhoneInput(e.target.value)}
                   placeholder="e.g. 923001234567"
-                  className="px-2.5 py-1 rounded border border-slate-300 text-xs font-mono w-36 bg-white text-slate-900 focus:outline-none focus:border-blue-700"
+                  className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-mono w-36 bg-white text-slate-900 focus:outline-none focus:border-blue-700"
                 />
                 <button
                   type="button"
                   onClick={() => handleSwitchSimPhone(simPhoneInput)}
-                  className="px-2.5 py-1 rounded bg-blue-700 text-white font-semibold hover:bg-blue-800 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-blue-700 text-white font-semibold hover:bg-blue-800 cursor-pointer transition"
                 >
                   Switch
                 </button>
@@ -1458,14 +1458,14 @@ export function MarketingModuleView() {
                 <button
                   type="button"
                   onClick={() => handleSwitchSimPhone('923001234567')}
-                  className="px-2 py-0.5 rounded border border-slate-300 bg-white text-slate-700 font-mono hover:bg-slate-100 cursor-pointer"
+                  className="px-2 py-0.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-mono hover:bg-slate-100 cursor-pointer transition"
                 >
                   Candidate (+923001234567)
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSwitchSimPhone('923408195018')}
-                  className="px-2 py-0.5 rounded border border-slate-300 bg-white text-slate-700 font-mono hover:bg-slate-100 cursor-pointer"
+                  className="px-2 py-0.5 rounded-lg border border-slate-200 bg-white text-slate-700 font-mono hover:bg-slate-100 cursor-pointer transition"
                 >
                   Staff (+923408195018)
                 </button>
@@ -1473,9 +1473,9 @@ export function MarketingModuleView() {
             </div>
 
             {/* Chat Transcript Area */}
-            <div className="flex-1 p-5 overflow-y-auto space-y-3.5 bg-slate-50/40">
+            <div className="flex-1 p-5 overflow-y-auto space-y-3.5 bg-slate-50/30">
               {simTurnState === 'QUALIFIED' && (
-                <div className="p-3.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-xs shadow-2xs">
+                <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/80 text-amber-900 text-xs shadow-2xs">
                   <div className="font-bold flex items-center gap-1.5 mb-0.5">
                     <IconCheck className="size-4 text-emerald-700" />
                     <span>Candidate Qualified — 60-Second Grace Window Active</span>
@@ -1491,10 +1491,10 @@ export function MarketingModuleView() {
                   key={idx}
                   className={`flex ${m.direction === 'INBOUND' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div className={`max-w-[80%] rounded-lg p-3 text-xs shadow-2xs ${
+                  <div className={`max-w-[80%] rounded-xl p-3.5 text-xs shadow-xs ${
                     m.direction === 'INBOUND'
                       ? 'bg-slate-800 text-white'
-                      : 'bg-white text-slate-900 border border-slate-300'
+                      : 'bg-white text-slate-900 border border-slate-200'
                   }`}>
                     <div className="flex items-center justify-between gap-3 pb-1 mb-1 border-b border-white/20 text-[10px] font-mono">
                       <span className="font-bold uppercase tracking-wider">
@@ -1514,15 +1514,15 @@ export function MarketingModuleView() {
             <form onSubmit={handleSendSimulatedTurn} className="p-3.5 border-t border-slate-200 bg-white flex gap-2">
               <input
                 type="text"
-                placeholder="Type candidate reply (e.g. 'Yes', 'Pre-Engineering', '840', 'can I write my name again')…"
+                placeholder="Type candidate reply (e.g. 'Yes', 'Pre-Engineering', '840', 'can I write my name again')..."
                 value={simMessage}
                 onChange={(e) => setSimMessage(e.target.value)}
-                className="flex-1 px-3 py-2 rounded-md border border-slate-300 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
+                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none"
               />
               <button
                 type="submit"
                 disabled={simSending || !simMessage.trim()}
-                className="px-4 py-2 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
               >
                 <IconSend className="size-3.5" />
                 <span>Send</span>
@@ -1533,7 +1533,7 @@ export function MarketingModuleView() {
           {/* Reference & Directives Sidebar */}
           <div className="space-y-4">
             {/* Department Active WhatsApp Line Card */}
-            <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-xs">
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
               <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-1">
                 Department WhatsApp Line
               </h3>
@@ -1546,40 +1546,40 @@ export function MarketingModuleView() {
                   value={customWhatsAppInput}
                   onChange={(e) => setCustomWhatsAppInput(e.target.value)}
                   placeholder="e.g. 923408195018"
-                  className="w-full px-3 py-1.5 text-xs font-mono rounded border border-slate-300 bg-white text-slate-900 focus:outline-none focus:border-blue-700"
+                  className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-white text-slate-900 focus:outline-none focus:border-blue-700"
                 />
                 <button
                   type="submit"
                   disabled={savingWhatsAppNumber || !customWhatsAppInput.trim()}
-                  className="w-full py-1.5 px-3 text-xs font-semibold rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 cursor-pointer transition"
+                  className="w-full py-1.5 px-3 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50 cursor-pointer transition"
                 >
-                  {savingWhatsAppNumber ? 'Saving…' : 'Update Line Number'}
+                  {savingWhatsAppNumber ? 'Saving...' : 'Update Line Number'}
                 </button>
               </form>
             </div>
 
             {/* Counselor Intake Directives Card */}
-            <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-xs space-y-3">
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs space-y-3">
               <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
                 Intake Directives & Rules
               </h3>
               <div className="text-xs text-slate-700 space-y-2.5">
-                <div className="p-2.5 rounded border border-slate-200 bg-slate-50">
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
                   <div className="font-bold text-slate-900 mb-0.5">Short Academic Abbreviations</div>
                   <div className="text-[11px] text-slate-600">Accepts "pre eng", "ics", "med", "pre med", "dae" without requiring case-sensitive names.</div>
                 </div>
 
-                <div className="p-2.5 rounded border border-slate-200 bg-slate-50">
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
                   <div className="font-bold text-slate-900 mb-0.5">Minimum 50% Threshold</div>
                   <div className="text-[11px] text-slate-600">Requires 550 / 1100 marks and Mathematics for BS Software Engineering qualification.</div>
                 </div>
 
-                <div className="p-2.5 rounded border border-slate-200 bg-slate-50">
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
                   <div className="font-bold text-slate-900 mb-0.5">General Inquiries Interception</div>
                   <div className="text-[11px] text-slate-600">Answers inquiries regarding hostel, fees, or entrance tests before prompting for the next intake step.</div>
                 </div>
 
-                <div className="p-2.5 rounded border border-slate-200 bg-slate-50">
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
                   <div className="font-bold text-slate-900 mb-0.5">60s Correction Grace</div>
                   <div className="text-[11px] text-slate-600">Allows candidates to adjust marks, name, or CNIC before generating document upload access.</div>
                 </div>
@@ -1590,11 +1590,11 @@ export function MarketingModuleView() {
       )}
 
       {/* =========================================================================
-          STEP 6: BOT KNOWLEDGE & RULES (CLEAN & OLD-SCHOOL INSTITUTIONAL)
+          STEP 6: BOT KNOWLEDGE & RULES
           ========================================================================= */}
       {activeTab === 'knowledge' && (
         <div className="space-y-6">
-          <div className="bg-white border border-slate-300 rounded-xl p-6 shadow-xs">
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs">
             {/* Institutional Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
               <div>
@@ -1616,7 +1616,7 @@ export function MarketingModuleView() {
                   type="button"
                   onClick={loadKnowledge}
                   disabled={loadingKnowledge}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 cursor-pointer disabled:opacity-50 transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 cursor-pointer disabled:opacity-50 transition"
                 >
                   <IconRefresh className="size-3.5" />
                   <span>Reload</span>
@@ -1625,35 +1625,35 @@ export function MarketingModuleView() {
                   type="button"
                   onClick={handleSaveKnowledge}
                   disabled={savingKnowledge}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-2xs transition"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-2xs transition"
                 >
                   <IconCheck className="size-3.5" />
-                  <span>{savingKnowledge ? 'Deploying…' : 'Save & Deploy Directives'}</span>
+                  <span>{savingKnowledge ? 'Deploying...' : 'Save & Deploy Directives'}</span>
                 </button>
               </div>
             </div>
 
             {/* Institutional Metadata Ribbon */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4 border-b border-slate-200 text-xs">
-              <div className="p-3 bg-slate-50 rounded border border-slate-200">
+              <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/80">
                 <div className="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">Last Synchronized</div>
                 <div className="font-semibold text-slate-900 mt-0.5">
                   {knowledgeMeta?.updatedAt ? new Date(knowledgeMeta.updatedAt).toLocaleString() : 'System Default'}
                 </div>
               </div>
-              <div className="p-3 bg-slate-50 rounded border border-slate-200">
+              <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/80">
                 <div className="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">Directive Length</div>
                 <div className="font-semibold text-slate-900 mt-0.5">
                   {knowledgeMeta?.charCount || knowledgeText.length} characters
                 </div>
               </div>
-              <div className="p-3 bg-slate-50 rounded border border-slate-200">
+              <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/80">
                 <div className="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">Word Count</div>
                 <div className="font-semibold text-slate-900 mt-0.5">
                   {knowledgeMeta?.wordCount || (knowledgeText.trim() ? knowledgeText.trim().split(/\s+/).length : 0)} words
                 </div>
               </div>
-              <div className="p-3 bg-slate-50 rounded border border-slate-200">
+              <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/80">
                 <div className="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">Storage File</div>
                 <div className="font-semibold text-slate-900 mt-0.5 font-mono text-[11px] truncate">
                   server/data/knowledge.txt
@@ -1662,7 +1662,7 @@ export function MarketingModuleView() {
             </div>
 
             {/* Clean Document File Upload Bar */}
-            <div className="my-5 p-4 rounded-lg border border-slate-200 bg-slate-50/70">
+            <div className="my-5 p-4 rounded-xl border border-slate-200 bg-slate-50/60">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <div className="text-xs font-bold text-slate-900 uppercase tracking-wider">
@@ -1684,7 +1684,7 @@ export function MarketingModuleView() {
                   />
                   <label
                     htmlFor="knowledgeDocUpload"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-300 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer shadow-2xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-800 text-xs font-semibold hover:bg-slate-50 cursor-pointer shadow-2xs transition"
                   >
                     <IconUploadCloud className="size-3.5 text-blue-700" />
                     <span>Select Document</span>
@@ -1708,7 +1708,7 @@ export function MarketingModuleView() {
                 value={knowledgeText}
                 onChange={(e) => setKnowledgeText(e.target.value)}
                 placeholder="Paste admissions requirements, program eligibility, deadlines, fee details, and FAQ answers..."
-                className="w-full p-3.5 rounded-lg border border-slate-300 font-mono text-xs text-slate-900 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-blue-700 leading-relaxed resize-y"
+                className="w-full p-3.5 rounded-xl border border-slate-200 font-mono text-xs text-slate-900 bg-slate-50/30 focus:bg-white focus:outline-none focus:border-blue-700 leading-relaxed resize-y"
               />
               <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
                 <span className="text-xs text-slate-500">
@@ -1718,23 +1718,23 @@ export function MarketingModuleView() {
                   type="button"
                   onClick={handleSaveKnowledge}
                   disabled={savingKnowledge}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-2xs"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg bg-blue-700 text-white hover:bg-blue-800 cursor-pointer disabled:opacity-50 shadow-2xs transition"
                 >
                   <IconCheck className="size-3.5" />
-                  <span>{savingKnowledge ? 'Saving…' : 'Save & Deploy Directives'}</span>
+                  <span>{savingKnowledge ? 'Saving...' : 'Save & Deploy Directives'}</span>
                 </button>
               </div>
             </div>
           </div>
 
           {/* Institutional Rule Governance Table */}
-          <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-xs">
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">
               Directives Enforcement Matrix
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border border-slate-200">
-                <thead className="bg-[#f4f7fb] border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
+                <thead className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-700">
                   <tr>
                     <th className="px-4 py-2.5">Directive</th>
                     <th className="px-3 py-2.5">Level</th>
@@ -1789,8 +1789,8 @@ export function MarketingModuleView() {
           EDIT STUDENT RECORD MODAL
           ========================================================================= */}
       {editLeadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs">
-          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-2xl border border-slate-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-xs">
+          <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Edit Candidate Record</h3>
@@ -1801,7 +1801,7 @@ export function MarketingModuleView() {
               <button
                 type="button"
                 onClick={() => setEditLeadModal(null)}
-                className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer"
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 cursor-pointer transition"
               >
                 <IconClose className="size-4" />
               </button>
@@ -2010,16 +2010,16 @@ export function MarketingModuleView() {
                 <button
                   type="button"
                   onClick={() => setEditLeadModal(null)}
-                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                  className="rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={updatingLead || !editForm.fullName.trim() || !editForm.phone.trim()}
-                  className="rounded bg-blue-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50 cursor-pointer shadow-2xs"
+                  className="rounded-lg bg-blue-700 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50 cursor-pointer shadow-2xs transition"
                 >
-                  {updatingLead ? 'Saving Changes…' : 'Save Changes'}
+                  {updatingLead ? 'Saving Changes...' : 'Save Changes'}
                 </button>
               </div>
             </form>

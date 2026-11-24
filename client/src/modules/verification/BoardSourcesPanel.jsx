@@ -280,11 +280,11 @@ export function BoardSourcesPanel() {
   return (
     <div className="space-y-6">
       {/* Refined Academic Institutional Header */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs">
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white shadow-2xs">
-              <IconShield className="size-5 text-slate-100" />
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              <IconShield className="size-5 text-blue-700" />
             </div>
             <div className="space-y-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -303,15 +303,15 @@ export function BoardSourcesPanel() {
 
           {/* Institutional Status Counters */}
           <div className="flex items-center gap-2 shrink-0">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-center min-w-[84px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">HSSC Gazettes</div>
               <div className="text-sm font-bold text-indigo-700">{hsscCount}</div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-center min-w-[84px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">SSC Gazettes</div>
               <div className="text-sm font-bold text-teal-700">{sscCount}</div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-center min-w-[84px]">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Active Total</div>
               <div className="text-sm font-bold text-emerald-700">{activeCount}</div>
             </div>
@@ -321,7 +321,7 @@ export function BoardSourcesPanel() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(340px,0.88fr)_minmax(0,1.12fr)]">
         {/* Left Column: Gazette Upload & Source Configuration Form */}
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs flex flex-col">
           <div className="border-b border-slate-100 pb-3">
             <div className="flex items-center justify-between">
               <h2 className="m-0 text-sm font-bold text-slate-900">
@@ -343,14 +343,14 @@ export function BoardSourcesPanel() {
             <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
               Archive Source Type:
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
               <button
                 type="button"
                 onClick={() => setForm({ ...form, sourceType: 'GAZETTE', resultUrl: '' })}
-                className={`flex items-center justify-center rounded-lg border py-2 px-3 text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center justify-center rounded-lg py-1.5 px-3 text-xs font-semibold transition cursor-pointer ${
                   form.sourceType === 'GAZETTE'
-                    ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-2xs font-bold'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    ? 'bg-white text-blue-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 PDF Gazette
@@ -358,10 +358,10 @@ export function BoardSourcesPanel() {
               <button
                 type="button"
                 onClick={() => setForm({ ...form, sourceType: 'PORTAL_URL', gazette: null })}
-                className={`flex items-center justify-center rounded-lg border py-2 px-3 text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center justify-center rounded-lg py-1.5 px-3 text-xs font-semibold transition cursor-pointer ${
                   form.sourceType === 'PORTAL_URL'
-                    ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-2xs font-bold'
-                    : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    ? 'bg-white text-blue-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Web Result Portal
@@ -382,10 +382,10 @@ export function BoardSourcesPanel() {
                     key={bp.name}
                     type="button"
                     onClick={() => applyBoardPreset(bp)}
-                    className={`rounded-md border px-2 py-1.5 text-[11px] font-medium transition cursor-pointer text-left truncate ${
+                    className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition cursor-pointer text-left truncate ${
                       isSelected
-                        ? 'border-blue-600 bg-blue-50 text-blue-800 font-semibold'
-                        : 'border-slate-200 bg-slate-50/70 text-slate-700 hover:bg-slate-100'
+                        ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                     title={bp.name}
                   >
@@ -399,7 +399,7 @@ export function BoardSourcesPanel() {
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             {/* Standard Archive Name Helper Bar */}
             {form.sourceType === 'GAZETTE' && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/75 p-3 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
                     Standardized Title Preview:
@@ -428,7 +428,7 @@ export function BoardSourcesPanel() {
                 value={form.boardName}
                 onChange={(event) => setForm({ ...form, boardName: event.target.value })}
                 placeholder="e.g. BISE AJK Mirpur - HSSC (FSc) 2023 Annual"
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </label>
 
@@ -439,7 +439,7 @@ export function BoardSourcesPanel() {
                 value={form.boardAliases}
                 onChange={(event) => setForm({ ...form, boardAliases: event.target.value })}
                 placeholder="e.g. AJK BISE, Mirpur Board, Federal Board, FBISE"
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <span className="mt-1 block font-normal text-[11px] text-slate-500">
                 Comma-separated names to match OCR variations printed on marksheets.
@@ -453,7 +453,7 @@ export function BoardSourcesPanel() {
                   value={form.examLevel}
                   onChange={(event) => setForm({ ...form, examLevel: event.target.value })}
                   required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
                 >
                   <option value="HSSC">FSc / HSSC (Intermediate 11th & 12th)</option>
                   <option value="SSC">Matric / SSC (Secondary 9th & 10th)</option>
@@ -469,7 +469,7 @@ export function BoardSourcesPanel() {
                   value={form.academicYear}
                   onChange={(event) => setForm({ ...form, academicYear: event.target.value.toUpperCase() })}
                   placeholder="e.g. 2024 or 2023"
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
                 />
               </label>
             </div>
@@ -481,7 +481,7 @@ export function BoardSourcesPanel() {
                   value={form.examSession}
                   onChange={(event) => setForm({ ...form, examSession: event.target.value })}
                   required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
                 >
                   <option value="ANNUAL">Annual Examination</option>
                   <option value="SECOND_ANNUAL">Supplementary / Second Annual</option>
@@ -495,7 +495,7 @@ export function BoardSourcesPanel() {
                   value={form.examPart}
                   onChange={(event) => setForm({ ...form, examPart: event.target.value })}
                   required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
                 >
                   <option value="ALL">Composite / Complete (Part I & II)</option>
                   <option value="PART_II">Part II (12th / 10th)</option>
@@ -505,11 +505,11 @@ export function BoardSourcesPanel() {
             </div>
 
             {form.sourceType === 'GAZETTE' ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-3.5">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
                 <span className="block text-xs font-semibold text-slate-800 mb-1.5">
                   Official Gazette PDF File {editingId && '(Choose file to replace existing PDF)'} *
                 </span>
-                <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white p-4 text-center hover:border-blue-500 hover:bg-blue-50/20 transition cursor-pointer">
+                <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-white p-4 text-center hover:border-blue-400 hover:bg-blue-50/20 transition cursor-pointer">
                   <IconUploadCloud className="size-6 text-slate-400 mb-1" />
                   <span className="text-xs font-medium text-slate-700">
                     {form.gazette ? form.gazette.name : 'Click to select official gazette PDF'}
@@ -544,13 +544,13 @@ export function BoardSourcesPanel() {
                 )}
               </div>
             ) : (
-              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3.5">
+              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
                 <label className="block text-xs font-semibold text-slate-700">
                   Portal Adapter
                   <select
                     value={form.portalAdapter}
                     onChange={(event) => setForm({ ...form, portalAdapter: event.target.value })}
-                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs"
+                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
                   >
                     <option value="AUTO_FORM">Automatic Public Result Form</option>
                     <option value="FBISE">FBISE Result Portal</option>
@@ -565,7 +565,7 @@ export function BoardSourcesPanel() {
                     value={form.resultUrl}
                     onChange={(event) => setForm({ ...form, resultUrl: event.target.value })}
                     placeholder="https://official-board.edu.pk/results"
-                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-300 px-3 font-normal text-xs text-slate-800 shadow-2xs"
+                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
                   />
                 </label>
               </div>
@@ -584,9 +584,9 @@ export function BoardSourcesPanel() {
             )}
 
             <div className="flex gap-2 pt-2">
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" disabled={saving} className="bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs rounded-lg">
                 {saving
-                  ? 'Indexing & Uploading…'
+                  ? 'Indexing & Uploading...'
                   : editingId
                     ? 'Save Archive Changes'
                     : form.sourceType === 'GAZETTE'
@@ -610,7 +610,7 @@ export function BoardSourcesPanel() {
         </section>
 
         {/* Right Column: Registered Examination Archives Organized by Level & Authority */}
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs flex flex-col">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col">
           {/* Header with Title, Refresh, and Level Category Filter Tabs */}
           <div className="border-b border-slate-100 bg-slate-50/80 px-5 py-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -623,7 +623,7 @@ export function BoardSourcesPanel() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="subtle" onClick={loadSources} disabled={loading}>
+                <Button size="sm" variant="subtle" onClick={loadSources} disabled={loading} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs">
                   <IconRefresh className="size-3.5 mr-1" />
                   Refresh
                 </Button>
@@ -632,14 +632,14 @@ export function BoardSourcesPanel() {
 
             {/* Level Category Filter Tabs & Search */}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60 pt-3">
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
                 <button
                   type="button"
                   onClick={() => setActiveFilter('ALL')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'ALL'
-                      ? 'bg-slate-900 text-white shadow-2xs'
-                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                      ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
                   All Sources ({sources.length})
@@ -647,35 +647,38 @@ export function BoardSourcesPanel() {
                 <button
                   type="button"
                   onClick={() => setActiveFilter('HSSC')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'HSSC'
-                      ? 'bg-indigo-700 text-white shadow-2xs'
-                      : 'bg-white border border-slate-200 text-indigo-700 hover:bg-indigo-50'
+                      ? 'bg-white text-indigo-950 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  FSc / HSSC ({hsscCount})
+                  <span className="size-2 rounded-full bg-indigo-500" />
+                  <span>FSc / HSSC ({hsscCount})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFilter('SSC')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'SSC'
-                      ? 'bg-teal-700 text-white shadow-2xs'
-                      : 'bg-white border border-slate-200 text-teal-700 hover:bg-teal-50'
+                      ? 'bg-white text-teal-950 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Matric / SSC ({sscCount})
+                  <span className="size-2 rounded-full bg-teal-500" />
+                  <span>Matric / SSC ({sscCount})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFilter('PORTAL')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'PORTAL'
-                      ? 'bg-blue-700 text-white shadow-2xs'
-                      : 'bg-white border border-slate-200 text-blue-700 hover:bg-blue-50'
+                      ? 'bg-white text-blue-950 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Result Portals ({portalCount})
+                  <span className="size-2 rounded-full bg-blue-500" />
+                  <span>Result Portals ({portalCount})</span>
                 </button>
               </div>
 
@@ -685,15 +688,15 @@ export function BoardSourcesPanel() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Filter sources…"
-                  className="h-8 w-36 sm:w-44 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none"
+                  placeholder="Filter sources..."
+                  className="h-8 w-36 sm:w-44 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none"
                 />
               </div>
             </div>
           </div>
 
           {loading ? (
-            <p className="p-8 text-center text-xs text-slate-500">Loading board sources…</p>
+            <p className="p-8 text-center text-xs text-slate-500">Loading board sources...</p>
           ) : filteredSources.length === 0 ? (
             <div className="p-8 text-center">
               <p className="text-xs font-medium text-slate-600">
@@ -973,18 +976,18 @@ function SourceCard({
               onClick={() => onToggleTester(source.id)}
               className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer border ${
                 isExpanded
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                  ? 'bg-blue-700 text-white border-blue-700 shadow-2xs'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               {isExpanded ? 'Hide Test' : 'Test Roll'}
             </button>
           )}
-          <Button size="sm" variant="subtle" onClick={() => onEdit(source)}>
+          <Button size="sm" variant="subtle" onClick={() => onEdit(source)} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs">
             Edit
           </Button>
           {source.is_active && (
-            <Button size="sm" variant="subtle" onClick={() => onDeactivate(source)}>
+            <Button size="sm" variant="subtle" onClick={() => onDeactivate(source)} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs text-rose-700 hover:text-rose-800">
               Turn off
             </Button>
           )}
@@ -993,7 +996,7 @@ function SourceCard({
 
       {/* Collapsible Roll Number Tester Drawer */}
       {isGazette && source.is_active && isExpanded && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-3 mt-2 space-y-2.5 shadow-2xs">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3.5 mt-2 space-y-2.5 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
               Test Roll Verification: {source.board_name}
@@ -1009,7 +1012,7 @@ function SourceCard({
               value={testInput}
               onChange={(e) => onTestInputChange(e.target.value)}
               placeholder="e.g. 535453 or 1056918"
-              className="h-8 w-44 rounded border border-slate-300 bg-white px-2.5 font-mono text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
+              className="h-8.5 w-48 rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -1021,9 +1024,9 @@ function SourceCard({
               type="button"
               disabled={isTesting || !testInput.trim()}
               onClick={onRunTest}
-              className="h-8 rounded bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer shadow-2xs"
+              className="h-8.5 rounded-lg bg-blue-700 px-3.5 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50 cursor-pointer shadow-2xs transition"
             >
-              {isTesting ? 'Searching…' : 'Search Gazette'}
+              {isTesting ? 'Searching...' : 'Search Gazette'}
             </button>
           </div>
 

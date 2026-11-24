@@ -1228,3 +1228,300 @@ test('VerificationDecisionService: Domicile with mismatched name -> MANUAL_REVIE
   assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW);
   assert.ok(decision.discrepancyReason.includes('does not match marksheet name'));
 });
+
+test('AdmissionIntakeService.createCandidateFromLead: mints token and dispatches WhatsApp notice for all 4 mandatory documents', async () => {
+  const executedQueries = [];
+  const outboxJobs = [];
+
+  const mockConnection = {
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+    async execute(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_students WHERE')) {
+        return [[]]; // New candidate
+      }
+      if (query.includes('INSERT INTO adm_students')) {
+        return [{ insertId: 77 }];
+      }
+      if (query.includes('UPDATE adm_students')) {
+        return [{ affectedRows: 1 }];
+      }
+      if (query.includes('INSERT INTO adm_intake_tokens')) {
+        return [{ insertId: 101 }];
+      }
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        outboxJobs.push({ query, params });
+        return [{ insertId: 501 }];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockConnection;
+    },
+  };
+
+  const leadPayload = {
+    leadId: 12,
+    fullName: 'Ali Raza',
+    fatherName: 'Muhammad Raza',
+    cnic: '82203-1234567-1',
+    phoneNormalized: '923001234567',
+    email: 'ali@example.com',
+    city: 'Muzaffarabad',
+    priorDegree: 'Pre-Engineering',
+    fscMarks: 950,
+  };
+
+  const res = await AdmissionIntakeService.createCandidateFromLead(leadPayload, mockDb);
+  assert.equal(res.studentId, 77);
+  assert.equal(res.tokenId, 101);
+
+  // Check intake token was minted for all 4 mandatory documents
+  const tokenInsert = executedQueries.find((q) => q.query.includes('INSERT INTO adm_intake_tokens'));
+  assert.ok(tokenInsert, 'Token was inserted');
+  const allowedDocTypes = JSON.parse(tokenInsert.params[2]);
+  assert.deepEqual(allowedDocTypes, [
+    DOCUMENT_TYPES.FSC_MARKSHEET,
+    DOCUMENT_TYPES.MATRIC_MARKSHEET,
+    DOCUMENT_TYPES.CNIC_FRONT,
+    DOCUMENT_TYPES.DOMICILE,
+  ]);
+
+  // Check WhatsApp outreach job was queued with all 4 documents listed
+  assert.equal(outboxJobs.length, 1);
+  const jobPayload = JSON.parse(outboxJobs[0].params[2]);
+  assert.equal(jobPayload.recipientPhone, '923001234567');
+  assert.ok(jobPayload.messageText.includes('FSc / HSSC Intermediate Marksheet'));
+  assert.ok(jobPayload.messageText.includes('Matric / SSC Marksheet'));
+  assert.ok(jobPayload.messageText.includes('CNIC / B-Form (Front Side)'));
+  assert.ok(jobPayload.messageText.includes('State Domicile Certificate'));
+  assert.ok(jobPayload.messageText.includes('Admissions Document Upload Request'));
+});
+
+test('AdmissionIntakeService.autoDispatchMissingDocumentLinks: batch request missing sends token and notice strictly for missing documents', async () => {
+  const executedQueries = [];
+  const outboxJobs = [];
+
+  const mockDb = {
+    async execute(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_students s')) {
+        return [[
+          { id: 101, full_name: 'Zahra Bibi', phone_normalized: '923009876543', overall_status: 'UNDER_REVIEW' },
+        ]];
+      }
+      if (query.includes('INSERT INTO adm_intake_tokens')) {
+        return [{ insertId: 301 }];
+      }
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        outboxJobs.push({ query, params });
+        return [{ insertId: 701 }];
+      }
+      return [[], undefined];
+    },
+    async query(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_student_documents')) {
+        // Candidate 101 has uploaded FSC, Matric, and CNIC Front, but NOT Domicile!
+        return [[
+          { student_id: 101, doc_type: 'FSC_MARKSHEET', verification_status: 'MATCHED' },
+          { student_id: 101, doc_type: 'MATRIC_MARKSHEET', verification_status: 'PORTAL_VERIFIED' },
+          { student_id: 101, doc_type: 'CNIC_FRONT', verification_status: 'MATCHED' },
+        ]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const dispatchResult = await AdmissionIntakeService.autoDispatchMissingDocumentLinks(
+    { actorId: 'admin-1', expiresInHours: 48 },
+    mockDb
+  );
+
+  assert.equal(dispatchResult.dispatched, 1);
+  assert.equal(dispatchResult.details.length, 1);
+  assert.equal(dispatchResult.details[0].studentId, 101);
+  // Specifically ONLY Domicile should be requested!
+  assert.deepEqual(dispatchResult.details[0].missingDocs, [DOCUMENT_TYPES.DOMICILE]);
+
+  // Check token was minted ONLY for DOMICILE
+  const tokenInsert = executedQueries.find((q) => q.query.includes('INSERT INTO adm_intake_tokens'));
+  assert.ok(tokenInsert, 'Token insert executed');
+  const tokenAllowedDocs = JSON.parse(tokenInsert.params[2]);
+  assert.deepEqual(tokenAllowedDocs, [DOCUMENT_TYPES.DOMICILE]);
+
+  // Check WhatsApp outreach message requests strictly the missing State Domicile Certificate
+  assert.equal(outboxJobs.length, 1);
+  const outboxPayload = JSON.parse(outboxJobs[0].params[2]);
+  assert.equal(outboxPayload.recipientPhone, '923009876543');
+  assert.ok(outboxPayload.messageText.includes('State Domicile Certificate'));
+  assert.ok(!outboxPayload.messageText.includes('FSc / HSSC Intermediate Marksheet'));
+  assert.ok(!outboxPayload.messageText.includes('Matric / SSC Marksheet'));
+  assert.ok(outboxPayload.messageText.includes('Missing Document Upload Request'));
+});
+
+test('AdmissionIntakeService.autoDispatchMissingDocumentLinks: skips candidates with all 4 mandatory documents verified', async () => {
+  const executedQueries = [];
+  const outboxJobs = [];
+
+  const mockDb = {
+    async execute(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_students s')) {
+        return [[
+          { id: 202, full_name: 'Hamza Tariq', phone_normalized: '923005556677', overall_status: 'UNDER_REVIEW' },
+        ]];
+      }
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        outboxJobs.push({ query, params });
+        return [{ insertId: 702 }];
+      }
+      return [[], undefined];
+    },
+    async query(query, params) {
+      executedQueries.push({ query, params });
+      if (query.includes('FROM adm_student_documents')) {
+        // Candidate 202 has all 4 mandatory documents verified!
+        return [[
+          { student_id: 202, doc_type: 'FSC_MARKSHEET', verification_status: 'MATCHED' },
+          { student_id: 202, doc_type: 'MATRIC_MARKSHEET', verification_status: 'PORTAL_VERIFIED' },
+          { student_id: 202, doc_type: 'CNIC_FRONT', verification_status: 'MATCHED' },
+          { student_id: 202, doc_type: 'DOMICILE', verification_status: 'MATCHED' },
+        ]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const dispatchResult = await AdmissionIntakeService.autoDispatchMissingDocumentLinks(
+    { actorId: 'admin-1', expiresInHours: 48 },
+    mockDb
+  );
+
+  assert.equal(dispatchResult.dispatched, 0);
+  assert.equal(dispatchResult.details[0].status, 'SKIPPED_ALREADY_VERIFIED');
+  assert.equal(outboxJobs.length, 0, 'No WhatsApp message dispatched for fully verified candidate');
+});
+
+test('AdmissionIntakeService.autoDispatchMissingDocumentLinks: includes rejected documents in missing documents batch request', async () => {
+  const outboxJobs = [];
+
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_students s')) {
+        return [[
+          { id: 303, full_name: 'Khadija Bibi', phone_normalized: '923008889900', overall_status: 'NEEDS_MANUAL_REVIEW' },
+        ]];
+      }
+      if (query.includes('INSERT INTO adm_intake_tokens')) {
+        return [{ insertId: 401 }];
+      }
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        outboxJobs.push({ query, params });
+        return [{ insertId: 703 }];
+      }
+      return [[], undefined];
+    },
+    async query(query) {
+      if (query.includes('FROM adm_student_documents')) {
+        // Candidate 303 has 3 verified, but CNIC Front was REJECTED by staff!
+        return [[
+          { student_id: 303, doc_type: 'FSC_MARKSHEET', verification_status: 'MATCHED' },
+          { student_id: 303, doc_type: 'MATRIC_MARKSHEET', verification_status: 'PORTAL_VERIFIED' },
+          { student_id: 303, doc_type: 'DOMICILE', verification_status: 'MATCHED' },
+          { student_id: 303, doc_type: 'CNIC_FRONT', verification_status: 'REJECTED' },
+        ]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const dispatchResult = await AdmissionIntakeService.autoDispatchMissingDocumentLinks(
+    { actorId: 'admin-1', expiresInHours: 48 },
+    mockDb
+  );
+
+  assert.equal(dispatchResult.dispatched, 1);
+  assert.deepEqual(dispatchResult.details[0].missingDocs, [DOCUMENT_TYPES.CNIC_FRONT]);
+  assert.equal(outboxJobs.length, 1);
+  const outboxPayload = JSON.parse(outboxJobs[0].params[2]);
+  assert.ok(outboxPayload.messageText.includes('CNIC / B-Form (Front Side)'));
+  assert.ok(!outboxPayload.messageText.includes('Domicile'));
+});
+
+test('AdmissionIntakeService.triggerAutoSeetLookup: automatically scrapes portal, links score, and recalibrates merit snapshot when candidate is VERIFIED', async () => {
+  const { SeetScraperService } = await import('../src/modules/merit/services/seet-scraper.service.js');
+  const { MeritSnapshotService } = await import('../src/modules/merit/services/merit-snapshot.service.js');
+
+  const originalLookup = SeetScraperService.lookupByCnic;
+  const originalSave = SeetScraperService.saveResultAndBackfill;
+  const originalSnapshot = MeritSnapshotService.calculateAndSaveSnapshot;
+
+  let lookupCalledWith = null;
+  let saveCalledWith = null;
+  let snapshotCalled = false;
+
+  SeetScraperService.lookupByCnic = async (cnic) => {
+    lookupCalledWith = cnic;
+    return {
+      found: true,
+      source: 'LIVE_PORTAL',
+      phase: 'SEET26-P2',
+      data: {
+        cnic,
+        rollNo: 'SEET26-P2-UAJK-12',
+        candidateName: 'Ibtisam Azam',
+        fatherName: 'Raja Muhammad Azam',
+        phase: 'SEET26-P2',
+        marksObtained: 55,
+        totalMarks: 100,
+        status: 'PASS',
+      },
+    };
+  };
+
+  SeetScraperService.saveResultAndBackfill = async (data) => {
+    saveCalledWith = data;
+    return { id: 1, cnic: data.cnic, marksObtained: 55 };
+  };
+
+  MeritSnapshotService.calculateAndSaveSnapshot = async () => {
+    snapshotCalled = true;
+    return { snapshotId: 10, totalRanked: 1 };
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM adm_students') && sql.includes("overall_status = 'VERIFIED'")) {
+        return [[{ id: 7080, cnic: '82701-0359416-5', full_name: 'Ibtisam Azam', entry_test_marks: null }]];
+      }
+      return [[]];
+    },
+    async execute() {
+      return [{ affectedRows: 1 }];
+    },
+  };
+
+  try {
+    AdmissionIntakeService.triggerAutoSeetLookup(7080, mockDb);
+
+    // Wait for the setImmediate microtask
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(lookupCalledWith, '82701-0359416-5', 'Should query SEET scraper with verified candidate CNIC');
+    assert.ok(saveCalledWith, 'Should save and backfill scraped result');
+    assert.equal(saveCalledWith.marksObtained, 55);
+    assert.equal(saveCalledWith.phase, 'SEET26-P2');
+    assert.equal(snapshotCalled, true, 'Should trigger automated recalculation of merit snapshot');
+  } finally {
+    SeetScraperService.lookupByCnic = originalLookup;
+    SeetScraperService.saveResultAndBackfill = originalSave;
+    MeritSnapshotService.calculateAndSaveSnapshot = originalSnapshot;
+  }
+});

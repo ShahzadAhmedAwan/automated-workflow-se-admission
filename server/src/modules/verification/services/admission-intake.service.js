@@ -300,10 +300,10 @@ export class AdmissionIntakeService {
         );
       }
 
-      // Mint initial token for marksheet verification
+      // Mint initial token for all required admission documents (all 4 mandatory documents)
       const token = await IntakeTokenService.generateToken({
         studentId,
-        allowedDocTypes: [DOCUMENT_TYPES.FSC_MARKSHEET, DOCUMENT_TYPES.MATRIC_MARKSHEET],
+        allowedDocTypes: [...MANDATORY_ADMISSION_DOCUMENTS],
         expiresInHours: 48,
         connection,
       });
@@ -312,7 +312,7 @@ export class AdmissionIntakeService {
       const uploadUrl = buildPortalUrl(token.rawToken);
       const messageText = formatUploadRequestMessage({
         studentName: lead.fullName,
-        allowedDocTypes: [DOCUMENT_TYPES.FSC_MARKSHEET, DOCUMENT_TYPES.MATRIC_MARKSHEET],
+        allowedDocTypes: [...MANDATORY_ADMISSION_DOCUMENTS],
         uploadUrl,
         expiresInHours: 48,
         headerTitle: 'Admissions Document Upload Request',
@@ -850,19 +850,29 @@ export class AdmissionIntakeService {
       );
       for (const d of docRows) {
         if (!docsByStudent[d.student_id]) docsByStudent[d.student_id] = {};
-        docsByStudent[d.student_id][d.doc_type] = {
-          status: d.verification_status,
-          isVerified: d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED',
-          reviewNotes: d.review_notes || null,
-        };
+        const isVerified = d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED';
+        const existing = docsByStudent[d.student_id][d.doc_type];
+        if (!existing || isVerified) {
+          docsByStudent[d.student_id][d.doc_type] = {
+            status: d.verification_status,
+            isVerified,
+            reviewNotes: d.review_notes || null,
+          };
+        }
       }
     }
 
     const items = rows.map((r) => {
       const studentDocs = docsByStudent[r.student_id] || {};
-      const missingMandatoryDocs = MANDATORY_ADMISSION_DOCUMENTS.filter(
-        (docType) => !studentDocs[docType] || !studentDocs[docType].isVerified
-      );
+      const missingMandatoryDocs = MANDATORY_ADMISSION_DOCUMENTS.filter((docType) => {
+        const doc = studentDocs[docType];
+        if (!doc) return true;
+        if (doc.isVerified) return false;
+        if (doc.status === DOCUMENT_VERIFICATION_STATUS.REJECTED || doc.status === DOCUMENT_VERIFICATION_STATUS.DISCREPANCY) {
+          return true;
+        }
+        return false;
+      });
 
       const problemDocs = Object.entries(studentDocs)
         .filter(([, doc]) => ['DISCREPANCY', 'REJECTED', 'MANUAL_REVIEW'].includes(doc.status))
@@ -1687,12 +1697,13 @@ export class AdmissionIntakeService {
    * For each student, determines their missing mandatory documents and sends a targeted WhatsApp link.
    */
   static async autoDispatchMissingDocumentLinks({ actorId, expiresInHours = 48 }, db = pool) {
-    // 1. Fetch all active candidates (DOCS_REQUESTED, UNDER_REVIEW, NEEDS_MANUAL_REVIEW)
+    // 1. Fetch all active candidates (PENDING, DOCS_REQUESTED, UNDER_REVIEW, NEEDS_MANUAL_REVIEW)
     const [students] = await db.execute(
       `SELECT s.id, s.full_name, s.phone_normalized, s.overall_status
          FROM adm_students s
-        WHERE s.overall_status IN (?, ?, ?)`,
+        WHERE s.overall_status IN (?, ?, ?, ?)`,
       [
+        STUDENT_OVERALL_STATUS.PENDING,
         STUDENT_OVERALL_STATUS.DOCS_REQUESTED,
         STUDENT_OVERALL_STATUS.UNDER_REVIEW,
         STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
@@ -1707,16 +1718,22 @@ export class AdmissionIntakeService {
     const [docRows] = await db.query(
       `SELECT student_id, doc_type, verification_status
          FROM adm_student_documents
-        WHERE student_id IN (${studentIds.map(() => '?').join(',')})`,
+        WHERE student_id IN (${studentIds.map(() => '?').join(',')})
+        ORDER BY id ASC`,
       studentIds
     );
 
     const docsByStudent = {};
     for (const d of docRows) {
       if (!docsByStudent[d.student_id]) docsByStudent[d.student_id] = {};
-      docsByStudent[d.student_id][d.doc_type] = {
-        isVerified: d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED',
-      };
+      const verified = d.verification_status === 'MATCHED' || d.verification_status === 'PORTAL_VERIFIED';
+      const existing = docsByStudent[d.student_id][d.doc_type];
+      if (!existing || verified) {
+        docsByStudent[d.student_id][d.doc_type] = {
+          status: d.verification_status,
+          isVerified: verified,
+        };
+      }
     }
 
     const results = [];
@@ -1729,12 +1746,22 @@ export class AdmissionIntakeService {
       }
 
       const studentDocs = docsByStudent[student.id] || {};
-      const missingDocs = MANDATORY_ADMISSION_DOCUMENTS.filter(
-        (docType) => !studentDocs[docType] || !studentDocs[docType].isVerified
-      );
+      const missingDocs = MANDATORY_ADMISSION_DOCUMENTS.filter((docType) => {
+        const doc = studentDocs[docType];
+        // 1. Never uploaded -> missing
+        if (!doc) return true;
+        // 2. Already verified -> not missing
+        if (doc.isVerified) return false;
+        // 3. Rejected or flagged discrepancy -> missing / needs re-upload
+        if (doc.status === DOCUMENT_VERIFICATION_STATUS.REJECTED || doc.status === DOCUMENT_VERIFICATION_STATUS.DISCREPANCY) {
+          return true;
+        }
+        // 4. Currently submitted and under review -> not missing
+        return false;
+      });
 
       if (missingDocs.length === 0) {
-        // All mandatory documents are already verified
+        // All mandatory documents are already verified or under review
         results.push({ studentId: student.id, name: student.full_name, status: 'SKIPPED_ALREADY_VERIFIED' });
         continue;
       }
@@ -1744,15 +1771,17 @@ export class AdmissionIntakeService {
         studentId: student.id,
         allowedDocTypes: missingDocs,
         expiresInHours,
+        connection: db,
       });
 
       const uploadUrl = buildPortalUrl(tokenData.rawToken);
+      const isPartial = missingDocs.length < MANDATORY_ADMISSION_DOCUMENTS.length;
       const messageText = formatUploadRequestMessage({
         studentName: student.full_name,
         allowedDocTypes: missingDocs,
         uploadUrl,
         expiresInHours,
-        headerTitle: 'Document Upload Request',
+        headerTitle: isPartial ? 'Missing Document Upload Request' : 'Admissions Document Upload Request',
       });
 
       await dispatchJob({
@@ -1770,6 +1799,7 @@ export class AdmissionIntakeService {
             missingDocs,
           },
         },
+        connection: db,
       });
 
       dispatchedCount += 1;
@@ -1907,10 +1937,10 @@ export class AdmissionIntakeService {
   /**
    * Non-blocking automated SEET entry test lookup and merit calculation when a candidate becomes VERIFIED
    */
-  static triggerAutoSeetLookup(studentId) {
+  static triggerAutoSeetLookup(studentId, db = pool) {
     setImmediate(async () => {
       try {
-        const [rows] = await pool.query(
+        const [rows] = await db.query(
           `SELECT id, cnic, full_name, entry_test_marks
            FROM adm_students
            WHERE id = ? AND overall_status = 'VERIFIED'`,
@@ -1919,27 +1949,62 @@ export class AdmissionIntakeService {
         if (!rows.length) return;
         const student = rows[0];
 
-        // 1. Scrape or resolve SEET score if unrecorded
-        if ((student.entry_test_marks === null || Number(student.entry_test_marks) === 0) && student.cnic) {
+        // 1. Resolve CNIC: if missing in student row, attempt recovery from CNIC_FRONT or lead record
+        let targetCnic = student.cnic;
+        if (!targetCnic) {
+          try {
+            const [cnicDocs] = await db.query(
+              `SELECT extracted_data FROM adm_student_documents
+               WHERE student_id = ? AND doc_type = 'CNIC_FRONT' AND extracted_data IS NOT NULL
+               ORDER BY id DESC LIMIT 1`,
+              [studentId]
+            );
+            if (cnicDocs.length && cnicDocs[0].extracted_data) {
+              const parsed = typeof cnicDocs[0].extracted_data === 'string'
+                ? JSON.parse(cnicDocs[0].extracted_data)
+                : cnicDocs[0].extracted_data;
+              targetCnic = parsed.cnic || parsed.cnicNumber || parsed.idNumber;
+            }
+            if (!targetCnic) {
+              const [leadRows] = await db.query(
+                `SELECT l.cnic FROM mkt_leads l JOIN adm_students s ON s.lead_id = l.id WHERE s.id = ?`,
+                [studentId]
+              );
+              if (leadRows.length && leadRows[0].cnic) targetCnic = leadRows[0].cnic;
+            }
+            if (targetCnic) {
+              await db.execute(`UPDATE adm_students SET cnic = ? WHERE id = ?`, [targetCnic, studentId]);
+            }
+          } catch {}
+        }
+
+        // 2. Automatically scrape and link SEET entrance test score if unrecorded
+        if ((student.entry_test_marks === null || Number(student.entry_test_marks) === 0) && targetCnic) {
           const { SeetScraperService } = await import('../../merit/services/seet-scraper.service.js');
           let result = null;
           try {
-            result = await SeetScraperService.lookupByCnic(student.cnic, { timeoutMs: 3500 });
-          } catch {
-            // Live network fallback
+            result = await SeetScraperService.lookupByCnic(targetCnic, { timeoutMs: 5000 });
+          } catch (lookupErr) {
+            console.error('[Auto SEET Scrape Network Error]:', lookupErr.message);
           }
-          if (!result?.found) {
-            // Simulation fallback for candidates whose CNIC is not in the live university staging DB
-            result = await SeetScraperService.lookupByCnic(student.cnic, { useSimulation: true });
+
+          // In offline test/simulation environments, allow controlled simulation fallback
+          if (!result?.found && (process.env.USE_SIMULATED_SEET === 'true' || process.env.NODE_ENV === 'test')) {
+            result = await SeetScraperService.lookupByCnic(targetCnic, { useSimulation: true });
           }
+
           if (result?.found && result?.data) {
-            await SeetScraperService.saveResultAndBackfill(result.data, pool);
+            await SeetScraperService.saveResultAndBackfill(result.data, db);
+            console.log(`[Auto SEET Trigger]: Verified student ${student.id} (${student.full_name}) linked with score ${result.data.marksObtained}/100 (${result.data.phase || 'SEET'}).`);
+          } else {
+            console.log(`[Auto SEET Trigger]: Candidate ${student.id} (${student.full_name}) checked across active phases; test score left as SEET Pending.`);
           }
         }
 
-        // 2. Automatically calculate and persist updated merit snapshot rankings!
+        // 3. Automatically calculate and persist updated merit snapshot rankings!
         const { MeritSnapshotService } = await import('../../merit/services/merit-snapshot.service.js');
-        await MeritSnapshotService.calculateAndSaveSnapshot({ isDryRun: false, iterationNumber: 1 }, pool);
+        await MeritSnapshotService.calculateAndSaveSnapshot({ isDryRun: false, iterationNumber: 1 }, db);
+        console.log(`[Auto Merit Trigger]: Recalculated merit list snapshot with verified candidate ${student.id}.`);
       } catch (err) {
         // Non-blocking auto-lookup: logs silently if university portal is temporarily unreachable
         console.error('[Auto SEET & Merit Trigger]:', err.message);

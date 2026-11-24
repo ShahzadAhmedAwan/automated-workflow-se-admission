@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-card-hover: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --font-sans: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --shadow-card: 0 8px 24px rgba(45, 77, 128, 0.06);
+  --shadow-card-hover: 0 12px 28px rgba(45, 77, 128, 0.10);
 }
 
 @layer base {
@@ -16,7 +16,7 @@
   html {
     min-width: 320px;
     min-height: 100%;
-    background-color: #f8fafc;
+    background-color: #f4f7fb;
     color-scheme: light;
   }
 
@@ -25,8 +25,11 @@
     min-height: 100vh;
     margin: 0;
     @apply font-sans text-slate-800 antialiased;
-    font-size: 13.5px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 1.55;
+    background:
+      radial-gradient(circle at 100% 0, rgba(37, 99, 235, 0.025), transparent 28rem),
+      #f4f7fb;
   }
 
   button,
@@ -62,5 +65,81 @@
 
   ::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
+  }
+}
+
+@layer components {
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  select,
+  textarea {
+    border-radius: 9px !important;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  select,
+  textarea {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
+  select:focus,
+  textarea:focus {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10) !important;
+  }
+
+  table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  table thead th {
+    background: #eef4fb;
+  }
+
+  table tbody tr {
+    transition: background-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  table tbody tr:hover {
+    background: #f8fafc;
+  }
+
+  table tbody tr:first-child td {
+    border-top: 0;
+  }
+
+  [role='tablist'] button {
+    font-family: inherit;
+  }
+
+  #main-content {
+    animation: app-content-enter 220ms ease-out;
+  }
+
+  #main-content > div > div:first-child {
+    margin-bottom: 18px;
+  }
+
+  #main-content h1 {
+    font-size: 21px;
+    letter-spacing: -0.025em;
+  }
+
+  @media (min-width: 640px) {
+    #main-content h1 {
+      font-size: 23px;
+    }
+  }
+}
+
+@keyframes app-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

@@ -55,6 +55,13 @@ meritRoutes.put(
 );
 
 // SEET Portal Scraper & Result Sync
+meritRoutes.get(
+  '/seet/phases',
+  authenticate,
+  requirePermission(MERIT_PERMISSIONS.READ),
+  MeritController.getSeetPhases
+);
+
 meritRoutes.post(
   '/seet/lookup',
   authenticate,

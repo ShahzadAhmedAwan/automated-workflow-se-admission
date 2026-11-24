@@ -1623,3 +1623,44 @@ test('LeadBotService: Candidate in QUALIFIED state can say "can I write my name 
   assert.ok(turnCorrectName.reply.includes('Muhammad Ali Raza'));
   assert.ok(turnCorrectName.reply.includes('1 minute'));
 });
+
+test('WhatsAppManager: handles concurrent messages from multiple students in parallel with per-student FIFO ordering', async () => {
+  const { WhatsAppManager } = await import('../src/core/baileys/whatsapp-manager.service.js');
+
+  const executionLog = [];
+
+  // Simulate Student A sending 2 rapid messages and Student B sending 1 message concurrently
+  const taskA1 = WhatsAppManager.enqueueForStudent('923001111111', async () => {
+    executionLog.push('A1_START');
+    await new Promise((r) => setTimeout(r, 20));
+    executionLog.push('A1_FINISH');
+    return 'Reply to A1';
+  });
+
+  const taskA2 = WhatsAppManager.enqueueForStudent('923001111111', async () => {
+    executionLog.push('A2_START');
+    await new Promise((r) => setTimeout(r, 10));
+    executionLog.push('A2_FINISH');
+    return 'Reply to A2';
+  });
+
+  const taskB1 = WhatsAppManager.enqueueForStudent('923002222222', async () => {
+    executionLog.push('B1_START');
+    await new Promise((r) => setTimeout(r, 15));
+    executionLog.push('B1_FINISH');
+    return 'Reply to B1';
+  });
+
+  const results = await Promise.all([taskA1, taskA2, taskB1]);
+  assert.deepEqual(results, ['Reply to A1', 'Reply to A2', 'Reply to B1']);
+
+  // Assertions:
+  // 1. Student B started in parallel without waiting for Student A to finish
+  assert.ok(executionLog.indexOf('B1_START') < executionLog.indexOf('A1_FINISH'), 'Student B must start concurrently without waiting for Student A');
+
+  // 2. Student A's messages ran in strict sequential order (A1 finishes before A2 starts)
+  assert.ok(executionLog.indexOf('A1_FINISH') < executionLog.indexOf('A2_START'), 'Messages from the same student must run sequentially in FIFO order');
+
+  // 3. Queue map is cleaned up after completion
+  assert.equal(WhatsAppManager.studentQueues.size, 0, 'In-flight student queue map should be empty after tasks complete');
+});

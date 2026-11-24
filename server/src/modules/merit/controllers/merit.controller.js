@@ -74,6 +74,25 @@ export class MeritController {
     }
   }
 
+  static async getSeetPhases(req, res, next) {
+    try {
+      const forceRefresh = req.query.refresh === 'true';
+      const phases = await SeetScraperService.getOrDiscoverPhases({ forceRefresh });
+      res.json({
+        status: 'success',
+        data: {
+          phases,
+          summary: phases.map((p) => p.label).join(', '),
+          lastDiscoveredAt: SeetScraperService._phasesCache.timestamp
+            ? new Date(SeetScraperService._phasesCache.timestamp).toISOString()
+            : null,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async saveSeetResult(req, res, next) {
     try {
       const payload = saveSeetResultSchema.parse(req.body);
@@ -157,8 +176,9 @@ export class MeritController {
   static async exportSnapshot(req, res, next) {
     try {
       const { filename, csvContent } = await MeritSnapshotService.exportSnapshotToCsv(Number(req.params.id));
-      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
       res.send(csvContent);
     } catch (err) {
       next(err);
@@ -174,8 +194,10 @@ export class MeritController {
       const result = await MeritSnapshotService.dispatchSelectedNotifications(
         payload.snapshotId,
         {
+          studentId: payload.studentId,
           customMessage: payload.customMessage,
           duePaymentDate: payload.duePaymentDate,
+          forceResend: payload.forceResend,
         }
       );
       res.json({ status: 'success', data: result });

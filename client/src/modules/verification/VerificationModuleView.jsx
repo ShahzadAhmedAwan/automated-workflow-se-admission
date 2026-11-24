@@ -146,7 +146,7 @@ export function VerificationModuleView() {
     const studentId = typeof student === 'object' ? student.studentId : student;
     const missingDocs = (typeof student === 'object' && student.missingDocuments?.length)
       ? student.missingDocuments
-      : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET', 'CNIC_FRONT'];
+      : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET', 'CNIC_FRONT', 'DOMICILE'];
 
     try {
       const res = await verificationApi.reissueToken({
@@ -285,10 +285,10 @@ export function VerificationModuleView() {
         value={activeTab}
         onChange={setActiveTab}
         tabs={[
-          { id: 'sources', label: '1. Official Board Gazettes (Pre-Verification)' },
-          { id: 'queue', label: '2. Candidate Verification Queue' },
-          { id: 'import', label: '3. Import Discrepancies (CSV)' },
-          { id: 'reissue', label: '4. Reissue Upload Link' },
+          { id: 'sources', label: 'Official Board Gazettes' },
+          { id: 'queue', label: 'Candidate Verification Queue', count: queueTotal || undefined },
+          { id: 'import', label: 'Import Discrepancies (CSV)' },
+          { id: 'reissue', label: 'Reissue Upload Links' },
         ]}
       />
 
@@ -299,58 +299,76 @@ export function VerificationModuleView() {
       {activeTab === 'queue' && (
         <section role="tabpanel" aria-label="Verification queue" className="space-y-4">
           {/* Clean Filter and Search Toolbar */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-              {/* Filter Pills */}
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {/* Segmented Filter Pills */}
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
                 <button
                   type="button"
                   onClick={() => { setFilterStatus(''); setQueuePage(0); }}
-                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     !filterStatus
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  All ({queueTotal})
+                  <span>All</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    !filterStatus ? 'bg-slate-100 text-slate-800' : 'bg-slate-200/80 text-slate-600'
+                  }`}>
+                    {queueTotal}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setFilterStatus('VERIFIED'); setQueuePage(0); }}
-                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     filterStatus === 'VERIFIED'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                      ? 'bg-white text-emerald-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Verified ({queueSummary.VERIFIED || 0})
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  <span>Verified</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    filterStatus === 'VERIFIED' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200/80 text-slate-600'
+                  }`}>
+                    {queueSummary.VERIFIED || 0}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setFilterStatus('NEEDS_MANUAL_REVIEW'); setQueuePage(0); }}
-                  className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     filterStatus === 'NEEDS_MANUAL_REVIEW'
-                      ? 'bg-rose-600 text-white shadow-xs'
-                      : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+                      ? 'bg-white text-rose-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
-                  Needs Review ({queueSummary.NEEDS_MANUAL_REVIEW || 0})
+                  <span className="size-2 rounded-full bg-rose-500" />
+                  <span>Needs Review</span>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    filterStatus === 'NEEDS_MANUAL_REVIEW' ? 'bg-rose-50 text-rose-700' : 'bg-slate-200/80 text-slate-600'
+                  }`}>
+                    {queueSummary.NEEDS_MANUAL_REVIEW || 0}
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => { setFilterStatus('PROBLEMS_ONLY'); setQueuePage(0); }}
-                  className={`inline-flex items-center gap-1 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
                     filterStatus === 'PROBLEMS_ONLY'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                      ? 'bg-white text-amber-900 font-semibold shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
+                  <span className="size-2 rounded-full bg-amber-500" />
                   <span>Problems Only</span>
-                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${
-                    filterStatus === 'PROBLEMS_ONLY' ? 'bg-amber-800 text-white' : 'bg-amber-200 text-amber-900'
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    filterStatus === 'PROBLEMS_ONLY' ? 'bg-amber-50 text-amber-700' : 'bg-slate-200/80 text-slate-600'
                   }`}>
                     {problemCount}
                   </span>
@@ -365,7 +383,7 @@ export function VerificationModuleView() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search candidate, phone, CNIC…"
+                    placeholder="Search candidate, phone, CNIC..."
                     className="w-full rounded-lg border border-slate-200 bg-slate-50/50 py-1.5 pl-9 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:bg-white focus:outline-none"
                   />
                   {searchQuery && (
@@ -383,14 +401,14 @@ export function VerificationModuleView() {
                   <button
                     type="button"
                     onClick={() => setDensity('compact')}
-                    className={`rounded px-2 py-0.5 font-semibold transition cursor-pointer ${density === 'compact' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'compact' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
                   >
                     Table
                   </button>
                   <button
                     type="button"
                     onClick={() => setDensity('spacious')}
-                    className={`rounded px-2 py-0.5 font-semibold transition cursor-pointer ${density === 'spacious' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+                    className={`rounded px-2.5 py-1 font-semibold transition cursor-pointer ${density === 'spacious' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
                   >
                     Cards
                   </button>
@@ -401,10 +419,10 @@ export function VerificationModuleView() {
                   variant="subtle"
                   onClick={handleAutoDispatchMissing}
                   disabled={autoDispatching || loading}
-                  className="text-xs"
+                  className="text-xs border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
                 >
                   <IconSend className="size-3 text-blue-600" />
-                  <span>{autoDispatching ? 'Dispatching…' : 'Batch Request Missing'}</span>
+                  <span>{autoDispatching ? 'Dispatching...' : 'Batch Request Missing'}</span>
                 </Button>
 
                 <button
@@ -422,12 +440,12 @@ export function VerificationModuleView() {
 
           {/* Queue Cards / Table */}
           {loading ? (
-            <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-xs text-slate-500 shadow-xs">
+            <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center text-xs text-slate-500 shadow-xs">
               <span className="size-6 animate-spin rounded-full border-2 border-blue-100 border-t-blue-600 inline-block mb-3" />
-              <p className="m-0">Loading verification records…</p>
+              <p className="m-0">Loading verification records...</p>
             </div>
           ) : queue.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center shadow-xs">
+            <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-xs">
               <span className="grid size-12 place-items-center rounded-full bg-blue-50 text-blue-700 mx-auto">
                 <IconDocumentCheck className="size-6" />
               </span>
@@ -445,7 +463,7 @@ export function VerificationModuleView() {
                   onClick={() => { setFilterStatus(''); setQueuePage(0); }}
                   className="mt-3 text-xs font-semibold text-blue-700 hover:underline cursor-pointer"
                 >
-                  View all active candidates →
+                  View all active candidates
                 </button>
               )}
             </div>
@@ -455,13 +473,14 @@ export function VerificationModuleView() {
               {queue.map((item) => {
                 const isExpanded = Boolean(expandedDocs[item.studentId]);
                 const docKeys = [
-                  { key: 'CNIC_FRONT', label: 'CNIC Front' },
-                  { key: 'CNIC_BACK', label: 'CNIC Back' },
-                  { key: 'FSC_MARKSHEET', label: 'FSc Marksheet' },
-                  { key: 'MATRIC_MARKSHEET', label: 'Matric Marksheet' },
-                  { key: 'DOMICILE', label: 'Domicile Certificate' },
+                  { key: 'FSC_MARKSHEET', label: 'FSc Marksheet', mandatory: true },
+                  { key: 'MATRIC_MARKSHEET', label: 'Matric Marksheet', mandatory: true },
+                  { key: 'CNIC_FRONT', label: 'CNIC Front', mandatory: true },
+                  { key: 'DOMICILE', label: 'Domicile Certificate', mandatory: true },
+                  { key: 'CNIC_BACK', label: 'CNIC Back', mandatory: false },
                 ];
-                const verifiedDocsCount = docKeys.filter((d) => item.verifiedDocuments?.[d.key]?.isVerified).length;
+                const mandatoryDocKeys = docKeys.filter((d) => d.mandatory !== false);
+                const verifiedDocsCount = mandatoryDocKeys.filter((d) => item.verifiedDocuments?.[d.key]?.isVerified).length;
                 const hasItemProblem = item.overallStatus !== 'VERIFIED' && Boolean(
                   item.overallStatus === 'NEEDS_MANUAL_REVIEW' ||
                   item.hasProblem ||
@@ -607,7 +626,7 @@ export function VerificationModuleView() {
                         </span>
                         <div className="mt-1 flex items-center gap-2">
                           <strong className="text-slate-900 font-bold">
-                            {verifiedDocsCount} of {docKeys.length} verified
+                            {verifiedDocsCount} of {mandatoryDocKeys.length} verified
                           </strong>
                         </div>
                         <button
@@ -615,7 +634,7 @@ export function VerificationModuleView() {
                           onClick={() => toggleDocExpand(item.studentId)}
                           className="mt-1 text-[11px] font-semibold text-blue-700 hover:underline cursor-pointer"
                         >
-                          {isExpanded ? 'Hide documents ▲' : 'Show checklist ▼'}
+                          {isExpanded ? 'Hide documents' : 'Show checklist'}
                         </button>
                       </div>
                     </div>
@@ -647,9 +666,9 @@ export function VerificationModuleView() {
                                 }`}
                               >
                                 <div className="flex items-center gap-2">
-                                  <span className="font-bold">
-                                    {isVerified ? '✓' : hasIssue ? '✕' : hasUploaded ? '●' : '○'}
-                                  </span>
+                                  <span className={`size-2 rounded-full ${
+                                    isVerified ? 'bg-emerald-500' : hasIssue ? 'bg-rose-500' : hasUploaded ? 'bg-amber-500' : 'bg-slate-300'
+                                  }`} />
                                   <span className="font-semibold">{docDef.label}</span>
                                 </div>
                                 <span className="font-mono text-[10px] font-bold">
@@ -667,14 +686,20 @@ export function VerificationModuleView() {
                       <div className="text-[11px] text-slate-500">
                         {item.missingDocuments?.length ? (
                           <span>
-                            Pending required documents:{' '}
+                            Missing documents to upload:{' '}
                             <strong className="text-amber-700">
-                              {item.missingDocuments.join(', ')}
+                              {item.missingDocuments.map((d) => d.replace(/_/g, ' ')).join(', ')}
                             </strong>
                           </span>
+                        ) : item.overallStatus === 'VERIFIED' ? (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                            <IconCheck className="size-3.5" />
+                            <span>All mandatory documents verified</span>
+                          </span>
                         ) : (
-                          <span className="text-emerald-700 font-medium">
-                            All mandatory documents verified
+                          <span className="inline-flex items-center gap-1.5 text-blue-700 font-medium">
+                            <span className="size-1.5 rounded-full bg-blue-600" />
+                            <span>All documents uploaded · Review in progress</span>
                           </span>
                         )}
                       </div>
@@ -695,7 +720,7 @@ export function VerificationModuleView() {
                           onClick={() => {
                             setReissueForm({
                               studentId: item.studentId,
-                              docTypes: item.missingDocuments?.length ? item.missingDocuments : ['FSC_MARKSHEET'],
+                              docTypes: item.missingDocuments?.length ? item.missingDocuments : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET', 'CNIC_FRONT', 'DOMICILE'],
                               expiresInHours: 48,
                             });
                             setActiveTab('reissue');
@@ -712,9 +737,9 @@ export function VerificationModuleView() {
             </div>
           ) : (
             /* ================= COMPACT TABLE VIEW ================= */
-            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-xs">
               <table className="w-full text-left text-xs text-slate-700">
-                <thead className="border-b border-slate-100 bg-[#f8fafc] text-[11px] font-semibold uppercase tracking-[.05em] text-slate-600">
+                <thead className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
                   <tr>
                     <th className="px-5 py-3.5">Candidate Details</th>
                     <th className="px-4 py-3.5">Contact</th>
@@ -853,9 +878,9 @@ export function VerificationModuleView() {
         </section>
       )}
 
-      {/* Tab 2: Discrepancy Ingest */}
+      {/* Tab 3: Discrepancy Ingest */}
       {activeTab === 'import' && (
-        <section role="tabpanel" aria-label="Import discrepancies" className="max-w-3xl rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+        <section role="tabpanel" aria-label="Import discrepancies" className="max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
           <h2 className="m-0 text-base font-bold text-slate-900">Import Discrepancies CSV</h2>
           <p className="mb-0 mt-1 text-xs text-slate-500">
             Upload an administrative discrepancy spreadsheet of applicants with missing or mismatched documents.
@@ -880,8 +905,8 @@ export function VerificationModuleView() {
               </label>
             </div>
 
-            <Button type="submit" disabled={!importFile || importing} className="min-h-10 w-full text-xs sm:w-auto sm:px-5">
-              {importing ? 'Importing…' : 'Import and send links'}
+            <Button type="submit" disabled={!importFile || importing} className="min-h-10 w-full text-xs font-semibold sm:w-auto sm:px-5">
+              {importing ? 'Importing...' : 'Import and send links'}
             </Button>
           </form>
 
@@ -898,9 +923,9 @@ export function VerificationModuleView() {
         </section>
       )}
 
-      {/* Tab 3: Reissue Token */}
+      {/* Tab 4: Reissue Token */}
       {activeTab === 'reissue' && (
-        <section role="tabpanel" aria-label="Reissue upload link" className="max-w-3xl rounded-xl border border-slate-200 bg-white p-6 shadow-xs">
+        <section role="tabpanel" aria-label="Reissue upload link" className="max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <h2 className="m-0 text-base font-bold text-slate-900">Reissue Upload Link & Request Missing Documents</h2>
@@ -913,15 +938,15 @@ export function VerificationModuleView() {
               variant="subtle"
               onClick={loadQueue}
               disabled={loading}
-              className="border border-slate-200 bg-white text-xs"
+              className="border border-slate-200 bg-white hover:bg-slate-50 text-xs"
             >
               Refresh Candidates
             </Button>
           </div>
 
           {/* Candidate Selection Dropdown */}
-          <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50/40 p-4 text-xs">
-            <label className="block font-semibold text-blue-950 mb-1.5">
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/50 p-4 text-xs">
+            <label className="block font-semibold text-slate-900 mb-1.5">
               Select Candidate to inspect missing documents:
             </label>
             <select
@@ -932,10 +957,10 @@ export function VerificationModuleView() {
                 setReissueForm((prev) => ({
                   ...prev,
                   studentId: val,
-                  docTypes: c?.missingDocuments?.length ? c.missingDocuments : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET'],
+                  docTypes: c?.missingDocuments?.length ? c.missingDocuments : ['FSC_MARKSHEET', 'MATRIC_MARKSHEET', 'CNIC_FRONT', 'DOMICILE'],
                 }));
               }}
-              className="w-full rounded-lg border border-blue-300 bg-white p-2.5 text-xs font-medium text-slate-800 shadow-2xs focus:border-blue-500 focus:outline-hidden"
+              className="w-full rounded-lg border border-slate-200 bg-white p-2.5 text-xs font-medium text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
             >
               <option value="">-- Choose Candidate ({queue.length} in current view) --</option>
               {queue.map((c) => (
@@ -968,11 +993,11 @@ export function VerificationModuleView() {
                 <span className="text-[11px] font-semibold text-slate-700">Verification Status by Document:</span>
                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                   {[
-                    { key: 'CNIC_FRONT', label: 'CNIC Front', mandatory: true },
-                    { key: 'CNIC_BACK', label: 'CNIC Back', mandatory: false },
                     { key: 'FSC_MARKSHEET', label: 'FSc / HSSC Marksheet', mandatory: true },
                     { key: 'MATRIC_MARKSHEET', label: 'Matric / SSC Marksheet', mandatory: true },
-                    { key: 'DOMICILE', label: 'Domicile Certificate', mandatory: false },
+                    { key: 'CNIC_FRONT', label: 'CNIC Front', mandatory: true },
+                    { key: 'DOMICILE', label: 'Domicile Certificate', mandatory: true },
+                    { key: 'CNIC_BACK', label: 'CNIC Back', mandatory: false },
                   ].map((docDef) => {
                     const verifiedInfo = selectedCandidate.verifiedDocuments?.[docDef.key];
                     const isVerified = verifiedInfo?.isVerified;
@@ -1051,7 +1076,7 @@ export function VerificationModuleView() {
                   }));
                 }}
                 placeholder="e.g. 1 or 14"
-                className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-xs"
+                className="mt-1 w-full rounded-lg border border-slate-200 p-2.5 text-xs focus:border-blue-600 focus:outline-none"
               />
             </div>
 
@@ -1065,7 +1090,7 @@ export function VerificationModuleView() {
                   { id: 'MATRIC_MARKSHEET', label: 'Matric / SSC Marksheet', mandatory: true },
                   { id: 'CNIC_FRONT', label: 'CNIC Front', mandatory: true },
                   { id: 'CNIC_BACK', label: 'CNIC Back', mandatory: false },
-                  { id: 'DOMICILE', label: 'Domicile Certificate', mandatory: false },
+                  { id: 'DOMICILE', label: 'Domicile Certificate', mandatory: true },
                 ].map((item) => {
                   const isVerified = selectedCandidate?.verifiedDocuments?.[item.id]?.isVerified;
                   const isMissing = selectedCandidate?.missingDocuments?.includes(item.id);
@@ -1116,17 +1141,17 @@ export function VerificationModuleView() {
                 max="168"
                 value={reissueForm.expiresInHours}
                 onChange={(e) => setReissueForm((prev) => ({ ...prev, expiresInHours: e.target.value }))}
-                className="mt-1 w-32 rounded-lg border border-slate-300 p-2 text-xs"
+                className="mt-1 w-32 rounded-lg border border-slate-200 p-2 text-xs focus:border-blue-600 focus:outline-none"
               />
             </div>
 
             <Button
               type="submit"
               disabled={reissuing || !reissueForm.studentId || reissueForm.docTypes.length === 0}
-              className="min-h-10 w-full text-xs font-bold sm:w-auto sm:px-6 bg-blue-600 text-white hover:bg-blue-700 rounded-xl"
+              className="min-h-10 w-full text-xs font-semibold sm:w-auto sm:px-6 bg-blue-700 text-white hover:bg-blue-800 rounded-lg"
             >
               {reissuing
-                ? 'Creating and dispatching link…'
+                ? 'Creating and dispatching link...'
                 : `Create & Send Link for ${reissueForm.docTypes.length} Document(s)`}
             </Button>
           </form>

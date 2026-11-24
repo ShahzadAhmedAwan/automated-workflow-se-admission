@@ -75,6 +75,8 @@ export const lockSnapshotSchema = z.object({
 
 export const notifySelectedSchema = z.object({
   snapshotId: z.coerce.number().int().positive(),
+  studentId: z.coerce.number().int().positive().optional(),
   customMessage: z.string().trim().max(1000).optional(),
   duePaymentDate: z.string().trim().max(60).optional(),
+  forceResend: z.boolean().optional(),
 }).strict();

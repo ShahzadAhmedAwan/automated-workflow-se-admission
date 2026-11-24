@@ -167,7 +167,7 @@ export function PublicUploadPortal({ token }) {
         <span className="grid size-12 place-items-center rounded-2xl border border-slate-200 bg-white text-blue-700 shadow-xs">
           <span className="size-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />
         </span>
-        <p className="text-xs font-semibold text-slate-600">Validating your secure upload link…</p>
+        <p className="text-xs font-semibold text-slate-600">Validating your secure upload link...</p>
       </main>
     );
   }
@@ -439,7 +439,7 @@ export function PublicUploadPortal({ token }) {
                   rows={2}
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
-                  placeholder="Add any details regarding your marks, roll number, or board…"
+                  placeholder="Add any details regarding your marks, roll number, or board..."
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none"
                 />
               </div>
@@ -461,7 +461,7 @@ export function PublicUploadPortal({ token }) {
                   disabled={submitting || Object.keys(files).length === 0}
                   className="min-h-10 px-6 text-xs font-bold shadow-xs bg-blue-600 hover:bg-blue-700 text-white rounded-xl w-full sm:w-auto"
                 >
-                  {submitting ? 'Submitting & Encrypting…' : 'Submit for Verification'}
+                  {submitting ? 'Submitting & Encrypting...' : 'Submit for Verification'}
                 </Button>
               </div>
             </div>

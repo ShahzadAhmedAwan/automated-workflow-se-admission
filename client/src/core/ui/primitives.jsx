@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { IconClose, IconAlertTriangle, IconCheck } from '../icons/Icons.jsx';
 
 const buttonVariants = {
-  primary: 'border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-2xs hover:shadow-xs active:scale-[0.99]',
-  subtle: 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shadow-2xs active:scale-[0.99]',
+  primary: 'border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-[0_4px_10px_rgba(37,99,235,0.18)] hover:shadow-[0_6px_14px_rgba(37,99,235,0.22)] active:scale-[0.99]',
+  subtle: 'border border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/60 hover:text-blue-700 shadow-2xs active:scale-[0.99]',
   danger: 'border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 active:scale-[0.99]',
   success: 'border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 shadow-2xs active:scale-[0.99]',
 };
@@ -38,7 +38,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', type 
 export function SectionTabs({ tabs, value, onChange, label, variant = 'underline' }) {
   if (variant === 'pills') {
     return (
-      <nav className="flex items-center gap-1 overflow-x-auto p-1 bg-slate-100/90 rounded-xl border border-slate-200/70 scrollbar-none" role="tablist" aria-label={label}>
+      <nav className="flex items-center gap-1.5 overflow-x-auto p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 scrollbar-none" role="tablist" aria-label={label}>
         {tabs.map((tab) => {
           const active = value === tab.id;
           return (
@@ -48,15 +48,15 @@ export function SectionTabs({ tabs, value, onChange, label, variant = 'underline
               role="tab"
               aria-selected={active}
               onClick={() => onChange(tab.id)}
-              className={`relative inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold transition-all duration-150 cursor-pointer ${
+              className={`relative inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs transition-all duration-150 cursor-pointer ${
                 active
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                  ? 'bg-white text-slate-900 font-semibold shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60 font-medium'
               }`}
             >
               <span>{tab.label}</span>
               {tab.count !== undefined && (
-                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-bold ${active ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-slate-200/80 text-slate-600'}`}>
+                <span className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${active ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-slate-200/80 text-slate-600'}`}>
                   {tab.count}
                 </span>
               )}
@@ -68,7 +68,7 @@ export function SectionTabs({ tabs, value, onChange, label, variant = 'underline
   }
 
   return (
-    <nav className="flex gap-6 overflow-x-auto border-b border-slate-200 scrollbar-none" role="tablist" aria-label={label}>
+    <nav className="flex gap-7 overflow-x-auto border-b border-slate-200/90 scrollbar-none" role="tablist" aria-label={label}>
       {tabs.map((tab) => {
         const active = value === tab.id;
         return (
@@ -78,11 +78,19 @@ export function SectionTabs({ tabs, value, onChange, label, variant = 'underline
             role="tab"
             aria-selected={active}
             onClick={() => onChange(tab.id)}
-            className={`relative min-h-11 shrink-0 border-b-2 px-1 text-xs font-bold transition-all duration-150 cursor-pointer ${active ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+            className={`relative min-h-10 shrink-0 border-b-2 px-1 text-xs transition-colors cursor-pointer inline-flex items-center gap-2 pb-2.5 pt-0.5 ${
+              active
+                ? 'border-blue-600 text-blue-700 font-semibold'
+                : 'border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900 font-medium'
+            }`}
           >
             <span>{tab.label}</span>
             {tab.count !== undefined && (
-              <span className={`ml-2 rounded-full px-1.5 py-0.2 text-[10px] font-bold ${active ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+              <span className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+                active
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200/70'
+                  : 'bg-slate-100 text-slate-600 border border-slate-200/70'
+              }`}>
                 {tab.count}
               </span>
             )}
@@ -111,7 +119,7 @@ export function MetricStrip({ items, label, className = '' }) {
   };
 
   return (
-    <section className={`overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs ${className}`} aria-label={label}>
+    <section className={`overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-[0_8px_24px_rgba(45,77,128,0.055)] ${className}`} aria-label={label}>
       <div className={`grid ${colClass} divide-y divide-slate-100 sm:divide-x sm:divide-y-0`}>
         {items.map((item) => (
           <div key={item.label} className="flex flex-col justify-center gap-1.5 px-5 py-4 sm:min-h-[74px] sm:px-6">
@@ -131,8 +139,8 @@ export function MetricStrip({ items, label, className = '' }) {
 
 export function WorkspacePanel({ title, description, actions, children, className = '' }) {
   return (
-    <section className={`min-w-0 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-xs ${className}`}>
-      <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 sm:px-6 bg-slate-50/40">
+    <section className={`min-w-0 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-[0_8px_24px_rgba(45,77,128,0.055)] ${className}`}>
+      <header className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-3.5 sm:px-6 bg-[#fbfcfe]">
         <div className="min-w-0">
           <h2 className="m-0 text-sm font-semibold text-slate-900">{title}</h2>
           {description && <p className="mb-0 mt-0.5 text-xs text-slate-500">{description}</p>}

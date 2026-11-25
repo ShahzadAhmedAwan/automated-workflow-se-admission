@@ -695,6 +695,8 @@ export class AdmissionIntakeService {
         extracted: ocrResult.extracted,
         source: ocrResult.source,
         model: ocrResult.model,
+        isFallback: Boolean(ocrResult.isFallback),
+        fallbackReason: ocrResult.fallbackReason || null,
         decision,
       };
     } catch (err) {
@@ -1499,6 +1501,8 @@ export class AdmissionIntakeService {
     actorId,
     actorType = 'STAFF_USER',
   }, db = pool) {
+    const effectiveActorId = actorId || null;
+    const effectiveReviewMethod = reviewMethod || 'STAFF_DOCUMENT';
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
@@ -1526,18 +1530,18 @@ export class AdmissionIntakeService {
             `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
                     reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
               WHERE student_id = ?`,
-            [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod || 'STAFF_DOCUMENT', (notes || 'Candidate approved by staff').trim(), studentId]
+            [DOCUMENT_VERIFICATION_STATUS.MATCHED, effectiveActorId, effectiveReviewMethod, (notes || 'Candidate approved by staff').trim(), studentId]
           );
           await connection.execute(
             `UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`,
-            [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]
+            [STUDENT_OVERALL_STATUS.VERIFIED, effectiveActorId, studentId]
           );
         } else {
           await connection.execute(
             `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
                     reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
               WHERE id = ? AND student_id = ?`,
-            [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod, (notes || 'Approved').trim(), documentId, studentId]
+            [DOCUMENT_VERIFICATION_STATUS.MATCHED, effectiveActorId, effectiveReviewMethod, (notes || 'Approved').trim(), documentId, studentId]
           );
 
           // Auto-complete any NULL fields in adm_students from this approved document
@@ -1565,7 +1569,7 @@ export class AdmissionIntakeService {
           );
 
           if (!pending.length && allMandatoryVerified) {
-            await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+            await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, effectiveActorId, studentId]);
           } else {
             await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
           }
@@ -1607,7 +1611,7 @@ export class AdmissionIntakeService {
           `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
                   reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ?
             WHERE id = ? AND student_id = ?`,
-          [DOCUMENT_VERIFICATION_STATUS.MATCHED, actorId, reviewMethod || 'STAFF_DOCUMENT', auditNotes, documentId, studentId]
+          [DOCUMENT_VERIFICATION_STATUS.MATCHED, effectiveActorId, effectiveReviewMethod, auditNotes, documentId, studentId]
         );
 
         // Auto-complete any remaining NULL fields from this marksheet
@@ -1632,7 +1636,7 @@ export class AdmissionIntakeService {
 
         const [pending] = await connection.execute(`SELECT id FROM adm_student_documents WHERE student_id = ? AND verification_status NOT IN (?, ?)`, [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]);
         if (!pending.length && allMandatoryVerified) {
-          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, actorId, studentId]);
+          await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`, [STUDENT_OVERALL_STATUS.VERIFIED, effectiveActorId, studentId]);
         } else {
           await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
         }
@@ -1640,12 +1644,12 @@ export class AdmissionIntakeService {
       } else if (action === 'MARK_DISCREPANCY') {
         if (!targetDocument) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose a document to mark as discrepant.');
         if (!discrepancyReason?.trim()) throw new AppError(400, 'DISCREPANCY_REASON_REQUIRED', 'Enter the reason for the discrepancy.');
-        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.DISCREPANCY, actorId, reviewMethod || 'STAFF_DOCUMENT', discrepancyReason.trim(), documentId, studentId]);
+        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.DISCREPANCY, effectiveActorId, effectiveReviewMethod, discrepancyReason.trim(), documentId, studentId]);
         await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL, discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Staff discrepancy]: ', ?) WHERE id = ?`, [STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW, discrepancyReason.trim(), studentId]);
       } else if (action === 'REJECT_AND_REISSUE') {
         if (!targetDocument) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose the document that needs to be uploaded again.');
         if (!studentBefore.phone_normalized) throw new AppError(400, 'PHONE_REQUIRED', 'Add a valid phone number before reissuing an upload link.');
-        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.REJECTED, actorId, reviewMethod || 'STAFF_DOCUMENT', notes.trim(), documentId, studentId]);
+        await connection.execute(`UPDATE adm_student_documents SET verification_status = ?, verified_at = NULL, reviewed_at = CURRENT_TIMESTAMP(3), reviewed_by = ?, review_method = ?, review_notes = ? WHERE id = ? AND student_id = ?`, [DOCUMENT_VERIFICATION_STATUS.REJECTED, effectiveActorId, effectiveReviewMethod, notes.trim(), documentId, studentId]);
         await connection.execute(
           `UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL, discrepancy_notes = CONCAT(COALESCE(discrepancy_notes, ''), '\n[Manual Reissue]: ', ?) WHERE id = ?`,
           [STUDENT_OVERALL_STATUS.DOCS_REQUESTED, notes || 'Staff requested re-upload', studentId]

@@ -133,7 +133,7 @@ export class CampaignService {
             lead.fscMarks !== undefined && lead.fscMarks !== null ? lead.fscMarks : null,
             lead.hasMaths !== undefined && lead.hasMaths !== null ? (lead.hasMaths ? 1 : 0) : null,
             lead.eligibleFor || (isEligible ? 'SE' : null),
-            isEligible ? CONVERSATION_STATE.QUALIFIED : CONVERSATION_STATE.IDLE
+            CONVERSATION_STATE.IDLE // Must be IDLE so outreach campaign can send WhatsApp greetings to them!
           );
           return '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         });
@@ -692,6 +692,8 @@ export class CampaignService {
       allowedStartHour = 9,
       allowedEndHour = 20,
       customGreeting = null,
+      sendNow = true,
+      ignoreDaylight = false,
       now = new Date(),
     } = options;
 
@@ -699,11 +701,17 @@ export class CampaignService {
     try {
       await connection.beginTransaction();
 
-      // Fetch idle leads for this campaign
+      // Fetch uncontacted leads for this campaign
+      // This includes leads in IDLE, PENDING, or leads previously imported without an outbound greeting
       const [leads] = await connection.query(
         `SELECT id, full_name, phone_normalized, prior_degree
          FROM mkt_leads
-         WHERE campaign_id = ? AND conversation_state = 'IDLE'
+         WHERE campaign_id = ?
+           AND (
+             conversation_state = 'IDLE'
+             OR conversation_state = 'PENDING'
+             OR (conversation_state = 'QUALIFIED' AND (chat_history IS NULL OR JSON_LENGTH(chat_history) = 0))
+           )
          ORDER BY id ASC
          FOR UPDATE`,
         [campaignId]
@@ -711,18 +719,21 @@ export class CampaignService {
 
       if (!leads.length) {
         await connection.commit();
-        return { scheduledCount: 0, message: 'No idle leads found to schedule.' };
+        return { scheduledCount: 0, message: 'All applicants in this campaign have already been contacted.' };
       }
 
       // Schedule messages with daylight hours and randomized jitter
+      // When sendNow or ignoreDaylight is active, dispatch immediately without daylight postponement
+      const shouldApplyDaylight = !sendNow && !ignoreDaylight;
       let currentScheduleTime = new Date(now);
 
-      // Adjust schedule start time if currently outside daylight window
-      currentScheduleTime = CampaignService.adjustToDaylight(
-        currentScheduleTime,
-        allowedStartHour,
-        allowedEndHour
-      );
+      if (shouldApplyDaylight) {
+        currentScheduleTime = CampaignService.adjustToDaylight(
+          currentScheduleTime,
+          allowedStartHour,
+          allowedEndHour
+        );
+      }
 
       const defaultGreeting = (name) =>
         `*DEPARTMENT OF SOFTWARE ENGINEERING*\n` +
@@ -738,18 +749,25 @@ export class CampaignService {
 
       let scheduledCount = 0;
 
-      for (const lead of leads) {
-        // Random jitter in seconds
-        const jitterSeconds =
-          Math.floor(Math.random() * (jitterMaxSeconds - jitterMinSeconds + 1)) +
-          jitterMinSeconds;
+      for (let i = 0; i < leads.length; i++) {
+        const lead = leads[i];
 
-        currentScheduleTime = new Date(currentScheduleTime.getTime() + jitterSeconds * 1000);
-        currentScheduleTime = CampaignService.adjustToDaylight(
-          currentScheduleTime,
-          allowedStartHour,
-          allowedEndHour
-        );
+        // For the very first lead (i === 0), schedule immediately at currentScheduleTime (now) so texts start in the first go
+        // For subsequent leads (i > 0), apply randomized anti-ban jitter
+        if (i > 0) {
+          const jitterSeconds =
+            Math.floor(Math.random() * (jitterMaxSeconds - jitterMinSeconds + 1)) +
+            jitterMinSeconds;
+
+          currentScheduleTime = new Date(currentScheduleTime.getTime() + jitterSeconds * 1000);
+          if (shouldApplyDaylight) {
+            currentScheduleTime = CampaignService.adjustToDaylight(
+              currentScheduleTime,
+              allowedStartHour,
+              allowedEndHour
+            );
+          }
+        }
 
         const greetingText = customGreeting
           ? customGreeting.replace(/{name}/gi, lead.full_name)
@@ -919,11 +937,15 @@ export class CampaignService {
           leadId = ins.insertId;
         }
 
-        // Random anti-ban jitter
-        const jitterSeconds =
-          Math.floor(Math.random() * (jitterMaxSeconds - jitterMinSeconds + 1)) + jitterMinSeconds;
-        currentScheduleTime = new Date(currentScheduleTime.getTime() + jitterSeconds * 1000);
-        currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
+        // Random anti-ban jitter applied between subsequent messages
+        if (scheduledCount > 0) {
+          const jitterSeconds =
+            Math.floor(Math.random() * (jitterMaxSeconds - jitterMinSeconds + 1)) + jitterMinSeconds;
+          currentScheduleTime = new Date(currentScheduleTime.getTime() + jitterSeconds * 1000);
+          if (!options.sendNow && !options.ignoreDaylight) {
+            currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
+          }
+        }
 
         const messageText = customMessage
           ? customMessage.replace(/{name}/gi, targetName)

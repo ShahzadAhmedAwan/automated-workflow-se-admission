@@ -70,6 +70,8 @@ export const triggerCampaignSchema = z.object({
   allowedStartHour: z.number().int().min(0).max(23).default(9),
   allowedEndHour: z.number().int().min(0).max(23).default(20),
   customGreeting: z.string().trim().max(1000).optional(),
+  sendNow: z.boolean().optional().default(true),
+  ignoreDaylight: z.boolean().optional().default(false),
 }).strict();
 
 export const incomingMessageWebhookSchema = z.object({

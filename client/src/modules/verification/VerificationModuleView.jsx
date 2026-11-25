@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { verificationApi } from './verificationApi.js';
-import { StudentDossierModal } from './StudentDossierModal.jsx';
+import { StudentDossierView } from './StudentDossierView.jsx';
 import { Button, StatusBadge, MetricStrip, SectionTabs, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
 import {
   IconDocumentCheck,
@@ -38,6 +38,28 @@ export function VerificationModuleView() {
   const [expandedDocs, setExpandedDocs] = useState({});
   const [density, setDensity] = useState('compact'); // Default to clean compact table
 
+  // Mutable refs to prevent stale closures during live intervals and cross-tab events
+  const filterStatusRef = useRef(filterStatus);
+  const queuePageRef = useRef(queuePage);
+  const searchQueryRef = useRef(searchQuery);
+  const activeTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    filterStatusRef.current = filterStatus;
+  }, [filterStatus]);
+
+  useEffect(() => {
+    queuePageRef.current = queuePage;
+  }, [queuePage]);
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
   // Production-grade feedback and dialog states
   const [notice, setNotice] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
@@ -62,21 +84,21 @@ export function VerificationModuleView() {
     (c) => String(c.studentId) === String(reissueForm.studentId) || (c.leadId && String(c.leadId) === String(reissueForm.studentId))
   );
 
-  useEffect(() => {
-    loadQueue();
-  }, [filterStatus, queuePage, activeTab]);
-
-  async function loadQueue() {
+  async function loadQueue(silent = false, overrideFilter = undefined, overridePage = undefined) {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
+      const effectiveFilter = overrideFilter !== undefined ? overrideFilter : filterStatusRef.current;
+      const effectivePage = overridePage !== undefined ? overridePage : queuePageRef.current;
+
       const data = await verificationApi.fetchReviewQueue({
-        status: filterStatus || undefined,
-        search: searchQuery.trim() || undefined,
+        status: effectiveFilter || undefined,
+        search: searchQueryRef.current.trim() || undefined,
         limit: pageSize,
-        offset: queuePage * pageSize,
+        offset: effectivePage * pageSize,
       });
+
       const lastPage = Math.max(0, Math.ceil((data.total || 0) / pageSize) - 1);
-      if (queuePage > lastPage) {
+      if (effectivePage > lastPage) {
         setQueuePage(lastPage);
         return;
       }
@@ -92,21 +114,79 @@ export function VerificationModuleView() {
       );
       setQueueTotal(data.total || 0);
     } catch (err) {
-      console.error('Failed to load verification queue:', err);
-      setNotice({
-        type: 'error',
-        message: 'Could not load candidate verification queue.',
-        detail: err.message,
-      });
+      if (!silent) {
+        console.error('Failed to load verification queue:', err);
+        setNotice({
+          type: 'error',
+          message: 'Could not load candidate verification queue.',
+          detail: err.message,
+        });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
+
+  // Reload when filter, page, or active tab changes
+  useEffect(() => {
+    loadQueue(false);
+  }, [filterStatus, queuePage, activeTab]);
+
+  // Real-time background sync: Polls every 2.5s and listens for cross-tab verification events
+  // This ensures that as soon as documents are verified (via upload, OCR, or staff action),
+  // they appear in the Verified filter and update counters without refreshing.
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadQueue(true); // silent background update
+      }
+    }, 2500);
+
+    // Cross-tab broadcast listener (e.g., candidate submits on upload portal or another staff tab verifies)
+    let channel;
+    try {
+      channel = new BroadcastChannel('adm_verification');
+      channel.onmessage = (event) => {
+        if (
+          event.data?.type === 'DOCUMENTS_VERIFIED' ||
+          event.data?.type === 'DOCUMENTS_SUBMITTED' ||
+          event.data?.type === 'STATUS_UPDATED'
+        ) {
+          loadQueue(true);
+        }
+      };
+    } catch (_) {}
+
+    // Storage event fallback for cross-tab sync
+    function handleStorage(e) {
+      if (e.key === 'adm_verification_event') {
+        loadQueue(true);
+      }
+    }
+    window.addEventListener('storage', handleStorage);
+
+    // Immediate silent refresh on window focus
+    function handleFocus() {
+      if (document.visibilityState === 'visible') {
+        loadQueue(true);
+      }
+    }
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      if (channel) channel.close();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
+  }, []);
 
   function handleSearchSubmit(e) {
     e.preventDefault();
     setQueuePage(0);
-    loadQueue();
+    loadQueue(false);
   }
 
   function toggleDocExpand(studentId) {
@@ -246,6 +326,34 @@ export function VerificationModuleView() {
 
   // Determine problem count for badge
   const problemCount = queueSummary.PROBLEMS_ONLY || queueSummary.NEEDS_MANUAL_REVIEW || 0;
+
+  // Full-Page Candidate Verification Dossier View
+  if (selectedStudentId) {
+    return (
+      <StudentDossierView
+        studentId={selectedStudentId}
+        onBack={(targetFilter) => {
+          setSelectedStudentId(null);
+          if (targetFilter) {
+            setFilterStatus(targetFilter);
+            setQueuePage(0);
+            loadQueue(false, targetFilter, 0);
+          } else {
+            loadQueue(false);
+          }
+        }}
+        onActionComplete={(res) => {
+          if (res?.overall_status === 'VERIFIED' || res?.overallStatus === 'VERIFIED') {
+            setFilterStatus('VERIFIED');
+            setQueuePage(0);
+            loadQueue(true, 'VERIFIED', 0);
+          } else {
+            loadQueue(true);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1180,16 +1288,6 @@ export function VerificationModuleView() {
             </div>
           )}
         </section>
-      )}
-
-      {/* Candidate Verification Dossier Modal */}
-      {selectedStudentId && (
-        <StudentDossierModal
-          studentId={selectedStudentId}
-          isOpen={Boolean(selectedStudentId)}
-          onClose={() => setSelectedStudentId(null)}
-          onActionComplete={loadQueue}
-        />
       )}
 
       {/* Confirmation Dialog */}

@@ -345,16 +345,31 @@ export function MarketingModuleView() {
     }
   }
 
-  async function handleCommitLeads() {
+  async function handleCommitLeads(andStartOutreach = false) {
     if (!selectedTargetCampaign || !preview?.validLeads?.length) return;
     setCommitting(true);
     setError('');
     try {
       const res = await marketingApi.importLeads(selectedTargetCampaign, preview.validLeads);
-      setSuccess(`Added ${res.insertedCount} applicants to the campaign.`);
+      const importedCount = res?.insertedCount || preview.validLeads.length;
       setPreview(null);
       setFile(null);
       await loadCampaigns();
+
+      if (andStartOutreach) {
+        try {
+          const outreachRes = await marketingApi.triggerOutreach(selectedTargetCampaign, { sendNow: true });
+          setSuccess(
+            `Successfully imported ${importedCount} applicants and started WhatsApp outreach! ${outreachRes.scheduledCount} message(s) are actively being dispatched.`
+          );
+          setActiveTab('campaigns');
+        } catch (outreachErr) {
+          setSuccess(`Imported ${importedCount} applicants, but outreach initiation reported: ${outreachErr.message}`);
+        }
+      } else {
+        setSuccess(`Added ${importedCount} applicants to the campaign. Click 'Start Outreach' to begin messaging.`);
+      }
+
       if (activeTab === 'leads') loadLeads();
     } catch (err) {
       setError(err.message || 'Failed to commit leads.');
@@ -367,15 +382,20 @@ export function MarketingModuleView() {
     setConfirmModal({
       isOpen: true,
       title: 'Start WhatsApp Outreach',
-      message: `Start WhatsApp outreach campaign for "${campaign.name}"? The system will enqueue personalized automated greeting messages to pending leads.`,
-      confirmLabel: 'Start Outreach',
+      message: `Start WhatsApp outreach campaign for "${campaign.name}"? The system will enqueue personalized automated greeting messages to all pending applicants in this campaign.`,
+      confirmLabel: 'Start Outreach Immediately',
       tone: 'primary',
       onConfirm: async () => {
         setConfirmModal(null);
         try {
-          const res = await marketingApi.triggerOutreach(campaign.id);
-          setSuccess(`Outreach started. ${res.scheduledCount} messages are scheduled.`);
+          const res = await marketingApi.triggerOutreach(campaign.id, { sendNow: true });
+          if (res.scheduledCount > 0) {
+            setSuccess(`Outreach started! ${res.scheduledCount} WhatsApp message(s) are actively being dispatched.`);
+          } else {
+            setSuccess(`Outreach active: All applicants in this campaign have already received greetings.`);
+          }
           loadCampaigns();
+          if (activeTab === 'leads') loadLeads();
         } catch (err) {
           setError(err.message || 'Failed to trigger outreach.');
         }
@@ -989,11 +1009,21 @@ export function MarketingModuleView() {
 
                     <button
                       type="button"
-                      onClick={handleCommitLeads}
+                      onClick={() => handleCommitLeads(false)}
                       disabled={committing}
-                      className="px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
                     >
-                      {committing ? 'Adding...' : `Add ${preview.validCount} Applicants`}
+                      {committing ? 'Adding...' : `Add Only (${preview.validCount})`}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCommitLeads(true)}
+                      disabled={committing}
+                      className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold text-xs transition shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
+                    >
+                      <IconSend className="size-3" />
+                      <span>{committing ? 'Importing & Sending...' : `Add & Start Outreach Now (${preview.validCount})`}</span>
                     </button>
                   </div>
                 </div>

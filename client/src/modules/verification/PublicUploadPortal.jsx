@@ -154,6 +154,11 @@ export function PublicUploadPortal({ token }) {
       }
 
       await verificationApi.submitDocuments(token, formData);
+      try {
+        const payload = { type: 'DOCUMENTS_SUBMITTED', studentId: tokenData?.studentId, timestamp: Date.now() };
+        localStorage.setItem('adm_verification_event', JSON.stringify(payload));
+        new BroadcastChannel('adm_verification').postMessage(payload);
+      } catch (_) {}
       setSuccess(true);
     } catch (err) {
       setFormError(err.message || 'Upload failed. Please try again.');

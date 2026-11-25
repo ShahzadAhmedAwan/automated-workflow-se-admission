@@ -186,8 +186,8 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     const knowledge = AIKnowledgeService.getKnowledgeText();
     const apiKey = process.env.GEMINI_API_KEY;
 
-    // 1. Try Gemini API if API key is configured
-    if (apiKey && apiKey !== 'mock_key' && apiKey !== 'replace-with-a-secret') {
+    // 1. Try Gemini API if API key is configured (unless in automated test mode)
+    if (apiKey && apiKey !== 'mock_key' && apiKey !== 'replace-with-a-secret' && (process.env.NODE_ENV !== 'test' || process.env.TEST_LIVE_GEMINI === '1')) {
       try {
         const response = await AIKnowledgeService.callGeminiAPI({
           apiKey,
@@ -246,25 +246,41 @@ ${knowledge}
       },
     ];
 
+    const candidateModels = [
+      process.env.GEMINI_MODEL,
+      'gemini-flash-lite-latest',
+      'gemini-3.5-flash-lite',
+      'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-flash-latest',
+    ].filter(Boolean);
+
     try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }),
-        signal: controller.signal,
-      });
+      for (const model of candidateModels) {
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents }),
+            signal: controller.signal,
+          });
 
-      if (!res.ok) {
-        throw new Error(`Gemini API error: HTTP ${res.status}`);
+          if (!res.ok) continue;
+
+          const data = await res.json();
+          const text =
+            data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+            data?.candidates?.[0]?.text ||
+            null;
+          if (text) return text;
+        } catch {
+          continue;
+        }
       }
-
-      const data = await res.json();
-      const text =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        data?.candidates?.[0]?.text ||
-        null;
-      return text;
+      return null;
     } finally {
       clearTimeout(timeoutId);
     }

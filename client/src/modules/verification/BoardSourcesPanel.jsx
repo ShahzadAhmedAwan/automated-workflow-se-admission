@@ -81,6 +81,7 @@ export function BoardSourcesPanel() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [confirmSource, setConfirmSource] = useState(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Active Filter: 'ALL' | 'HSSC' | 'SSC' | 'PORTAL'
   const [activeFilter, setActiveFilter] = useState('ALL');
@@ -119,6 +120,12 @@ export function BoardSourcesPanel() {
 
   function editSource(source) {
     setEditingId(source.id);
+    const hasCustom =
+      source.source_type === 'PORTAL_URL' ||
+      (source.exam_session && source.exam_session !== 'ANNUAL') ||
+      (source.exam_part && source.exam_part !== 'ALL') ||
+      Boolean(source.board_aliases && String(source.board_aliases).length > 2);
+    setShowAdvanced(hasCustom);
     setForm({
       boardName: source.board_name,
       boardAliases: (typeof source.board_aliases === 'string'
@@ -136,6 +143,13 @@ export function BoardSourcesPanel() {
     });
     setMessage(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function handleResetForm() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowAdvanced(false);
+    setMessage(null);
   }
 
   async function handleSubmit(event) {
@@ -161,8 +175,7 @@ export function BoardSourcesPanel() {
         type: 'success',
         text: `Official board ${form.sourceType === 'GAZETTE' ? 'gazette' : 'source'} saved successfully.`,
       });
-      setEditingId(null);
-      setForm(emptyForm);
+      handleResetForm();
       await loadSources();
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Could not save this board source.' });
@@ -280,184 +293,123 @@ export function BoardSourcesPanel() {
   return (
     <div className="space-y-6">
       {/* Refined Academic Institutional Header */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-              <IconShield className="size-5 text-blue-700" />
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+              <IconShield className="size-4.5 text-blue-700" />
             </div>
-            <div className="space-y-0.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="m-0 text-sm font-bold text-slate-900">
-                  Official Examination Gazettes & Board Archives
-                </h3>
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700 uppercase tracking-wide border border-slate-200">
-                  Intake Registry
-                </span>
-              </div>
-              <p className="m-0 text-xs text-slate-600 max-w-3xl leading-relaxed">
-                Official PDF result gazettes and verification adapters for <strong>Intermediate (FSc / HSSC)</strong> and <strong>Matriculation (SSC)</strong>. When candidates submit their marksheets, the automated intake engine extracts student roll numbers and verifies marks directly against these official board records.
+            <div>
+              <h3 className="m-0 text-sm font-bold text-slate-900">
+                Official Examination Gazettes & Board Archives
+              </h3>
+              <p className="m-0 text-xs text-slate-500">
+                Board results used to automatically cross-verify student marksheets.
               </p>
             </div>
           </div>
 
           {/* Institutional Status Counters */}
           <div className="flex items-center gap-2 shrink-0">
-            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">HSSC Gazettes</div>
-              <div className="text-sm font-bold text-indigo-700">{hsscCount}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">SSC Gazettes</div>
-              <div className="text-sm font-bold text-teal-700">{sscCount}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-1.5 text-center min-w-[84px]">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Active Total</div>
-              <div className="text-sm font-bold text-emerald-700">{activeCount}</div>
-            </div>
+            <span className="rounded-md border border-indigo-200 bg-indigo-50/70 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+              HSSC: {hsscCount}
+            </span>
+            <span className="rounded-md border border-teal-200 bg-teal-50/70 px-2.5 py-1 text-xs font-semibold text-teal-700">
+              SSC: {sscCount}
+            </span>
+            <span className="rounded-md border border-emerald-200 bg-emerald-50/70 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              Active: {activeCount}
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(340px,0.88fr)_minmax(0,1.12fr)]">
-        {/* Left Column: Gazette Upload & Source Configuration Form */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs flex flex-col">
+      <div className="grid gap-6 xl:grid-cols-[minmax(340px,0.85fr)_minmax(0,1.15fr)]">
+        {/* Left Column: Minimal Gazette Upload & Source Configuration Form */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col">
           <div className="border-b border-slate-100 pb-3">
             <div className="flex items-center justify-between">
               <h2 className="m-0 text-sm font-bold text-slate-900">
-                {editingId ? 'Update Board Archive' : 'Add Examination Archive / Source'}
+                {editingId ? 'Update Board Archive' : 'Upload Examination Gazette'}
               </h2>
               {editingId && (
                 <span className="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                  Editing Record #{editingId}
+                  Editing #{editingId}
                 </span>
               )}
             </div>
             <p className="mb-0 mt-0.5 text-xs text-slate-500">
-              Configure official board parameters and register a PDF gazette file or portal adapter.
+              Upload a board PDF gazette to cross-check student marksheets automatically.
             </p>
           </div>
 
-          {/* Segmented Source Type Switcher */}
-          <div className="mt-4">
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
-              Archive Source Type:
-            </label>
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, sourceType: 'GAZETTE', resultUrl: '' })}
-                className={`flex items-center justify-center rounded-lg py-1.5 px-3 text-xs font-semibold transition cursor-pointer ${
-                  form.sourceType === 'GAZETTE'
-                    ? 'bg-white text-blue-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                PDF Gazette
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, sourceType: 'PORTAL_URL', gazette: null })}
-                className={`flex items-center justify-center rounded-lg py-1.5 px-3 text-xs font-semibold transition cursor-pointer ${
-                  form.sourceType === 'PORTAL_URL'
-                    ? 'bg-white text-blue-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Web Result Portal
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Preset Buttons */}
-          <div className="mt-4">
-            <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
-              Quick Select Board:
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              {BOARD_PRESETS.map((bp) => {
-                const isSelected = form.boardName.toLowerCase().includes(bp.shortName.toLowerCase().split(' ')[1] || bp.shortName.toLowerCase());
-                return (
+          <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
+            {/* Quick Board Presets (Clean horizontal scrollable pills) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Quick Select Board:
+                </span>
+                {form.boardName && form.boardName !== standardTitlePreview && (
                   <button
-                    key={bp.name}
                     type="button"
-                    onClick={() => applyBoardPreset(bp)}
-                    className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition cursor-pointer text-left truncate ${
-                      isSelected
-                        ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                    title={bp.name}
+                    onClick={() => setForm((prev) => ({ ...prev, boardName: standardTitlePreview }))}
+                    className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                   >
-                    {bp.shortName}
+                    Format Title
                   </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-            {/* Standard Archive Name Helper Bar */}
-            {form.sourceType === 'GAZETTE' && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/75 p-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                    Standardized Title Preview:
-                  </span>
-                  {form.boardName !== standardTitlePreview && (
-                    <button
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, boardName: standardTitlePreview }))}
-                      className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                    >
-                      Use Standard Format
-                    </button>
-                  )}
-                </div>
-                <div className="font-mono text-xs font-semibold text-slate-900 mt-1 truncate">
-                  {standardTitlePreview}
-                </div>
+                )}
               </div>
-            )}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {BOARD_PRESETS.map((bp) => {
+                  const isSelected = form.boardName.toLowerCase().includes(
+                    bp.shortName.toLowerCase().split(' ')[1] || bp.shortName.toLowerCase()
+                  );
+                  return (
+                    <button
+                      key={bp.name}
+                      type="button"
+                      onClick={() => applyBoardPreset(bp)}
+                      className={`whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-medium transition cursor-pointer shrink-0 ${
+                        isSelected
+                          ? 'border-blue-600 bg-blue-50 text-blue-700 font-semibold'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                      title={bp.name}
+                    >
+                      {bp.shortName}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
+            {/* Board Name Input */}
             <label className="block text-xs font-semibold text-slate-700">
-              Official Board Name / Archive Title *
+              Board / Archive Title *
               <input
                 required
                 maxLength={160}
                 value={form.boardName}
                 onChange={(event) => setForm({ ...form, boardName: event.target.value })}
-                placeholder="e.g. BISE AJK Mirpur - HSSC (FSc) 2023 Annual"
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="e.g. BISE AJK Mirpur - HSSC (FSc) 2024 Annual"
+                className="mt-1 min-h-9 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
               />
             </label>
 
-            <label className="block text-xs font-semibold text-slate-700">
-              Board Aliases & Variations (Optional)
-              <input
-                maxLength={1000}
-                value={form.boardAliases}
-                onChange={(event) => setForm({ ...form, boardAliases: event.target.value })}
-                placeholder="e.g. AJK BISE, Mirpur Board, Federal Board, FBISE"
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <span className="mt-1 block font-normal text-[11px] text-slate-500">
-                Comma-separated names to match OCR variations printed on marksheets.
-              </span>
-            </label>
-
-            <div className="grid gap-3 sm:grid-cols-2">
+            {/* Exam Level & Academic Year (Single Row) */}
+            <div className="grid grid-cols-2 gap-3">
               <label className="block text-xs font-semibold text-slate-700">
                 Exam Level *
                 <select
                   value={form.examLevel}
                   onChange={(event) => setForm({ ...form, examLevel: event.target.value })}
                   required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
+                  className="mt-1 min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
                 >
-                  <option value="HSSC">FSc / HSSC (Intermediate 11th & 12th)</option>
-                  <option value="SSC">Matric / SSC (Secondary 9th & 10th)</option>
-                  <option value="ALL">Any Level (Universal)</option>
+                  <option value="HSSC">FSc / HSSC (Intermediate)</option>
+                  <option value="SSC">Matric / SSC (Secondary)</option>
+                  <option value="ALL">Universal (All Levels)</option>
                 </select>
               </label>
 
@@ -465,115 +417,188 @@ export function BoardSourcesPanel() {
                 Academic Year *
                 <input
                   required
-                  maxLength={20}
+                  maxLength={10}
                   value={form.academicYear}
                   onChange={(event) => setForm({ ...form, academicYear: event.target.value.toUpperCase() })}
-                  placeholder="e.g. 2024 or 2023"
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
+                  placeholder="e.g. 2024"
+                  className="mt-1 min-h-9 w-full rounded-lg border border-slate-200 px-2.5 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
                 />
               </label>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block text-xs font-semibold text-slate-700">
-                Exam Session *
-                <select
-                  value={form.examSession}
-                  onChange={(event) => setForm({ ...form, examSession: event.target.value })}
-                  required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
-                >
-                  <option value="ANNUAL">Annual Examination</option>
-                  <option value="SECOND_ANNUAL">Supplementary / Second Annual</option>
-                  <option value="ALL">Any Session</option>
-                </select>
-              </label>
-
-              <label className="block text-xs font-semibold text-slate-700">
-                Exam Part *
-                <select
-                  value={form.examPart}
-                  onChange={(event) => setForm({ ...form, examPart: event.target.value })}
-                  required
-                  className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none cursor-pointer"
-                >
-                  <option value="ALL">Composite / Complete (Part I & II)</option>
-                  <option value="PART_II">Part II (12th / 10th)</option>
-                  <option value="PART_I">Part I (11th / 9th)</option>
-                </select>
-              </label>
-            </div>
-
-            {form.sourceType === 'GAZETTE' ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
-                <span className="block text-xs font-semibold text-slate-800 mb-1.5">
-                  Official Gazette PDF File {editingId && '(Choose file to replace existing PDF)'} *
-                </span>
-                <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-white p-4 text-center hover:border-blue-400 hover:bg-blue-50/20 transition cursor-pointer">
-                  <IconUploadCloud className="size-6 text-slate-400 mb-1" />
-                  <span className="text-xs font-medium text-slate-700">
-                    {form.gazette ? form.gazette.name : 'Click to select official gazette PDF'}
+            {/* Gazette PDF Upload Dropzone */}
+            {form.sourceType === 'GAZETTE' && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-slate-800">
+                    Official Gazette PDF {editingId && '(Optional to replace)'} *
                   </span>
-                  <span className="text-[11px] text-slate-400 mt-0.5">
-                    {form.gazette
-                      ? `${(form.gazette.size / (1024 * 1024)).toFixed(2)} MB · Ready for upload`
-                      : 'Supports multi-column high volume PDF gazettes (up to 50 MB)'}
-                  </span>
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    required={!editingId}
-                    onChange={(event) => setForm({ ...form, gazette: event.target.files?.[0] || null })}
-                    className="sr-only"
-                  />
-                </label>
-                {form.gazette && (
-                  <div className="mt-2 flex items-center justify-between text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1">
-                    <span className="font-semibold flex items-center gap-1.5 truncate">
-                      <IconCheck className="size-3.5 text-emerald-600 shrink-0" />
-                      {form.gazette.name}
+                  {form.gazette && (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      {(form.gazette.size / (1024 * 1024)).toFixed(2)} MB
                     </span>
+                  )}
+                </div>
+
+                {form.gazette ? (
+                  <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-white p-2.5 text-xs shadow-2xs">
+                    <div className="flex items-center gap-2 truncate">
+                      <IconCheck className="size-4 text-emerald-600 shrink-0" />
+                      <span className="font-semibold text-slate-800 truncate">{form.gazette.name}</span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setForm({ ...form, gazette: null })}
-                      className="text-[11px] font-semibold text-rose-600 hover:underline shrink-0 ml-2 cursor-pointer"
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 hover:underline shrink-0 ml-2 cursor-pointer"
                     >
                       Clear
                     </button>
                   </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-white p-3.5 text-center hover:border-blue-500 hover:bg-blue-50/20 transition cursor-pointer">
+                    <IconUploadCloud className="size-5 text-slate-400 mb-1" />
+                    <span className="text-xs font-medium text-slate-700">Click to choose or drop PDF gazette</span>
+                    <span className="text-[10px] text-slate-400 mt-0.5">Supports multi-column PDFs up to 50 MB</span>
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      required={!editingId}
+                      onChange={(event) => setForm({ ...form, gazette: event.target.files?.[0] || null })}
+                      className="sr-only"
+                    />
+                  </label>
                 )}
-              </div>
-            ) : (
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-                <label className="block text-xs font-semibold text-slate-700">
-                  Portal Adapter
-                  <select
-                    value={form.portalAdapter}
-                    onChange={(event) => setForm({ ...form, portalAdapter: event.target.value })}
-                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
-                  >
-                    <option value="AUTO_FORM">Automatic Public Result Form</option>
-                    <option value="FBISE">FBISE Result Portal</option>
-                    <option value="AJKBISE">AJKBISE Result Portal</option>
-                  </select>
-                </label>
-                <label className="block text-xs font-semibold text-slate-700">
-                  Official HTTPS Result URL *
-                  <input
-                    required
-                    type="url"
-                    value={form.resultUrl}
-                    onChange={(event) => setForm({ ...form, resultUrl: event.target.value })}
-                    placeholder="https://official-board.edu.pk/results"
-                    className="mt-1.5 min-h-10 w-full rounded-lg border border-slate-200 px-3 font-normal text-xs text-slate-800 shadow-2xs focus:border-blue-600 focus:outline-none"
-                  />
-                </label>
               </div>
             )}
 
+            {/* Collapsible Secondary Options (OCR Aliases, Session, Part, Web Portal) */}
+            <div className="border-t border-slate-100 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex w-full items-center justify-between py-1 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="font-semibold">More Options</span>
+                  <span className="text-[11px] text-slate-400">
+                    {showAdvanced ? '(click to collapse)' : '(aliases, session, web portal)'}
+                  </span>
+                </span>
+                <span className="text-[11px] font-bold text-slate-400">
+                  {showAdvanced ? '▲ Less' : '▼ More'}
+                </span>
+              </button>
+
+              {showAdvanced && (
+                <div className="mt-2.5 space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-xs">
+                  {/* Source Type Toggle */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Archive Source Type:
+                    </label>
+                    <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-200/70 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, sourceType: 'GAZETTE', resultUrl: '' })}
+                        className={`py-1 text-xs font-medium rounded-md cursor-pointer transition ${
+                          form.sourceType === 'GAZETTE'
+                            ? 'bg-white text-blue-700 font-semibold shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        PDF Gazette File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, sourceType: 'PORTAL_URL', gazette: null })}
+                        className={`py-1 text-xs font-medium rounded-md cursor-pointer transition ${
+                          form.sourceType === 'PORTAL_URL'
+                            ? 'bg-white text-blue-700 font-semibold shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        Web Result Portal
+                      </button>
+                    </div>
+                  </div>
+
+                  {form.sourceType === 'PORTAL_URL' && (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Portal Adapter
+                        <select
+                          value={form.portalAdapter}
+                          onChange={(event) => setForm({ ...form, portalAdapter: event.target.value })}
+                          className="mt-1 min-h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs"
+                        >
+                          <option value="AUTO_FORM">Automatic Public Result Form</option>
+                          <option value="FBISE">FBISE Result Portal</option>
+                          <option value="AJKBISE">AJKBISE Result Portal</option>
+                        </select>
+                      </label>
+                      <label className="block text-xs font-semibold text-slate-700">
+                        Official HTTPS Result URL *
+                        <input
+                          required={form.sourceType === 'PORTAL_URL'}
+                          type="url"
+                          value={form.resultUrl}
+                          onChange={(event) => setForm({ ...form, resultUrl: event.target.value })}
+                          placeholder="https://official-board.edu.pk/results"
+                          className="mt-1 min-h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Exam Session & Part */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-[11px] font-semibold text-slate-700">
+                      Exam Session
+                      <select
+                        value={form.examSession}
+                        onChange={(event) => setForm({ ...form, examSession: event.target.value })}
+                        className="mt-1 min-h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs cursor-pointer"
+                      >
+                        <option value="ANNUAL">Annual Examination</option>
+                        <option value="SECOND_ANNUAL">2nd Annual / Supplementary</option>
+                        <option value="ALL">Any Session</option>
+                      </select>
+                    </label>
+                    <label className="block text-[11px] font-semibold text-slate-700">
+                      Exam Part
+                      <select
+                        value={form.examPart}
+                        onChange={(event) => setForm({ ...form, examPart: event.target.value })}
+                        className="mt-1 min-h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs cursor-pointer"
+                      >
+                        <option value="ALL">Composite (Part I & II)</option>
+                        <option value="PART_II">Part II (12th / 10th)</option>
+                        <option value="PART_I">Part I (11th / 9th)</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {/* OCR Aliases */}
+                  <label className="block text-[11px] font-semibold text-slate-700">
+                    Board Aliases & Name Variations
+                    <input
+                      maxLength={1000}
+                      value={form.boardAliases}
+                      onChange={(event) => setForm({ ...form, boardAliases: event.target.value })}
+                      placeholder="e.g. AJK BISE, Mirpur Board, FBISE"
+                      className="mt-1 min-h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs text-slate-800"
+                    />
+                    <span className="mt-0.5 block font-normal text-[10px] text-slate-400">
+                      Comma-separated variations matched by OCR.
+                    </span>
+                  </label>
+                </div>
+              )}
+            </div>
+
             {message && (
               <div
-                className={`rounded-lg p-3 text-xs ${
+                className={`rounded-lg p-2.5 text-xs ${
                   message.type === 'error'
                     ? 'border border-rose-200 bg-rose-50 text-rose-800'
                     : 'border border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -583,12 +608,17 @@ export function BoardSourcesPanel() {
               </div>
             )}
 
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" disabled={saving} className="bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs rounded-lg">
+            {/* Action Buttons */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                type="submit"
+                disabled={saving}
+                className="flex-1 bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs py-2 rounded-lg cursor-pointer shadow-xs"
+              >
                 {saving
-                  ? 'Indexing & Uploading...'
+                  ? 'Uploading & Indexing...'
                   : editingId
-                    ? 'Save Archive Changes'
+                    ? 'Save Changes'
                     : form.sourceType === 'GAZETTE'
                       ? 'Upload & Index Gazette'
                       : 'Register Portal Source'}
@@ -597,12 +627,10 @@ export function BoardSourcesPanel() {
                 <Button
                   type="button"
                   variant="subtle"
-                  onClick={() => {
-                    setEditingId(null);
-                    setForm(emptyForm);
-                  }}
+                  onClick={handleResetForm}
+                  className="text-xs"
                 >
-                  Cancel Edit
+                  Cancel
                 </Button>
               )}
             </div>
@@ -612,86 +640,82 @@ export function BoardSourcesPanel() {
         {/* Right Column: Registered Examination Archives Organized by Level & Authority */}
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs flex flex-col">
           {/* Header with Title, Refresh, and Level Category Filter Tabs */}
-          <div className="border-b border-slate-100 bg-slate-50/80 px-5 py-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h2 className="m-0 text-sm font-bold text-slate-900">
-                  Registered Examination Archives ({sources.length})
-                </h2>
-                <p className="mb-0 mt-0.5 text-xs text-slate-500">
-                  Organized by education level. Intake documents automatically cross-check against these files.
-                </p>
-              </div>
+          <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+            <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="subtle" onClick={loadSources} disabled={loading} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs">
-                  <IconRefresh className="size-3.5 mr-1" />
-                  Refresh
-                </Button>
+                <h2 className="m-0 text-sm font-bold text-slate-900">
+                  Registered Archives
+                </h2>
+                <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-bold text-slate-700">
+                  {sources.length}
+                </span>
               </div>
+              <Button size="sm" variant="subtle" onClick={loadSources} disabled={loading} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs py-1 px-2.5">
+                <IconRefresh className="size-3.5 mr-1" />
+                Refresh
+              </Button>
             </div>
 
             {/* Level Category Filter Tabs & Search */}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60 pt-3">
-              <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1 p-0.5 bg-slate-100 rounded-lg border border-slate-200/80">
                 <button
                   type="button"
                   onClick={() => setActiveFilter('ALL')}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'ALL'
-                      ? 'bg-white text-slate-900 font-semibold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      ? 'bg-white text-slate-900 font-semibold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  All Sources ({sources.length})
+                  All ({sources.length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFilter('HSSC')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'HSSC'
-                      ? 'bg-white text-indigo-950 font-semibold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      ? 'bg-white text-indigo-950 font-semibold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <span className="size-2 rounded-full bg-indigo-500" />
-                  <span>FSc / HSSC ({hsscCount})</span>
+                  <span className="size-1.5 rounded-full bg-indigo-500" />
+                  <span>FSc ({hsscCount})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFilter('SSC')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'SSC'
-                      ? 'bg-white text-teal-950 font-semibold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      ? 'bg-white text-teal-950 font-semibold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <span className="size-2 rounded-full bg-teal-500" />
-                  <span>Matric / SSC ({sscCount})</span>
+                  <span className="size-1.5 rounded-full bg-teal-500" />
+                  <span>Matric ({sscCount})</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveFilter('PORTAL')}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
                     activeFilter === 'PORTAL'
-                      ? 'bg-white text-blue-950 font-semibold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      ? 'bg-white text-blue-950 font-semibold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <span className="size-2 rounded-full bg-blue-500" />
-                  <span>Result Portals ({portalCount})</span>
+                  <span className="size-1.5 rounded-full bg-blue-500" />
+                  <span>Portals ({portalCount})</span>
                 </button>
               </div>
 
-              {/* Quick Search in sources */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Filter sources..."
-                  className="h-8 w-36 sm:w-44 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none"
-                />
-              </div>
+              {/* Quick Search */}
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter sources..."
+                className="h-7.5 w-36 sm:w-44 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-600 focus:outline-none"
+              />
             </div>
           </div>
 
@@ -710,16 +734,16 @@ export function BoardSourcesPanel() {
             <div className="max-h-[720px] overflow-y-auto divide-y divide-slate-100">
               {activeFilter === 'ALL' && !searchQuery ? (
                 // Grouped Institutional Sections for All
-                <div className="divide-y divide-slate-200/80">
+                <div className="divide-y divide-slate-100">
                   {/* Section 1: HSSC / Intermediate Gazettes */}
                   {hsscGroup.length > 0 && (
                     <div>
-                      <div className="bg-indigo-50/50 px-4 py-2 border-b border-indigo-100/60 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-indigo-900 uppercase tracking-wider">
-                          Intermediate / FSc (HSSC) Gazettes
+                      <div className="bg-slate-50/80 px-4 py-1.5 border-b border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          Intermediate / FSc Gazettes
                         </span>
-                        <span className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded-full">
-                          {hsscGroup.length} {hsscGroup.length === 1 ? 'Gazette' : 'Gazettes'}
+                        <span className="text-[10px] font-medium text-slate-400">
+                          {hsscGroup.length}
                         </span>
                       </div>
                       <div className="divide-y divide-slate-100">
@@ -745,12 +769,12 @@ export function BoardSourcesPanel() {
                   {/* Section 2: SSC / Matriculation Gazettes */}
                   {sscGroup.length > 0 && (
                     <div>
-                      <div className="bg-teal-50/50 px-4 py-2 border-b border-teal-100/60 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-teal-900 uppercase tracking-wider">
-                          Matriculation / SSC (Matric) Gazettes
+                      <div className="bg-slate-50/80 px-4 py-1.5 border-b border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          Matriculation / SSC Gazettes
                         </span>
-                        <span className="text-[10px] font-bold text-teal-700 bg-white border border-teal-200 px-2 py-0.5 rounded-full">
-                          {sscGroup.length} {sscGroup.length === 1 ? 'Gazette' : 'Gazettes'}
+                        <span className="text-[10px] font-medium text-slate-400">
+                          {sscGroup.length}
                         </span>
                       </div>
                       <div className="divide-y divide-slate-100">
@@ -776,11 +800,11 @@ export function BoardSourcesPanel() {
                   {/* Section 3: Universal / Other Gazettes */}
                   {otherGroup.length > 0 && (
                     <div>
-                      <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">
+                      <div className="bg-slate-50/80 px-4 py-1.5 border-b border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                           General / Universal Gazettes
                         </span>
-                        <span className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-medium text-slate-400">
                           {otherGroup.length}
                         </span>
                       </div>
@@ -807,12 +831,12 @@ export function BoardSourcesPanel() {
                   {/* Section 4: Result Web Portals */}
                   {portalGroup.length > 0 && (
                     <div>
-                      <div className="bg-blue-50/50 px-4 py-2 border-b border-blue-100/60 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-blue-900 uppercase tracking-wider">
+                      <div className="bg-slate-50/80 px-4 py-1.5 border-b border-slate-200/60 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                           Official Board Result Portals
                         </span>
-                        <span className="text-[10px] font-bold text-blue-700 bg-white border border-blue-200 px-2 py-0.5 rounded-full">
-                          {portalGroup.length} {portalGroup.length === 1 ? 'Portal' : 'Portals'}
+                        <span className="text-[10px] font-medium text-slate-400">
+                          {portalGroup.length}
                         </span>
                       </div>
                       <div className="divide-y divide-slate-100">
@@ -891,111 +915,169 @@ function SourceCard({
   testResult,
   isTesting,
 }) {
+  const [showDetails, setShowDetails] = useState(false);
   const isGazette = source.source_type === 'GAZETTE';
+  const isActive = Boolean(source.is_active);
   const aliases =
     typeof source.board_aliases === 'string'
-      ? JSON.parse(source.board_aliases)
+      ? (function () {
+          try { return JSON.parse(source.board_aliases); } catch { return []; }
+        })()
       : source.board_aliases || [];
 
+  function formatUrl(url) {
+    if (!url) return '';
+    try {
+      const u = new URL(url);
+      return u.hostname + (u.pathname && u.pathname !== '/' ? u.pathname : '');
+    } catch {
+      return String(url).replace(/^https?:\/\//, '');
+    }
+  }
+
   return (
-    <div className="p-4 transition hover:bg-slate-50/50 space-y-2.5">
-      {/* Top Header Row */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold text-sm text-slate-900">{source.board_name}</span>
+    <div className="p-3.5 transition hover:bg-slate-50/50 space-y-2">
+      {/* Primary Row: Title, Badges, and Actions */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Active status indicator dot */}
+          <span
+            className={`size-2 shrink-0 rounded-full ${
+              isActive ? 'bg-emerald-500' : 'bg-slate-300'
+            }`}
+            title={isActive ? 'Active' : 'Inactive'}
+          />
 
-            {/* Level Badge */}
-            <span
-              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
-                source.exam_level === 'HSSC'
-                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                  : source.exam_level === 'SSC'
-                    ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                    : 'bg-slate-100 text-slate-700 border border-slate-200'
-              }`}
-            >
-              {source.exam_level === 'HSSC'
-                ? 'FSc / HSSC'
+          <span className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+            {source.board_name}
+          </span>
+
+          {/* Level & Year Tag */}
+          <span
+            className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold shrink-0 ${
+              source.exam_level === 'HSSC'
+                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80'
                 : source.exam_level === 'SSC'
-                  ? 'Matric / SSC'
-                  : 'Universal'}
+                  ? 'bg-teal-50 text-teal-700 border border-teal-200/80'
+                  : 'bg-blue-50 text-blue-700 border border-blue-200/80'
+            }`}
+          >
+            {source.exam_level === 'HSSC'
+              ? 'HSSC'
+              : source.exam_level === 'SSC'
+                ? 'SSC'
+                : 'Universal'}
+            {source.academic_year && source.academic_year !== 'ALL' ? ` · ${source.academic_year}` : ''}
+          </span>
+
+          {!isActive && (
+            <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
+              Inactive
             </span>
-
-            {/* Year & Session Badge */}
-            <span className="text-xs font-semibold text-slate-600 bg-slate-100 border border-slate-200/80 rounded px-1.5 py-0.2">
-              {source.academic_year} · {source.exam_session === 'SECOND_ANNUAL' ? '2nd Annual' : 'Annual'}
-            </span>
-
-            {/* Active Status */}
-            {source.is_active ? (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.2">
-                <span className="size-1.5 rounded-full bg-emerald-600" /> Active
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.2">
-                Inactive
-              </span>
-            )}
-          </div>
-
-          {/* Subtitle File / URL Information */}
-          <div className="text-xs text-slate-600 flex flex-wrap items-center gap-2 pt-0.5">
-            {isGazette ? (
-              <span className="font-mono text-[11px] text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded inline-flex items-center gap-1">
-                <span className="font-sans font-semibold text-slate-500">PDF:</span> {source.gazette_filename}
-              </span>
-            ) : (
-              <span className="text-blue-700 bg-blue-50/70 border border-blue-200 px-2 py-0.5 rounded inline-flex items-center gap-1 text-[11px]">
-                <span className="font-semibold text-blue-800">Portal:</span> {source.portal_adapter || 'AUTO_FORM'} ·{' '}
-                <a
-                  href={source.result_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium hover:underline text-blue-700 truncate max-w-xs"
-                >
-                  {source.result_url}
-                </a>
-              </span>
-            )}
-
-            {aliases.length > 0 && (
-              <span className="text-[11px] text-slate-400 truncate max-w-sm" title={aliases.join(', ')}>
-                Aliases: {aliases.slice(0, 3).join(', ')}
-                {aliases.length > 3 ? ` +${aliases.length - 3}` : ''}
-              </span>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Action Buttons */}
+        {/* Action Buttons - Always aligned on the right, never wrapping */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {isGazette && source.is_active && (
+          {isGazette && isActive ? (
             <button
               type="button"
               onClick={() => onToggleTester(source.id)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer border ${
+              className={`rounded-md px-2 py-1 text-xs font-semibold transition cursor-pointer border ${
                 isExpanded
-                  ? 'bg-blue-700 text-white border-blue-700 shadow-2xs'
+                  ? 'bg-blue-700 text-white border-blue-700'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              {isExpanded ? 'Hide Test' : 'Test Roll'}
+              {isExpanded ? 'Close' : 'Test Roll'}
             </button>
-          )}
-          <Button size="sm" variant="subtle" onClick={() => onEdit(source)} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs">
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onEdit(source)}
+            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
             Edit
-          </Button>
-          {source.is_active && (
-            <Button size="sm" variant="subtle" onClick={() => onDeactivate(source)} className="border border-slate-200 bg-white hover:bg-slate-50 text-xs text-rose-700 hover:text-rose-800">
+          </button>
+          {isActive ? (
+            <button
+              type="button"
+              onClick={() => onDeactivate(source)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-200 cursor-pointer"
+            >
               Turn off
-            </Button>
-          )}
+            </button>
+          ) : null}
         </div>
       </div>
 
+      {/* Subtitle / File / URL Row - Clean, single line */}
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 pl-4">
+        {isGazette ? (
+          <span
+            className="font-mono text-slate-600 truncate max-w-[260px] inline-flex items-center gap-1"
+            title={source.gazette_filename}
+          >
+            <span className="text-slate-400 font-sans text-[10px]">PDF:</span>
+            {source.gazette_filename}
+          </span>
+        ) : (
+          <a
+            href={source.result_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 hover:underline truncate max-w-[260px] inline-flex items-center gap-1"
+            title={source.result_url}
+          >
+            <span className="text-slate-400">Portal:</span>
+            {formatUrl(source.result_url)}
+          </a>
+        )}
+
+        {/* Details Toggle (Aliases, Session, Adapter) */}
+        {(aliases.length > 0 || source.portal_adapter || source.exam_session === 'SECOND_ANNUAL') && (
+          <button
+            type="button"
+            onClick={() => setShowDetails((v) => !v)}
+            className="inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-slate-200/80 text-slate-600 px-1.5 py-0.2 text-[10px] font-medium transition cursor-pointer"
+          >
+            <span>{showDetails ? 'Hide Details' : aliases.length > 0 ? `${aliases.length} aliases` : 'Details'}</span>
+            <span className="text-[8px]">{showDetails ? '▲' : '▼'}</span>
+          </button>
+        )}
+      </div>
+
+      {/* Expandable Details Drawer */}
+      {showDetails && (
+        <div className="ml-4 rounded-lg bg-slate-50 border border-slate-200/70 p-2.5 text-xs space-y-1.5">
+          {source.portal_adapter && (
+            <div className="text-[11px] text-slate-600">
+              <span className="font-semibold text-slate-700">Adapter:</span> {source.portal_adapter}
+            </div>
+          )}
+          {source.exam_session && (
+            <div className="text-[11px] text-slate-600">
+              <span className="font-semibold text-slate-700">Session:</span> {source.exam_session}
+              {source.exam_part ? ` (${source.exam_part})` : ''}
+            </div>
+          )}
+          {aliases.length > 0 && (
+            <div>
+              <span className="font-semibold text-slate-700 text-[11px] block mb-1">OCR Board Aliases:</span>
+              <div className="flex flex-wrap gap-1">
+                {aliases.map((alias, i) => (
+                  <span key={i} className="bg-white border border-slate-200 px-1.5 py-0.2 rounded text-[10px] text-slate-600">
+                    {alias}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Collapsible Roll Number Tester Drawer */}
-      {isGazette && source.is_active && isExpanded && (
+      {isGazette && isActive && isExpanded && (
         <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3.5 mt-2 space-y-2.5 shadow-2xs">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">

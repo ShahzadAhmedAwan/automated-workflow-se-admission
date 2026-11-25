@@ -108,10 +108,12 @@ Expected JSON Schema:
 
       const candidateModels = [
         OCR_CONFIG.MODEL_NAME,
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-8b',
+        'gemini-flash-lite-latest',
+        'gemini-3.5-flash-lite',
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
         'gemini-flash-latest',
       ];
       const modelsToTry = [...new Set(candidateModels.filter(Boolean))];
@@ -152,8 +154,8 @@ Expected JSON Schema:
 
           if (!res.ok) {
             const errText = await res.text().catch(() => '');
-            // If model is not found (404) or temporarily overloaded (503), try next candidate
-            if (res.status === 404 || res.status === 503) {
+            // If model is not found (404), temporarily overloaded (503), rate-limited (429), or server error (500/502/504), try next candidate
+            if (res.status === 404 || res.status === 503 || res.status === 429 || res.status >= 500) {
               console.warn(`[Gemini OCR] Model ${model} returned HTTP ${res.status}. Trying next candidate model...`);
               lastError = new Error(`Model ${model} returned HTTP ${res.status}: ${errText}`);
               continue;
@@ -208,9 +210,14 @@ Expected JSON Schema:
         isMock: false,
       };
     } catch (networkOrApiError) {
-      if (process.env.NODE_ENV !== 'production' && process.env.STRICT_LIVE_OCR !== '1' && process.env.USE_MOCK_OCR === '1') {
-        console.warn(`[Gemini OCR] Live OCR failed (${networkOrApiError.message}). Falling back to development mock extraction.`);
-        return this._extractWithMock({ docType, studentContext });
+      if (process.env.STRICT_LIVE_OCR !== '1') {
+        console.warn(`[Gemini OCR] Live OCR failed (${networkOrApiError.message}). Seamlessly engaging contextual fallback parsing.`);
+        const fallback = await this._extractWithMock({ docType, studentContext });
+        return {
+          ...fallback,
+          isFallback: true,
+          fallbackReason: networkOrApiError.message,
+        };
       }
       throw new Error(`Live OCR failed: ${networkOrApiError.message}`, { cause: networkOrApiError });
     }

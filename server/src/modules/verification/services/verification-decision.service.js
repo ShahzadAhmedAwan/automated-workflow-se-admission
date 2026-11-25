@@ -5,6 +5,7 @@ import { EVENT_TYPES } from '../../../contracts/event-types.js';
 import {
   DOCUMENT_TYPES,
   DOCUMENT_VERIFICATION_STATUS,
+  MANDATORY_ADMISSION_DOCUMENTS,
   STUDENT_OVERALL_STATUS,
   TOKEN_CONFIG,
 } from '../verification.constants.js';
@@ -401,8 +402,18 @@ export class VerificationDecisionService {
       [student.id, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
     );
 
+    // Check that all mandatory admission documents exist and are verified
+    const [verifiedDocs] = await connection.execute(
+      `SELECT doc_type FROM adm_student_documents
+        WHERE student_id = ?
+          AND verification_status IN (?, ?)`,
+      [student.id, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+    );
+    const verifiedTypes = new Set(verifiedDocs.map((d) => d.doc_type));
+    const allMandatoryVerified = MANDATORY_ADMISSION_DOCUMENTS.every((t) => verifiedTypes.has(t));
+
     let finalStatus = student.overall_status;
-    if (unmatched.length === 0) {
+    if (unmatched.length === 0 && allMandatoryVerified) {
       finalStatus = STUDENT_OVERALL_STATUS.VERIFIED;
       const [manualReviews] = await connection.execute(
         `SELECT reviewed_by FROM adm_student_documents

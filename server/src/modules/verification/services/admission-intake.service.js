@@ -374,12 +374,16 @@ export class AdmissionIntakeService {
         if (!Object.values(DOCUMENT_TYPES).includes(docType) || (!allowedDocTypes.has(docType) && !allowedDocTypes.has(DOCUMENT_TYPES.OTHER))) {
           throw new AppError(400, 'INVALID_DOCUMENT_TYPES', `The upload link does not allow ${docType || 'this document type'}.`);
         }
+        const rawMime = String(file.mimetype || '').toLowerCase();
+        const effectiveMime = (rawMime === 'image/jpg' || rawMime === 'image/pjpeg') ? 'image/jpeg' : rawMime;
+        file.mimetype = effectiveMime;
+
         const signatures = {
           'image/jpeg': file.buffer?.[0] === 0xff && file.buffer?.[1] === 0xd8 && file.buffer?.[2] === 0xff,
           'image/png': file.buffer?.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
           'application/pdf': file.buffer?.subarray(0, 5).toString('ascii') === '%PDF-',
         };
-        if (!signatures[file.mimetype]) throw new AppError(400, 'INVALID_FILE_CONTENT', `${docType} is not a valid ${file.mimetype} file.`);
+        if (!signatures[effectiveMime]) throw new AppError(400, 'INVALID_FILE_CONTENT', `${docType} is not a valid ${effectiveMime} file.`);
 
         const uploadResult = await StorageService.uploadFile({
           buffer: file.buffer,
@@ -718,6 +722,10 @@ export class AdmissionIntakeService {
     if (document.gdrive_file_id) {
       await StorageService.deleteFile(document.storage_key || r2Key, document.storage_provider);
       return { gdriveFileId: document.gdrive_file_id, storageState: STORAGE_STATE.ARCHIVED_GDRIVE };
+    }
+    if (!StorageService.isGDriveConfigured()) {
+      console.info(`[Storage Worker] Google Drive archive is unconfigured; preserving document #${documentId} in active storage.`);
+      return { skipped: true, reason: 'GDRIVE_UNCONFIGURED', storageKey: document.storage_key || r2Key };
     }
     const migration = await StorageService.migrateToGoogleDrive({
       storageKey: document.storage_key || r2Key,
@@ -1935,79 +1943,20 @@ export class AdmissionIntakeService {
   }
 
   /**
-   * Non-blocking automated SEET entry test lookup and merit calculation when a candidate becomes VERIFIED
+   * Dispatches automated CANDIDATE_VERIFIED event to outbox queue for SEET entry test lookup and merit calculation
    */
   static triggerAutoSeetLookup(studentId, db = pool) {
     setImmediate(async () => {
       try {
-        const [rows] = await db.query(
-          `SELECT id, cnic, full_name, entry_test_marks
-           FROM adm_students
-           WHERE id = ? AND overall_status = 'VERIFIED'`,
-          [studentId]
-        );
-        if (!rows.length) return;
-        const student = rows[0];
-
-        // 1. Resolve CNIC: if missing in student row, attempt recovery from CNIC_FRONT or lead record
-        let targetCnic = student.cnic;
-        if (!targetCnic) {
-          try {
-            const [cnicDocs] = await db.query(
-              `SELECT extracted_data FROM adm_student_documents
-               WHERE student_id = ? AND doc_type = 'CNIC_FRONT' AND extracted_data IS NOT NULL
-               ORDER BY id DESC LIMIT 1`,
-              [studentId]
-            );
-            if (cnicDocs.length && cnicDocs[0].extracted_data) {
-              const parsed = typeof cnicDocs[0].extracted_data === 'string'
-                ? JSON.parse(cnicDocs[0].extracted_data)
-                : cnicDocs[0].extracted_data;
-              targetCnic = parsed.cnic || parsed.cnicNumber || parsed.idNumber;
-            }
-            if (!targetCnic) {
-              const [leadRows] = await db.query(
-                `SELECT l.cnic FROM mkt_leads l JOIN adm_students s ON s.lead_id = l.id WHERE s.id = ?`,
-                [studentId]
-              );
-              if (leadRows.length && leadRows[0].cnic) targetCnic = leadRows[0].cnic;
-            }
-            if (targetCnic) {
-              await db.execute(`UPDATE adm_students SET cnic = ? WHERE id = ?`, [targetCnic, studentId]);
-            }
-          } catch {}
-        }
-
-        // 2. Automatically scrape and link SEET entrance test score if unrecorded
-        if ((student.entry_test_marks === null || Number(student.entry_test_marks) === 0) && targetCnic) {
-          const { SeetScraperService } = await import('../../merit/services/seet-scraper.service.js');
-          let result = null;
-          try {
-            result = await SeetScraperService.lookupByCnic(targetCnic, { timeoutMs: 5000 });
-          } catch (lookupErr) {
-            console.error('[Auto SEET Scrape Network Error]:', lookupErr.message);
-          }
-
-          // In offline test/simulation environments, allow controlled simulation fallback
-          if (!result?.found && (process.env.USE_SIMULATED_SEET === 'true' || process.env.NODE_ENV === 'test')) {
-            result = await SeetScraperService.lookupByCnic(targetCnic, { useSimulation: true });
-          }
-
-          if (result?.found && result?.data) {
-            await SeetScraperService.saveResultAndBackfill(result.data, db);
-            console.log(`[Auto SEET Trigger]: Verified student ${student.id} (${student.full_name}) linked with score ${result.data.marksObtained}/100 (${result.data.phase || 'SEET'}).`);
-          } else {
-            console.log(`[Auto SEET Trigger]: Candidate ${student.id} (${student.full_name}) checked across active phases; test score left as SEET Pending.`);
-          }
-        }
-
-        // 3. Automatically calculate and persist updated merit snapshot rankings!
-        const { MeritSnapshotService } = await import('../../merit/services/merit-snapshot.service.js');
-        await MeritSnapshotService.calculateAndSaveSnapshot({ isDryRun: false, iterationNumber: 1 }, db);
-        console.log(`[Auto Merit Trigger]: Recalculated merit list snapshot with verified candidate ${student.id}.`);
+        await dispatchJob({
+          queueName: 'merit_processing',
+          jobType: EVENT_TYPES.CANDIDATE_VERIFIED,
+          payload: { studentId },
+          connection: db,
+        });
       } catch (err) {
-        // Non-blocking auto-lookup: logs silently if university portal is temporarily unreachable
-        console.error('[Auto SEET & Merit Trigger]:', err.message);
+        // Non-blocking auto-lookup: logs error if outbox dispatch fails
+        console.error('[Candidate Verified Event Dispatch Error]:', err.message);
       }
     });
   }

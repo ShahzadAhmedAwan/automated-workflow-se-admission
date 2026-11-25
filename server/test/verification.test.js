@@ -446,6 +446,14 @@ test('VerificationDecisionService: Condition A (Verified Match) sets VERIFIED an
           attempt_count: 1,
         }]];
       }
+      if (query.includes('verification_status IN')) {
+        return [[
+          { doc_type: 'FSC_MARKSHEET' },
+          { doc_type: 'MATRIC_MARKSHEET' },
+          { doc_type: 'CNIC_FRONT' },
+          { doc_type: 'DOMICILE' },
+        ]];
+      }
       if (query.includes('FROM adm_student_documents WHERE student_id = ?') || query.includes('verification_status NOT IN')) {
         return [[]]; // No remaining unmatched documents -> all verified!
       }
@@ -473,6 +481,47 @@ test('VerificationDecisionService: Condition A (Verified Match) sets VERIFIED an
 
   const gdriveJob = executedQueries.find((q) => q.query.includes('INSERT INTO outbox_jobs') && q.params[1] === 'MIGRATE_GDRIVE');
   assert.ok(gdriveJob, 'MIGRATE_GDRIVE outbox job was scheduled');
+});
+
+test('VerificationDecisionService: Condition A leaves status as UNDER_REVIEW if mandatory documents are still missing', async () => {
+  const mockDb = {
+    async execute(query) {
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 50,
+          cnic: '3740512345671',
+          full_name: 'Muhammad Usman',
+          phone_normalized: '923001234567',
+          fsc_obtained_marks: 940,
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('verification_status IN')) {
+        // Only FSC is verified so far; Matric, CNIC, and Domicile are missing
+        return [[{ doc_type: 'FSC_MARKSHEET' }]];
+      }
+      if (query.includes('verification_status NOT IN')) {
+        return [[]]; // No other files currently pending in adm_student_documents
+      }
+      if (query.includes('FROM adm_student_documents WHERE id = ?')) {
+        return [[{ storage_key: 'uploads/fsc.jpg', original_filename: 'fsc.jpg', file_mime: 'image/jpeg' }]];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 10,
+    studentId: 50,
+    docType: 'FSC_MARKSHEET',
+    extractedOcr: { candidateName: 'Muhammad Usman', obtainedMarks: 940, totalMarks: 1100, rollNumber: '542198', isPass: true },
+    portalVerification: { isVerified: true, boardMarks: 940, candidateName: 'Muhammad Usman' },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, 'MATCHED');
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.UNDER_REVIEW);
 });
 
 test('VerificationDecisionService: Condition B (Discrepancy Attempt 1) reissues fresh token and WhatsApp alert', async () => {
@@ -1036,6 +1085,14 @@ test('VerificationDecisionService: CNIC Front matches declared marketing CNIC an
           extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB-UR-REHMAN' }),
         }]];
       }
+      if (query.includes('verification_status IN')) {
+        return [[
+          { doc_type: 'FSC_MARKSHEET' },
+          { doc_type: 'MATRIC_MARKSHEET' },
+          { doc_type: 'CNIC_FRONT' },
+          { doc_type: 'DOMICILE' },
+        ]];
+      }
       if (query.includes('verification_status NOT IN')) {
         return [[]]; // All documents verified
       }
@@ -1160,6 +1217,14 @@ test('VerificationDecisionService: Domicile matches marksheet name and updates s
           doc_type: 'FSC_MARKSHEET',
           extracted_data: JSON.stringify({ candidateName: 'SHEIKH HASEEB UR REHMAN' }),
         }]];
+      }
+      if (query.includes('verification_status IN')) {
+        return [[
+          { doc_type: 'FSC_MARKSHEET' },
+          { doc_type: 'MATRIC_MARKSHEET' },
+          { doc_type: 'CNIC_FRONT' },
+          { doc_type: 'DOMICILE' },
+        ]];
       }
       if (query.includes('verification_status NOT IN')) {
         return [[]]; // All documents verified
@@ -1455,73 +1520,25 @@ test('AdmissionIntakeService.autoDispatchMissingDocumentLinks: includes rejected
   assert.ok(!outboxPayload.messageText.includes('Domicile'));
 });
 
-test('AdmissionIntakeService.triggerAutoSeetLookup: automatically scrapes portal, links score, and recalibrates merit snapshot when candidate is VERIFIED', async () => {
-  const { SeetScraperService } = await import('../src/modules/merit/services/seet-scraper.service.js');
-  const { MeritSnapshotService } = await import('../src/modules/merit/services/merit-snapshot.service.js');
-
-  const originalLookup = SeetScraperService.lookupByCnic;
-  const originalSave = SeetScraperService.saveResultAndBackfill;
-  const originalSnapshot = MeritSnapshotService.calculateAndSaveSnapshot;
-
-  let lookupCalledWith = null;
-  let saveCalledWith = null;
-  let snapshotCalled = false;
-
-  SeetScraperService.lookupByCnic = async (cnic) => {
-    lookupCalledWith = cnic;
-    return {
-      found: true,
-      source: 'LIVE_PORTAL',
-      phase: 'SEET26-P2',
-      data: {
-        cnic,
-        rollNo: 'SEET26-P2-UAJK-12',
-        candidateName: 'Ibtisam Azam',
-        fatherName: 'Raja Muhammad Azam',
-        phase: 'SEET26-P2',
-        marksObtained: 55,
-        totalMarks: 100,
-        status: 'PASS',
-      },
-    };
-  };
-
-  SeetScraperService.saveResultAndBackfill = async (data) => {
-    saveCalledWith = data;
-    return { id: 1, cnic: data.cnic, marksObtained: 55 };
-  };
-
-  MeritSnapshotService.calculateAndSaveSnapshot = async () => {
-    snapshotCalled = true;
-    return { snapshotId: 10, totalRanked: 1 };
-  };
-
+test('AdmissionIntakeService.triggerAutoSeetLookup: dispatches CANDIDATE_VERIFIED outbox job when candidate is VERIFIED', async () => {
+  const outboxJobs = [];
   const mockDb = {
-    async query(sql) {
-      if (sql.includes('FROM adm_students') && sql.includes("overall_status = 'VERIFIED'")) {
-        return [[{ id: 7080, cnic: '82701-0359416-5', full_name: 'Ibtisam Azam', entry_test_marks: null }]];
+    async execute(query, params) {
+      if (query.includes('INSERT INTO outbox_jobs')) {
+        outboxJobs.push({ query, params });
       }
-      return [[]];
-    },
-    async execute() {
-      return [{ affectedRows: 1 }];
+      return [{ affectedRows: 1, insertId: 101 }];
     },
   };
 
-  try {
-    AdmissionIntakeService.triggerAutoSeetLookup(7080, mockDb);
+  AdmissionIntakeService.triggerAutoSeetLookup(7080, mockDb);
 
-    // Wait for the setImmediate microtask
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  // Wait for the setImmediate microtask
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
-    assert.equal(lookupCalledWith, '82701-0359416-5', 'Should query SEET scraper with verified candidate CNIC');
-    assert.ok(saveCalledWith, 'Should save and backfill scraped result');
-    assert.equal(saveCalledWith.marksObtained, 55);
-    assert.equal(saveCalledWith.phase, 'SEET26-P2');
-    assert.equal(snapshotCalled, true, 'Should trigger automated recalculation of merit snapshot');
-  } finally {
-    SeetScraperService.lookupByCnic = originalLookup;
-    SeetScraperService.saveResultAndBackfill = originalSave;
-    MeritSnapshotService.calculateAndSaveSnapshot = originalSnapshot;
-  }
+  assert.equal(outboxJobs.length, 1, 'Should dispatch one outbox job');
+  assert.equal(outboxJobs[0].params[0], 'merit_processing');
+  assert.equal(outboxJobs[0].params[1], 'CANDIDATE_VERIFIED');
+  const payload = JSON.parse(outboxJobs[0].params[2]);
+  assert.equal(payload.studentId, 7080);
 });

@@ -99,8 +99,9 @@ export function PublicUploadPortal({ token }) {
       return;
     }
 
-    const allowed = ['image/jpeg', 'image/png', 'application/pdf'];
-    if (!allowed.includes(file.mimetype || file.type)) {
+    const rawType = String(file.mimetype || file.type || '').toLowerCase();
+    const allowed = ['image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'application/pdf'];
+    if (!allowed.includes(rawType) && !file.name?.match(/\.(jpe?g|png|pdf)$/i)) {
       setFormError('Please choose a valid JPEG, PNG or PDF file.');
       return;
     }

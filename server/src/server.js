@@ -33,14 +33,25 @@ registerJobHandler(EVENT_TYPES.PROCESS_OCR_DOCUMENT, async (payload, metadata) =
 
 // Module 3 Google Drive Archive Worker
 registerJobHandler(EVENT_TYPES.MIGRATE_GDRIVE, async (payload) => {
-  await AdmissionIntakeService.migrateGDriveJob(payload);
-  console.info(`[Storage Worker] Archived document #${payload.documentId} to Google Drive`);
+  const result = await AdmissionIntakeService.migrateGDriveJob(payload);
+  if (result?.skipped) {
+    console.info(`[Storage Worker] Preserved document #${payload.documentId} in active storage (Google Drive unconfigured).`);
+  } else {
+    console.info(`[Storage Worker] Archived document #${payload.documentId} to Google Drive`);
+  }
 });
 
 // Module 2 -> Module 3 Lead Handoff
 registerJobHandler(EVENT_TYPES.LEAD_QUALIFIED, async (payload) => {
   await AdmissionIntakeService.createCandidateFromLead(payload);
   console.info(`[Admissions Worker] Created candidate from qualified lead #${payload.leadId}`);
+});
+
+// Module 3 -> Module 4 Merit Handoff
+registerJobHandler(EVENT_TYPES.CANDIDATE_VERIFIED, async (payload) => {
+  const { MeritSnapshotService } = await import('./modules/merit/index.js');
+  await MeritSnapshotService.processCandidateVerified(payload);
+  console.info(`[Merit Worker] Recalibrated merit lists for verified student #${payload.studentId}`);
 });
 
 // Module 3 Intake Token Expiration Reminder Worker (Runs every 15 minutes)

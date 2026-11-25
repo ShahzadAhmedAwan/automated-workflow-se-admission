@@ -25,6 +25,17 @@ export class StorageService {
   }
 
   /**
+   * Determine whether real Google Drive API archiving is configured
+   */
+  static isGDriveConfigured() {
+    return Boolean(
+      process.env.GDRIVE_SERVICE_ACCOUNT_EMAIL &&
+      process.env.GDRIVE_PRIVATE_KEY &&
+      process.env.GDRIVE_ARCHIVE_FOLDER_ID
+    );
+  }
+
+  /**
    * Upload file to active storage (R2 or Local Fallback)
    *
    * @param {Object} params

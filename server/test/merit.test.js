@@ -959,3 +959,68 @@ test('SeetScraperService: dynamic phase auto-discovery strictly enforces 2 phase
   assert.equal(parsedCandidate.totalMarks, 100);
   assert.equal(parsedCandidate.status, 'PASS');
 });
+
+test('MeritSnapshotService.processCandidateVerified: automatically scrapes portal, links score, and recalibrates merit snapshot when candidate is VERIFIED', async () => {
+  const originalLookup = SeetScraperService.lookupByCnic;
+  const originalSave = SeetScraperService.saveResultAndBackfill;
+  const originalSnapshot = MeritSnapshotService.calculateAndSaveSnapshot;
+
+  let lookupCalledWith = null;
+  let saveCalledWith = null;
+  let snapshotCalled = false;
+
+  SeetScraperService.lookupByCnic = async (cnic) => {
+    lookupCalledWith = cnic;
+    return {
+      found: true,
+      source: 'LIVE_PORTAL',
+      phase: 'SEET26-P2',
+      data: {
+        cnic,
+        rollNo: 'SEET26-P2-UAJK-12',
+        candidateName: 'Ibtisam Azam',
+        fatherName: 'Raja Muhammad Azam',
+        phase: 'SEET26-P2',
+        marksObtained: 55,
+        totalMarks: 100,
+        status: 'PASS',
+      },
+    };
+  };
+
+  SeetScraperService.saveResultAndBackfill = async (data) => {
+    saveCalledWith = data;
+    return { id: 1, cnic: data.cnic, marksObtained: 55 };
+  };
+
+  MeritSnapshotService.calculateAndSaveSnapshot = async () => {
+    snapshotCalled = true;
+    return { snapshotId: 10, totalRanked: 1 };
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM adm_students') && sql.includes("overall_status = 'VERIFIED'")) {
+        return [[{ id: 7080, cnic: '82701-0359416-5', full_name: 'Ibtisam Azam', entry_test_marks: null }]];
+      }
+      return [[]];
+    },
+    async execute() {
+      return [{ affectedRows: 1 }];
+    },
+  };
+
+  try {
+    await MeritSnapshotService.processCandidateVerified({ studentId: 7080 }, mockDb);
+
+    assert.equal(lookupCalledWith, '82701-0359416-5', 'Should query SEET scraper with verified candidate CNIC');
+    assert.ok(saveCalledWith, 'Should save and backfill scraped result');
+    assert.equal(saveCalledWith.marksObtained, 55);
+    assert.equal(saveCalledWith.phase, 'SEET26-P2');
+    assert.equal(snapshotCalled, true, 'Should trigger automated recalculation of merit snapshot');
+  } finally {
+    SeetScraperService.lookupByCnic = originalLookup;
+    SeetScraperService.saveResultAndBackfill = originalSave;
+    MeritSnapshotService.calculateAndSaveSnapshot = originalSnapshot;
+  }
+});

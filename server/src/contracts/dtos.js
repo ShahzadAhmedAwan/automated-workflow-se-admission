@@ -46,4 +46,8 @@ export const eventDtos = Object.freeze({
     initialPassword: z.string().min(1),
     loginUrl: z.string().url().optional(),
   }).strict(),
+  CANDIDATE_VERIFIED: z.object({
+    studentId: id,
+    cnic: z.string().trim().max(30).optional().nullable(),
+  }).passthrough(),
 });

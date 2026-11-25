@@ -15,8 +15,11 @@ const documentUpload = multer({
     files: 5,                  // max 5 files per submission
   },
   fileFilter: (_req, file, cb) => {
+    const rawMime = String(file.mimetype || '').toLowerCase();
+    const normalizedMime = (rawMime === 'image/jpg' || rawMime === 'image/pjpeg') ? 'image/jpeg' : rawMime;
+    file.mimetype = normalizedMime;
     const allowedMimes = ['image/jpeg', 'image/png', 'application/pdf'];
-    if (allowedMimes.includes(file.mimetype) && Object.values(DOCUMENT_TYPES).includes(file.fieldname)) {
+    if (allowedMimes.includes(normalizedMime) && Object.values(DOCUMENT_TYPES).includes(file.fieldname)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid document field or file format. Use a supported document type and JPEG, PNG, or PDF file.'));

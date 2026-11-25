@@ -6,6 +6,7 @@ import { DECISION_STATUS } from '../merit.constants.js';
 import { MeritEngineService } from './merit-engine.service.js';
 import { MeritPolicyService } from './merit-policy.service.js';
 import { ensureMeritSchema } from './merit-schema.service.js';
+import { SeetScraperService } from './seet-scraper.service.js';
 
 export class MeritSnapshotService {
   /**
@@ -467,6 +468,80 @@ export class MeritSnapshotService {
       if (shouldRelease) {
         connection.release();
       }
+    }
+  }
+
+  /**
+   * Background processor for CANDIDATE_VERIFIED event:
+   * Resolves SEET entrance test score if missing, then recalibrates merit snapshot.
+   */
+  static async processCandidateVerified({ studentId, cnic = null }, db = pool) {
+    try {
+      const [rows] = await db.query(
+        `SELECT id, cnic, full_name, entry_test_marks
+         FROM adm_students
+         WHERE id = ? AND overall_status = 'VERIFIED'`,
+        [studentId]
+      );
+      if (!rows.length) return;
+      const student = rows[0];
+
+      // 1. Resolve CNIC: if missing in student row, attempt recovery from CNIC_FRONT or lead record
+      let targetCnic = cnic || student.cnic;
+      if (!targetCnic) {
+        try {
+          const [cnicDocs] = await db.query(
+            `SELECT extracted_data FROM adm_student_documents
+             WHERE student_id = ? AND doc_type = 'CNIC_FRONT' AND extracted_data IS NOT NULL
+             ORDER BY id DESC LIMIT 1`,
+            [studentId]
+          );
+          if (cnicDocs.length && cnicDocs[0].extracted_data) {
+            const parsed = typeof cnicDocs[0].extracted_data === 'string'
+              ? JSON.parse(cnicDocs[0].extracted_data)
+              : cnicDocs[0].extracted_data;
+            targetCnic = parsed.cnic || parsed.cnicNumber || parsed.idNumber;
+          }
+          if (!targetCnic) {
+            const [leadRows] = await db.query(
+              `SELECT l.cnic FROM mkt_leads l JOIN adm_students s ON s.lead_id = l.id WHERE s.id = ?`,
+              [studentId]
+            );
+            if (leadRows.length && leadRows[0].cnic) targetCnic = leadRows[0].cnic;
+          }
+          if (targetCnic) {
+            await db.execute(`UPDATE adm_students SET cnic = ? WHERE id = ?`, [targetCnic, studentId]);
+          }
+        } catch {}
+      }
+
+      // 2. Automatically scrape and link SEET entrance test score if unrecorded
+      if ((student.entry_test_marks === null || Number(student.entry_test_marks) === 0) && targetCnic) {
+        let result = null;
+        try {
+          result = await SeetScraperService.lookupByCnic(targetCnic, { timeoutMs: 5000 });
+        } catch (lookupErr) {
+          console.error('[Auto SEET Scrape Network Error]:', lookupErr.message);
+        }
+
+        // In offline test/simulation environments, allow controlled simulation fallback
+        if (!result?.found && (process.env.USE_SIMULATED_SEET === 'true' || process.env.NODE_ENV === 'test')) {
+          result = await SeetScraperService.lookupByCnic(targetCnic, { useSimulation: true });
+        }
+
+        if (result?.found && result?.data) {
+          await SeetScraperService.saveResultAndBackfill(result.data, db);
+          console.log(`[Auto SEET Trigger]: Verified student ${student.id} (${student.full_name}) linked with score ${result.data.marksObtained}/100 (${result.data.phase || 'SEET'}).`);
+        } else {
+          console.log(`[Auto SEET Trigger]: Candidate ${student.id} (${student.full_name}) checked across active phases; test score left as SEET Pending.`);
+        }
+      }
+
+      // 3. Automatically calculate and persist updated merit snapshot rankings
+      await MeritSnapshotService.calculateAndSaveSnapshot({ isDryRun: false, iterationNumber: 1 }, db);
+      console.log(`[Auto Merit Trigger]: Recalculated merit list snapshot with verified candidate ${student.id}.`);
+    } catch (err) {
+      console.error('[Auto SEET & Merit Trigger]:', err.message);
     }
   }
 }

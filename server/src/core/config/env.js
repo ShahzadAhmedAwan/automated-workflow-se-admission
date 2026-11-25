@@ -67,6 +67,11 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().optional(),
   SMTP_FROM: z.string().default('SE Admissions <noreply@se-admissions.local>'),
   SMTP_SECURE: z.enum(['true', 'false']).default('false'),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().optional(),
+  INSTITUTION_NAME: z.string().optional(),
+  ADMIN_NUMBER: z.string().optional(),
+  USE_SIMULATED_SEET: z.enum(['true', 'false']).optional().default('false'),
 });
 
 const parsed = envSchema.safeParse(process.env);

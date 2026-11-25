@@ -1,12 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from '../modules/auth/AuthProvider.jsx';
 import { LoginPage } from '../modules/auth/LoginPage.jsx';
-import { UserManagementView } from '../modules/auth/UserManagementView.jsx';
-import { MarketingModuleView } from '../modules/marketing/MarketingModuleView.jsx';
-import { VerificationModuleView } from '../modules/verification/VerificationModuleView.jsx';
-import { MeritModuleView } from '../modules/merit/MeritModuleView.jsx';
 import { marketingApi } from '../modules/marketing/marketingApi.js';
 import { Button } from '../core/ui/primitives.jsx';
+
+const UserManagementView = lazy(() =>
+  import('../modules/auth/UserManagementView.jsx').then((m) => ({ default: m.UserManagementView }))
+);
+const MarketingModuleView = lazy(() =>
+  import('../modules/marketing/MarketingModuleView.jsx').then((m) => ({ default: m.MarketingModuleView }))
+);
+const VerificationModuleView = lazy(() =>
+  import('../modules/verification/VerificationModuleView.jsx').then((m) => ({ default: m.VerificationModuleView }))
+);
+const MeritModuleView = lazy(() =>
+  import('../modules/merit/MeritModuleView.jsx').then((m) => ({ default: m.MeritModuleView }))
+);
+
+function ModuleLoadingFallback() {
+  return (
+    <div className="flex h-64 items-center justify-center">
+      <div className="flex flex-col items-center gap-2 text-slate-500">
+        <span className="size-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        <span className="text-xs font-medium">Loading view…</span>
+      </div>
+    </div>
+  );
+}
 import {
   IconDashboard,
   IconUsers,
@@ -322,49 +342,51 @@ export function App() {
         </header>
 
         <main id="main-content" className="mx-auto w-full max-w-[1520px] px-4 py-5 sm:px-7 sm:py-6 xl:px-9">
-          {currentNav === 'marketing' && (
-            <div>
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
-                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                  Marketing & Leads
-                </h1>
+          <Suspense fallback={<ModuleLoadingFallback />}>
+            {currentNav === 'marketing' && (
+              <div>
+                <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                  <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                    Marketing & Leads
+                  </h1>
+                </div>
+                <MarketingModuleView />
               </div>
-              <MarketingModuleView />
-            </div>
-          )}
+            )}
 
-          {currentNav === 'verification' && (
-            <div>
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
-                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                  Document Verification
-                </h1>
+            {currentNav === 'verification' && (
+              <div>
+                <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                  <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                    Document Verification
+                  </h1>
+                </div>
+                <VerificationModuleView />
               </div>
-              <VerificationModuleView />
-            </div>
-          )}
+            )}
 
-          {currentNav === 'merit' && (
-            <div>
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
-                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                  Merit & Rankings
-                </h1>
+            {currentNav === 'merit' && (
+              <div>
+                <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                  <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                    Merit & Rankings
+                  </h1>
+                </div>
+                <MeritModuleView />
               </div>
-              <MeritModuleView />
-            </div>
-          )}
+            )}
 
-          {currentNav === 'staff' && isSuperAdmin && (
-            <div>
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
-                <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                  Staff Management
-                </h1>
+            {currentNav === 'staff' && isSuperAdmin && (
+              <div>
+                <div className="mb-5 flex items-center justify-between border-b border-slate-200/80 pb-3.5">
+                  <h1 className="m-0 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                    Staff Management
+                  </h1>
+                </div>
+                <UserManagementView />
               </div>
-              <UserManagementView />
-            </div>
-          )}
+            )}
+          </Suspense>
         </main>
       </div>
 

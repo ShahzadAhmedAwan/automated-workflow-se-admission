@@ -65,7 +65,7 @@ Examples:
         }
       }
 
-      const [resOutbox] = await connection.execute("DELETE FROM outbox_jobs WHERE job_type IN ('WHATSAPP_MESSAGE', 'LEAD_QUALIFIED', 'PROCESS_OCR_DOCUMENT')");
+      const [resOutbox] = await connection.execute("DELETE FROM outbox_jobs WHERE job_type IN ('WHATSAPP_MESSAGE', 'LEAD_QUALIFIED', 'PROCESS_OCR_DOCUMENT', 'MIGRATE_GDRIVE', 'CANDIDATE_VERIFIED')");
       const [resDocs] = await connection.execute('DELETE FROM adm_student_documents');
       const [resTokens] = await connection.execute('DELETE FROM adm_intake_tokens');
       const [resStudents] = await connection.execute('DELETE FROM adm_students');

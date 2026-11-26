@@ -178,7 +178,7 @@ test('Schemas: createUserSchema accepts only allowed roles and strong passwords'
   const emptyName = schemas.createUserSchema.safeParse({
     email: 'user@example.com',
     password: 'StrongPassword2026',
-    role: 'AUDITOR',
+    role: 'SUPER_ADMIN',
     displayName: '   ',
   });
   assert.equal(emptyName.success, false, 'whitespace-only displayName rejected');
@@ -189,9 +189,13 @@ test('Schemas: updateUserSchema forbids empty payloads and invalid roles', () =>
   assert.equal(schemas.updateUserSchema.safeParse({}).success, false);
 
   // Valid updates
-  assert.equal(schemas.updateUserSchema.safeParse({ role: 'VERIFIER' }).success, true);
+  assert.equal(schemas.updateUserSchema.safeParse({ role: 'SUPER_ADMIN' }).success, true);
   assert.equal(schemas.updateUserSchema.safeParse({ isActive: false }).success, true);
-  assert.equal(schemas.updateUserSchema.safeParse({ role: 'AUDITOR', isActive: true }).success, true);
+  assert.equal(schemas.updateUserSchema.safeParse({ role: 'SUPER_ADMIN', isActive: true }).success, true);
+
+  // Legacy/invalid roles rejected
+  assert.equal(schemas.updateUserSchema.safeParse({ role: 'VERIFIER' }).success, false);
+  assert.equal(schemas.updateUserSchema.safeParse({ role: 'AUDITOR' }).success, false);
 
   // Disallowed fields
   assert.equal(schemas.updateUserSchema.safeParse({ displayName: 'New Name' }).success, false);

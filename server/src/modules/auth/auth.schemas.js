@@ -9,7 +9,7 @@ export const loginSchema = z.object({
 export const createUserSchema = z.object({
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
   password: z.string().min(12).max(128).regex(/[a-z]/).regex(/[A-Z]/).regex(/\d/),
-  role: z.enum(ROLE_NAMES),
+  role: z.enum(ROLE_NAMES).default('SUPER_ADMIN'),
   displayName: z.string().trim().min(1).max(120),
 }).strict();
 

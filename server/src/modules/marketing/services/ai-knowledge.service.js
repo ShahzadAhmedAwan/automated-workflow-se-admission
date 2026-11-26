@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KNOWLEDGE_PATH = path.resolve(__dirname, '../../../../data/knowledge.txt');
 
+export function stripEmojis(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1F1E6}-\u{1F1FF}\u{200D}]/gu, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 export class AIKnowledgeService {
   static knowledgeCache = null;
 
@@ -116,63 +125,97 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
 
   /**
    * Helper to detect if a message is an inquiry/question rather than a direct answer
+   * Intelligently detects questions even when punctuation/question marks are omitted
    */
   static isQuestion(text) {
     if (!text || typeof text !== 'string') return false;
     const clean = text.trim().toLowerCase();
 
-    // Explicit question mark
-    if (clean.includes('?')) return true;
+    // 1. Explicit question marks (English and Arabic/Urdu)
+    if (clean.includes('?') || clean.includes('؟')) return true;
 
-    // Direct intention to ask a question
+    // 2. Direct intention to ask a question
     if (AIKnowledgeService.isAskingToAskQuestion(clean)) return true;
 
-    // Interrogatives at start or core positions
+    // 3. Interrogatives at start of sentence
     if (
-      /^(what|where|when|who|why|how|which|whose|is|are|can|do|will|could|should|would|kya|kab|kahan|kitni|kitna|kaise|konsa|kon)\b/i.test(
+      /^(what|where|when|who|why|how|which|whose|whom|is|are|can|could|will|would|should|do|does|did|may|kya|kab|kahan|kidhar|kitna|kitni|kitnay|kitne|kaise|kaisay|kaisa|kaisi|konsa|konsi|konse|kon|koun|kyu|kyun|kyuu|kion|kyo)\b/i.test(
         clean
       )
     ) {
       return true;
     }
 
-    // Statements of admissions interest in other programs or intent to apply
-    // (e.g. "i want to take admission in electrical", "mujhe admission chahiye")
+    // 4. Interrogatives / Question words anywhere in the text (with word boundaries)
+    // Matches sentences like "fee kitni hai", "classes kab hongi", "university kahan hai", "admission kaise hoga", "coordinator kon hai"
     if (
-      /\b(electrical|civil|mechanical|electronics|telecom|mechatronics|cs|computer science|artificial intelligence|data science|cyber security|bba|pharmacy|dpt|mbbs|llb)\b/i.test(
+      /\b(kya|kab|kahan|kidhar|kitna|kitni|kitnay|kitne|kaise|kaisay|kaisa|kaisi|konsa|konsi|konse|kon|koun|kyu|kyun|kyuu|kion)\b/i.test(
         clean
       )
     ) {
       return true;
     }
 
+    // 5. English question phrases anywhere in the text
     if (
-      /\b(want to take admission|admission lena|admission leni|apply karna|admission chahiye|seat chahiye|classes kab|timing kya)\b/i.test(
+      /\b(how much|how many|how to|where is|where are|when will|when is|when does|what is|what are|what about|which program|which degree|who is|can i|can we|could i|is there|are there|do you have|will there be)\b/i.test(
         clean
       )
     ) {
       return true;
     }
 
-    // Explicit inquiry phrases
-    const inquiryPatterns = [
+    // 6. Urdu inquiry verbs and modal expressions
+    // Matches expressions like "apply kar sakte hain", "admission mil sakta hai", "classes hoti hain", "seat chahiye", "fee bata dain"
+    const urduInquiryPatterns = [
+      /\b(kar sakte|kar sakti|kar sakty|kr skte|kr skti|apply kar sakte|apply kr skte)\b/i,
+      /\b(mil sakta|mil sakti|milay ga|milega|ho sakta|ho sakti|mil jaye|mil jae)\b/i,
+      /\b(batao|batayein|bata dain|bata dein|bta do|bta dain|bta dein|btaen|bataiye|batana)\b/i,
+      /\b(chahiye|chahye|maloom karna|maloomat|guide kar|guide kr|rahnumai)\b/i,
+      /\b(hai ya nahi|h ya ni|h k nhi|h k nai|hota hai|hoti hai|hote hain)\b/i,
+      /\b(admission lena|admission leni|apply karna|apply krna|admission chahiye|seat chahiye|seats chahiye)\b/i,
+      /\b(information chahiye|info chahiye|info chahye|details chahiye)\b/i,
+    ];
+    if (urduInquiryPatterns.some((p) => p.test(clean))) {
+      return true;
+    }
+
+    // 7. English inquiry request verbs
+    const englishInquiryPatterns = [
+      /\b(tell me|want to know|wanna know|would like to know|like to know|need to know|let me know)\b/i,
+      /\b(give me details|give details|share details|send details|information about|info about|details of|details about|guide me)\b/i,
+    ];
+    if (englishInquiryPatterns.some((p) => p.test(clean))) {
+      return true;
+    }
+
+    // 8. Specific other discipline inquiries
+    if (
+      /\b(electrical|civil|mechanical|electronics|telecom|mechatronics|computer science|bs cs|bscs|artificial intelligence|bs ai|bsai|cyber security|data science|bba|pharmacy|dpt|mbbs|llb)\b/i.test(
+        clean
+      )
+    ) {
+      return true;
+    }
+
+    // 9. Core admissions domain topics (standalone keywords or in phrases without ?)
+    const domainTopicPatterns = [
+      /\b(fee|fees|tuition|challan|charges|kharcha|semester fee|admission fee|hostel fee)\b/i,
+      /\b(hostel|hostels|accommodation|mess charges|rehaish|boarding)\b/i,
+      /\b(entry test|entrance test|admission test|test date|test venue|test syllabus|test pattern|nats|nts|gat)\b/i,
+      /\b(eligibility|eligibility criteria|criteria|minimum marks|percentage required|merit list|merit formula|aggregate|closing merit)\b/i,
+      /\b(pre[- ]?medical policy|pre[- ]?medical quota|pre[- ]?med quota|deficiency math|pre[- ]?med policy)\b/i,
+      /\b(documents|required documents|documents checklist|migration certificate|noc|domicile|character certificate)\b/i,
+      /\b(last date|closing date|deadline|admission schedule|schedule|classes start|class timing)\b/i,
+      /\b(helpline|contact number|coordinator|phone number|official email|campus address|campus location)\b/i,
+      /\b(programs offered|courses offered|degree programs|degrees offered|disciplines)\b/i,
+      /\b(scholarship|scholarships|financial aid|need based|ehsaas)\b/i,
       /\b(who (are you|is this|are u|r u)|who speaks|aap kon|kon ho|koun ho)\b/i,
       /\b(why (are you|did you) (texting|messaging|calling|msg)|why msg me|kion msg|kion message|get my number|got my number)\b/i,
       /\b(what is this|what's this|whats this|ye kya hai|yeh kya hai|what is it about)\b/i,
-      /\b(tell me|want to know|give me details|information about|info about|guide me|details of)\b/i,
-      /\b(fee structure|fee schedule|how much fee|semester fee|tuition fee|fees kitni)\b/i,
-      /\b(hostel|accommodation|hostels|boys hostel|girls hostel|mess charges)\b/i,
-      /\b(scholarship|scholarships|financial aid)\b/i,
-      /\b(last date|closing date|deadline|admission schedule|schedule)\b/i,
-      /\b(eligibility criteria|minimum marks required|percentage required|criteria for)\b/i,
-      /\b(entry test|entrance test|admission test|test syllabus|test date)\b/i,
-      /\b(pre[- ]?medical policy|pre[- ]?medical quota|pre[- ]?med quota)\b/i,
-      /\b(helpline|contact number|coordinator|phone number|official email)\b/i,
-      /\b(required documents|documents checklist|migration certificate|noc required)\b/i,
-      /\b(programs offered|courses offered|degree programs)\b/i,
     ];
 
-    return inquiryPatterns.some((pattern) => pattern.test(clean));
+    return domainTopicPatterns.some((pattern) => pattern.test(clean));
   }
 
   /**
@@ -186,6 +229,7 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     const knowledge = AIKnowledgeService.getKnowledgeText();
     const apiKey = process.env.GEMINI_API_KEY;
 
+    let answer = null;
     // 1. Try Gemini API if API key is configured (unless in automated test mode)
     if (apiKey && apiKey !== 'mock_key' && apiKey !== 'replace-with-a-secret' && (process.env.NODE_ENV !== 'test' || process.env.TEST_LIVE_GEMINI === '1')) {
       try {
@@ -196,7 +240,7 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
           chatHistory,
         });
         if (response && response.trim()) {
-          return response.trim();
+          answer = response.trim();
         }
       } catch {
         // Fall through to local knowledge matcher on network error, rate limit, timeout, etc.
@@ -204,7 +248,10 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     }
 
     // 2. Local intelligent knowledge base matcher (Fast, deterministic & offline-safe)
-    return AIKnowledgeService.matchLocalKnowledge(userQuery, knowledge);
+    if (!answer) {
+      answer = AIKnowledgeService.matchLocalKnowledge(userQuery, knowledge);
+    }
+    return stripEmojis(answer);
   }
 
   /**
@@ -214,19 +261,22 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-    const systemPrompt = `You are the official WhatsApp Admissions AI Assistant for the Department of Software Engineering at The University of Azad Jammu & Kashmir (UAJK), Chehla Campus, Muzaffarabad.
-The admissions office has uploaded the official admissions and guidelines document below. You MUST behave, answer, and bend your guidance, rules, eligibility criteria, and tone strictly according to this document.
+    const systemPrompt = `You are the official WhatsApp Admissions Assistant for the Department of Software Engineering at the University of Azad Jammu and Kashmir (UAJK), Chehla Campus, Muzaffarabad.
+The admissions office has provided the official admissions information below. Ground all answers strictly in this document.
 
-STRICT GUIDELINES:
-1. Always ground your behavior, answers, eligibility rules, and numbers strictly in the knowledge document provided below.
-2. Department programs: UAJK Department of Software Engineering (Chehla Campus) offers B.Sc. Software Engineering (SE - PEC accredited, min 60% F.Sc.), B.Sc. Software Engineering Technology (SET - NTC accredited, min 50% F.Sc.), and B.Sc. Computer Engineering Technology (CET - NTC accredited, min 50% F.Sc.).
-3. If a student asks about other programs (e.g. Electrical Engineering, Civil Engineering, Mechanical, BSCS, BSAI), politely clarify what is offered at the Department of Software Engineering (Chehla Campus) vs other university faculties/campuses (e.g. Faculty of Engineering or King Abdullah Campus), adhering to the uploaded document.
-4. If a student says they have a question (e.g. "Yes, I have a question"), warmly and eagerly invite them to ask it.
-5. Academic groups: Pre-Engineering, ICS, and DAE are eligible with Mathematics. Pre-Medical students are eligible for SET & CET with a deficiency math course in the first semester, and can apply for SE under the PEC 40% quota if they have >= 60% marks.
-6. Keep replies WhatsApp-friendly: warm, polite, concise (2-4 bullet points or short sentences), using bold (*text*) for key details.
-7. If the exact answer is not in the knowledge base, politely provide general university guidance and direct them to contact the Department Helpline at +92-5822-960510 or email se@uajk.edu.pk, or visit https://uajk.edu.pk/.
+CRITICAL INSTRUCTIONS:
+1. STRICTLY NO EMOJIS: Do not use any emojis, icons, or symbols under any circumstances. Keep responses completely emoji-free.
+2. Tone: Professional, clear, polite, and simple. Make answers easy for prospective high school students and parents to understand.
+3. Keep replies concise and easy to read on WhatsApp (2-4 short sentences or standard bullet points). Use bold (*text*) only for important headings, program names, or key numbers.
+4. Department programs:
+   - B.Sc. Software Engineering (SE): PEC accredited, minimum 60% in F.Sc. (Pre-Engineering, ICS, DAE, or 40% Pre-Medical quota).
+   - B.Sc. Software Engineering Technology (SET): NTC accredited, minimum 50% in F.Sc. (Pre-Medical fully eligible with deficiency math).
+   - B.Sc. Computer Engineering Technology (CET): NTC accredited, minimum 50% in F.Sc. (Pre-Medical fully eligible with deficiency math).
+5. If a student asks about other programs (e.g. Electrical Engineering, Civil Engineering, Mechanical, BSCS, BSAI), politely clarify what is offered at the Department of Software Engineering (Chehla Campus) versus other university faculties, based on the knowledge base.
+6. If a student says they have a question (e.g. "Yes, I have a question"), politely invite them to ask.
+7. If the exact answer is not in the knowledge base, politely provide general university guidance and direct them to the Department Helpline (+92-5822-960510, se@uajk.edu.pk).
 
-KNOWLEDGE BASE DOCUMENT:
+KNOWLEDGE BASE:
 ${knowledge}
 `;
 
@@ -275,7 +325,7 @@ ${knowledge}
             data?.candidates?.[0]?.content?.parts?.[0]?.text ||
             data?.candidates?.[0]?.text ||
             null;
-          if (text) return text;
+          if (text) return stripEmojis(text);
         } catch {
           continue;
         }
@@ -287,15 +337,93 @@ ${knowledge}
   }
 
   /**
+   * Intelligently parses user message using Google Gemini to classify correction/change intent and extract field/value
+   * @param {string} userMessage
+   * @returns {Promise<{ isCorrection: boolean, field: string|null, newValue: string|null }|null>}
+   */
+  static async classifyCorrectionWithGemini(userMessage) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'mock_key' || apiKey === 'replace-with-a-secret' || (process.env.NODE_ENV === 'test' && process.env.TEST_LIVE_GEMINI !== '1')) {
+      return null;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const prompt = `You are an intelligent admissions bot intent parser for a university admissions assistant.
+Analyze the following student message (which may be in English, Urdu, or Roman Urdu with typos like "chnage", "fther", "walid", "abbu", "marks", "glat"):
+"${userMessage}"
+
+Determine if the student wants to change/correct an application field.
+Valid fields: "FATHER_NAME", "FULL_NAME", "MARKS", "ACADEMIC_GROUP", "CNIC", "EMAIL", "ALL".
+Also determine if they provided the new value directly in the message (e.g. "change father name to Tariq Mahmood" -> newValue: "Tariq Mahmood").
+
+Respond ONLY with valid JSON:
+{"isCorrection": boolean, "field": "FATHER_NAME"|"FULL_NAME"|"MARKS"|"ACADEMIC_GROUP"|"CNIC"|"EMAIL"|"ALL"|null, "newValue": string|null}`;
+
+    const candidateModels = [
+      process.env.GEMINI_MODEL,
+      'gemini-flash-lite-latest',
+      'gemini-3.5-flash-lite',
+      'gemini-3-flash-preview',
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash',
+      'gemini-flash-latest',
+    ].filter(Boolean);
+
+    try {
+      for (const model of candidateModels) {
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+            signal: controller.signal,
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+          if (text) {
+            const cleanJson = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleanJson);
+            if (parsed && typeof parsed === 'object') {
+              return parsed;
+            }
+          }
+        } catch {
+          continue;
+        }
+      }
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    return null;
+  }
+
+  /**
    * Deterministic, rule-grounded knowledge base lookup when AI API is unavailable
    */
   static matchLocalKnowledge(query, _knowledge = '') {
     const q = (query || '').toLowerCase();
 
+    // 00a. Inquiries about making corrections / editing details
+    if (
+      /\b(correction|correct|edit|change|chnage|update|modify|replace|theek|sahi|badalna)\b/i.test(q) &&
+      /\b(can\s+i|can\s+you|possible|how\s+to|karna|kar\s+sakta|kar\s+sakte|ho\s+sakta|name|father|marks|email|cnic)\b/i.test(q)
+    ) {
+      return (
+        "Yes, you can easily correct or update any of your information at any time! Simply tell me which detail needs to be updated (such as Father's Name, Full Name, Marks, CNIC, or Email) or send your correct details directly, and I will update your pre-registration record immediately."
+      );
+    }
+
     // 00. Explicit statement of wanting to ask a question
     if (AIKnowledgeService.isAskingToAskQuestion(q)) {
       return (
-        "Yes, please ask your question! Feel free to ask anything about our undergraduate programs (SE, SET, CET), eligibility criteria, fee structure, hostel facilities, or admissions process, and I'll be glad to help."
+        "Yes, please ask your question! Feel free to ask anything about our undergraduate programs (SE, SET, CET), eligibility criteria, fee structure, hostel facilities, or the admissions process, and I will be glad to help."
       );
     }
 
@@ -312,7 +440,7 @@ ${knowledge}
       q.includes('who speaks')
     ) {
       return (
-        "Assalam-o-Alaikum! I am the official automated Admissions Assistant for the *Department of Software Engineering* at *The University of Azad Jammu & Kashmir (UAJK)*, Chehla Campus, Muzaffarabad.\n\n" +
+        "Assalam-o-Alaikum! I am the automated Admissions Assistant for the Department of Software Engineering at the University of Azad Jammu & Kashmir (UAJK), Chehla Campus, Muzaffarabad.\n\n" +
         "I am here to assist students with admissions, program options (B.Sc. Software Engineering, SET, CET), eligibility criteria, scholarships, and fee structures for Fall 2026."
       );
     }
@@ -332,8 +460,8 @@ ${knowledge}
       q.includes('why contact')
     ) {
       return (
-        "Assalam-o-Alaikum! You received this automated outreach message because our admissions desk is contacting prospective candidates interested in higher education and engineering/technology degree programs for the upcoming Fall 2026 session.\n\n" +
-        "Our goal is to help you explore admission opportunities at UAJK. If you are not interested, simply let us know and we will not message you further!"
+        "Assalam-o-Alaikum! You received this automated outreach message because our admissions desk is contacting prospective candidates regarding Fall 2026 admissions at UAJK.\n\n" +
+        "Our goal is to help you explore admission opportunities at UAJK. If you are not interested, simply let us know and we will not message you further."
       );
     }
 
@@ -348,11 +476,11 @@ ${knowledge}
       q.includes('what is it about')
     ) {
       return (
-        "This is an official admissions inquiry and guidance service from the *Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK)*, Chehla Campus.\n\n" +
-        "We offer:\n" +
-        "- *B.Sc. Software Engineering (SE)* - PEC Accredited\n" +
-        "- *B.Sc. Software Engineering Technology (SET)* - NTC Accredited (Pre-Med eligible)\n" +
-        "- *B.Sc. Computer Engineering Technology (CET)* - NTC Accredited (Pre-Med eligible)\n\n" +
+        "This is an official admissions inquiry and guidance service from the Department of Software Engineering, University of Azad Jammu & Kashmir (UAJK), Chehla Campus.\n\n" +
+        "We offer the following undergraduate programs:\n" +
+        "- B.Sc. Software Engineering (SE) - PEC Accredited\n" +
+        "- B.Sc. Software Engineering Technology (SET) - NTC Accredited (Pre-Med eligible)\n" +
+        "- B.Sc. Computer Engineering Technology (CET) - NTC Accredited (Pre-Med eligible)\n\n" +
         "Would you like to check your eligibility or know more about our programs?"
       );
     }
@@ -380,7 +508,10 @@ ${knowledge}
       q.includes('admission test') ||
       q.includes('test venue') ||
       q.includes('test date') ||
-      q.includes('nats')
+      /\btest\b/.test(q) ||
+      q.includes('syllabus') ||
+      /\bnats\b/.test(q) ||
+      /\bnts\b/.test(q)
     ) {
       return (
         "*Entrance Test Information:*\n" +
@@ -397,6 +528,7 @@ ${knowledge}
       q.includes('pre-medical') ||
       q.includes('pre medical') ||
       q.includes('pre-med') ||
+      q.includes('medical') ||
       q.includes('bio') ||
       q.includes('biology')
     ) {
@@ -468,9 +600,12 @@ ${knowledge}
     if (
       q.includes('deadline') ||
       q.includes('last date') ||
+      q.includes('closing') ||
       q.includes('kab start') ||
       q.includes('classes') ||
-      q.includes('schedule')
+      q.includes('schedule') ||
+      q.includes('timing') ||
+      q.includes('kab')
     ) {
       return (
         "*Important Admissions Schedule & Deadlines:*\n" +
@@ -490,7 +625,9 @@ ${knowledge}
       q.includes('email') ||
       q.includes('location') ||
       q.includes('address') ||
-      q.includes('campus')
+      q.includes('campus') ||
+      q.includes('kahan') ||
+      q.includes('kidhar')
     ) {
       return (
         "*Department Contact & Helpline:*\n" +

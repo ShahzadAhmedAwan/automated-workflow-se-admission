@@ -716,7 +716,10 @@ export class AdmissionIntakeService {
          FROM adm_student_documents WHERE id = ? AND student_id = ?`,
       [documentId, studentId]
     );
-    if (!documents.length) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document to archive was not found.');
+    if (!documents.length) {
+      console.warn(`[Storage Worker] Document #${documentId} for student #${studentId} not found in database; skipping archive.`);
+      return { skipped: true, reason: 'DOCUMENT_NOT_FOUND' };
+    }
     const document = documents[0];
     if (![DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED].includes(document.verification_status)) {
       throw new AppError(409, 'DOCUMENT_NOT_VERIFIED', 'Only verified documents can be archived.');
@@ -979,9 +982,16 @@ export class AdmissionIntakeService {
     let matricTotalMarksVal = null;
     let cityVal = null;
 
-    if (extracted.candidateName) {
-      const cleanCandidate = String(extracted.candidateName).trim().replace(/\s+/g, ' ');
+    if (extracted.candidateName || extracted.name || extracted.full_name) {
+      const rawCandidate = extracted.candidateName || extracted.name || extracted.full_name;
+      const cleanCandidate = String(rawCandidate).trim().replace(/\s+/g, ' ');
       if (cleanCandidate.length >= 2) fullNameVal = cleanCandidate;
+    }
+
+    if (extracted.fatherName || extracted.father_name) {
+      const rawFather = extracted.fatherName || extracted.father_name;
+      const cleanFather = String(rawFather).trim().replace(/\s+/g, ' ');
+      if (cleanFather.length >= 2) fatherNameVal = cleanFather;
     }
 
     if (docType === DOCUMENT_TYPES.CNIC_FRONT || docType === DOCUMENT_TYPES.CNIC_BACK) {
@@ -989,15 +999,9 @@ export class AdmissionIntakeService {
         const cleaned = String(extracted.cnic).replace(/[^0-9]/g, '');
         if (cleaned.length === 13) cnicVal = cleaned;
       }
-      if (extracted.fatherName) {
-        fatherNameVal = String(extracted.fatherName).trim();
-      }
     } else if (docType === DOCUMENT_TYPES.DOMICILE) {
       if (extracted.city || extracted.district || extracted.tehsil) {
         cityVal = String(extracted.city || extracted.district || extracted.tehsil).trim();
-      }
-      if (extracted.fatherName) {
-        fatherNameVal = String(extracted.fatherName).trim();
       }
     } else if (docType === DOCUMENT_TYPES.FSC_MARKSHEET) {
       if (extracted.rollNumber) {
@@ -1009,9 +1013,6 @@ export class AdmissionIntakeService {
       if (Number.isFinite(extracted.totalMarks)) {
         fscTotalMarksVal = extracted.totalMarks;
       }
-      if (extracted.fatherName) {
-        fatherNameVal = String(extracted.fatherName).trim();
-      }
     } else if (docType === DOCUMENT_TYPES.MATRIC_MARKSHEET) {
       if (Number.isFinite(extracted.obtainedMarks)) {
         matricObtainedMarksVal = extracted.obtainedMarks;
@@ -1019,20 +1020,20 @@ export class AdmissionIntakeService {
       if (Number.isFinite(extracted.totalMarks)) {
         matricTotalMarksVal = extracted.totalMarks;
       }
-      if (extracted.fatherName) {
-        fatherNameVal = String(extracted.fatherName).trim();
-      }
     }
 
     // Update adm_students: complete NULL fields, assign application_no, and upgrade casual/short names to legal name
     await connection.execute(
       `UPDATE adm_students
           SET full_name = CASE
-                WHEN ? IS NOT NULL AND (full_name IS NULL OR CHAR_LENGTH(?) > CHAR_LENGTH(full_name)) THEN ?
+                WHEN ? IS NOT NULL AND (full_name IS NULL OR CHAR_LENGTH(?) >= CHAR_LENGTH(full_name)) THEN ?
                 ELSE full_name
               END,
               cnic = COALESCE(cnic, ?),
-              father_name = COALESCE(father_name, ?),
+              father_name = CASE
+                WHEN ? IS NOT NULL AND (father_name IS NULL OR CHAR_LENGTH(?) >= CHAR_LENGTH(father_name)) THEN ?
+                ELSE father_name
+              END,
               city = COALESCE(?, city),
               fsc_roll_no = COALESCE(fsc_roll_no, ?),
               fsc_obtained_marks = COALESCE(fsc_obtained_marks, ?),
@@ -1046,6 +1047,8 @@ export class AdmissionIntakeService {
         fullNameVal,
         fullNameVal,
         cnicVal,
+        fatherNameVal,
+        fatherNameVal,
         fatherNameVal,
         cityVal,
         fscRollNoVal,
@@ -1082,11 +1085,14 @@ export class AdmissionIntakeService {
         await connection.execute(
           `UPDATE mkt_leads l JOIN adm_students s ON s.lead_id = l.id
               SET l.full_name = CASE
-                    WHEN ? IS NOT NULL AND (l.full_name IS NULL OR CHAR_LENGTH(?) > CHAR_LENGTH(l.full_name)) THEN ?
+                    WHEN ? IS NOT NULL AND (l.full_name IS NULL OR CHAR_LENGTH(?) >= CHAR_LENGTH(l.full_name)) THEN ?
                     ELSE l.full_name
                   END,
                   l.cnic = COALESCE(l.cnic, ?),
-                  l.father_name = COALESCE(l.father_name, ?),
+                  l.father_name = CASE
+                    WHEN ? IS NOT NULL AND (l.father_name IS NULL OR CHAR_LENGTH(?) >= CHAR_LENGTH(l.father_name)) THEN ?
+                    ELSE l.father_name
+                  END,
                   l.city = COALESCE(?, l.city),
                   l.fsc_marks = COALESCE(l.fsc_marks, ?)
             WHERE s.id = ?`,
@@ -1095,6 +1101,8 @@ export class AdmissionIntakeService {
             fullNameVal,
             fullNameVal,
             cnicVal,
+            fatherNameVal,
+            fatherNameVal,
             fatherNameVal,
             cityVal,
             fscObtainedMarksVal,
@@ -1105,6 +1113,14 @@ export class AdmissionIntakeService {
         // Table or join might be in mock mode in unit tests
       }
     }
+  }
+
+  /**
+   * Consolidates and updates the student's legal full name and father's full name
+   * from verified documents (CNIC_FRONT > FSC_MARKSHEET > MATRIC_MARKSHEET > DOMICILE / gazette).
+   */
+  static async syncVerifiedStudentNames(params) {
+    return VerificationDecisionService.syncVerifiedStudentNames(params);
   }
 
   /**
@@ -1536,6 +1552,7 @@ export class AdmissionIntakeService {
             `UPDATE adm_students SET overall_status = ?, verified_at = CURRENT_TIMESTAMP(3), verified_by = ? WHERE id = ?`,
             [STUDENT_OVERALL_STATUS.VERIFIED, effectiveActorId, studentId]
           );
+          await VerificationDecisionService.syncVerifiedStudentNames({ studentId, connection });
         } else {
           await connection.execute(
             `UPDATE adm_student_documents SET verification_status = ?, verified_at = CURRENT_TIMESTAMP(3),
@@ -1573,6 +1590,7 @@ export class AdmissionIntakeService {
           } else {
             await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
           }
+          await VerificationDecisionService.syncVerifiedStudentNames({ studentId, connection });
           await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
         }
       } else if (action === 'OVERRIDE_MARKS') {
@@ -1640,6 +1658,7 @@ export class AdmissionIntakeService {
         } else {
           await connection.execute(`UPDATE adm_students SET overall_status = ?, verified_at = NULL, verified_by = NULL WHERE id = ?`, [STUDENT_OVERALL_STATUS.UNDER_REVIEW, studentId]);
         }
+        await VerificationDecisionService.syncVerifiedStudentNames({ studentId, connection });
         await this._queueManualArchive({ targetDocument, studentId, studentCnic: studentBefore.cnic, connection });
       } else if (action === 'MARK_DISCREPANCY') {
         if (!targetDocument) throw new AppError(400, 'DOCUMENT_REQUIRED', 'Choose a document to mark as discrepant.');
@@ -1888,6 +1907,7 @@ export class AdmissionIntakeService {
         );
         this.triggerAutoSeetLookup(doc.student_id);
       }
+      await VerificationDecisionService.syncVerifiedStudentNames({ studentId: doc.student_id, connection: db });
     } else {
       await db.execute(
         `UPDATE adm_student_documents

@@ -1664,3 +1664,311 @@ test('WhatsAppManager: handles concurrent messages from multiple students in par
   // 3. Queue map is cleaned up after completion
   assert.equal(WhatsAppManager.studentQueues.size, 0, 'In-flight student queue map should be empty after tasks complete');
 });
+
+test('LeadBotService & AIKnowledgeService: Intelligently answers questions without question marks (?) and distinguishes them from direct answers', async () => {
+  // 1. Standalone question detection without question marks
+  assert.equal(AIKnowledgeService.isQuestion('fee structure'), true);
+  assert.equal(AIKnowledgeService.isQuestion('fees kitni hai'), true);
+  assert.equal(AIKnowledgeService.isQuestion('hostel charges'), true);
+  assert.equal(AIKnowledgeService.isQuestion('classes kab start hongi'), true);
+  assert.equal(AIKnowledgeService.isQuestion('entry test date'), true);
+  assert.equal(AIKnowledgeService.isQuestion('can pre medical apply'), true);
+  assert.equal(AIKnowledgeService.isQuestion('kya pre medical wale apply kar sakte hain'), true);
+  assert.equal(AIKnowledgeService.isQuestion('pre medical quota kitna hai'), true);
+  assert.equal(AIKnowledgeService.isQuestion('documents required'), true);
+  assert.equal(AIKnowledgeService.isQuestion('merit formula kya hai'), true);
+  assert.equal(AIKnowledgeService.isQuestion('tell me about hostel'), true);
+  assert.equal(AIKnowledgeService.isQuestion('chehla campus kahan hai'), true);
+  assert.equal(AIKnowledgeService.isQuestion('who is coordinator'), true);
+
+  // 2. Direct intake answers must NOT be flagged as questions
+  assert.equal(AIKnowledgeService.isQuestion('Muhammad Ali'), false);
+  assert.equal(AIKnowledgeService.isQuestion('Tariq Mehmood'), false);
+  assert.equal(AIKnowledgeService.isQuestion('890/1100'), false);
+  assert.equal(AIKnowledgeService.isQuestion('420/550'), false);
+  assert.equal(AIKnowledgeService.isQuestion('Pre-Medical'), false);
+  assert.equal(AIKnowledgeService.isQuestion('ICS'), false);
+  assert.equal(AIKnowledgeService.isQuestion('Pre-Engineering'), false);
+  assert.equal(AIKnowledgeService.isQuestion('DAE'), false);
+  assert.equal(AIKnowledgeService.isQuestion('12345-1234567-1'), false);
+  assert.equal(AIKnowledgeService.isQuestion('ali@gmail.com'), false);
+
+  // 3. Simulated intake flow where applicant sends questions without question marks
+  let currentLead = {
+    id: 999,
+    campaign_id: 1,
+    full_name: 'Prospective Applicant',
+    father_name: null,
+    phone_normalized: '923009998877',
+    city: 'Muzaffarabad',
+    prior_degree: null,
+    cnic: null,
+    email: null,
+    fsc_marks: null,
+    has_maths: null,
+    eligible_for: null,
+    eligibility_status: null,
+    ineligibility_reason: null,
+    conversation_state: CONVERSATION_STATE.AWAITING_NAME,
+    chat_history: '[]',
+  };
+
+  const mockDbConnection = {
+    async query(sql) {
+      if (sql.includes('FROM mkt_leads')) {
+        return [[currentLead]];
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        const setPart = sql.split('SET')[1].split('WHERE')[0];
+        const clauses = setPart.split(',');
+        let pIndex = 0;
+        for (const clause of clauses) {
+          if (clause.includes('=')) {
+            const [col, valExpr] = clause.split('=').map((s) => s.trim());
+            if (valExpr === '?') {
+              const val = params[pIndex++];
+              if (col === 'conversation_state') currentLead.conversation_state = val;
+              else if (col === 'full_name') currentLead.full_name = val;
+              else if (col === 'father_name') currentLead.father_name = val;
+              else if (col === 'cnic') currentLead.cnic = val;
+              else if (col === 'email') currentLead.email = val;
+              else if (col === 'fsc_marks') currentLead.fsc_marks = val;
+              else if (col === 'has_maths') currentLead.has_maths = val;
+              else if (col === 'eligible_for') currentLead.eligible_for = val;
+              else if (col === 'eligibility_status') currentLead.eligibility_status = val;
+              else if (col === 'chat_history') currentLead.chat_history = val;
+            }
+          }
+        }
+      }
+      return [{ insertId: 1, affectedRows: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Turn 1: Bot asks for Name. Student asks "hostel fee" without question mark!
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'hostel fee',
+  }, mockDb);
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_NAME);
+  assert.ok(turn1.reply.includes('Hostel') || turn1.reply.includes('8,000'));
+  assert.ok(turn1.reply.includes('Full Name'));
+  // Ensure "hostel fee" was NOT set as the student's name
+  assert.notEqual(currentLead.full_name, 'hostel fee');
+
+  // Turn 2: Student now provides their name
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'Hamza Tariq',
+  }, mockDb);
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  assert.ok(turn2.reply.includes('Hamza Tariq'));
+  assert.ok(turn2.reply.includes("Father's Name"));
+
+  // Turn 3: In AWAITING_FATHER_NAME, student asks "classes kab start hongi" without question mark
+  const turn3 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'classes kab start hongi',
+  }, mockDb);
+  assert.equal(turn3.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  assert.ok(turn3.reply.includes('Schedule') || turn3.reply.includes('Admissions'));
+  assert.ok(turn3.reply.includes("Father's Name"));
+
+  // Turn 4: Student provides Father's Name
+  const turn4 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'Tariq Mehmood',
+  }, mockDb);
+  assert.equal(turn4.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn4.reply.includes('score in FSc'));
+
+  // Turn 5: In AWAITING_MARKS, student asks "minimum marks kitne chahiye" without question mark
+  const turn5 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'minimum marks kitne chahiye',
+  }, mockDb);
+  assert.equal(turn5.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn5.reply.includes('Eligibility Criteria') || turn5.reply.includes('60%') || turn5.reply.includes('50%'));
+  assert.ok(turn5.reply.includes('score in FSc'));
+
+  // Turn 6: Student provides marks
+  const turn6 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: '910/1100',
+  }, mockDb);
+  assert.equal(turn6.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turn6.reply.includes('academic group'));
+
+  // Turn 7: In AWAITING_MATHS, student asks "can pre medical apply" without question mark
+  const turn7 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'can pre medical apply',
+  }, mockDb);
+  assert.equal(turn7.state, CONVERSATION_STATE.AWAITING_MATHS);
+  assert.ok(turn7.reply.includes('Pre-Medical Eligibility Policy') || turn7.reply.includes('SET & CET'));
+  assert.ok(turn7.reply.includes('academic group'));
+
+  // Turn 8: Student directly states their academic group "Pre-Medical"
+  const turn8 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009998877',
+    messageBody: 'Pre-Medical',
+  }, mockDb);
+  assert.equal(turn8.state, CONVERSATION_STATE.AWAITING_CNIC);
+  assert.ok(turn8.reply.includes('CNIC or Form-B'));
+});
+
+test('LeadBotService: Robust Father Name Correction & Typo Tolerance (fther / chnage)', async () => {
+  // 1. Validation test: isValidName
+  assert.equal(LeadBotService.isValidName('wanna change father name'), false);
+  assert.equal(LeadBotService.isValidName('I wanna chnage my fther name'), false);
+  assert.equal(LeadBotService.isValidName('chnage father name'), false);
+  assert.equal(LeadBotService.isValidName('father name Tariq'), false);
+  assert.equal(LeadBotService.isValidName('abbu ka naam badalna hai'), false);
+  assert.equal(LeadBotService.isValidName('Shahzad'), true);
+  assert.equal(LeadBotService.isValidName('Shahzad Awan'), true);
+  assert.equal(LeadBotService.isValidName('Tariq Mahmood'), true);
+
+  // 2. Correction Field Detection
+  assert.equal(LeadBotService.detectCorrectionField('I wanna chnage my fther name'), 'FATHER_NAME');
+  assert.equal(LeadBotService.detectCorrectionField('wanna change father name'), 'FATHER_NAME');
+  assert.equal(LeadBotService.detectCorrectionField('change father name'), 'FATHER_NAME');
+  assert.equal(LeadBotService.detectCorrectionField('walid ka naam badalna hai'), 'FATHER_NAME');
+  assert.equal(LeadBotService.detectCorrectionField('wanna change my name'), 'FULL_NAME');
+  assert.equal(LeadBotService.detectCorrectionField('can i write my name again'), 'FULL_NAME');
+
+  // 3. Direct Father Name Extraction
+  assert.equal(LeadBotService.extractDirectFatherName('wanna change father name to Tariq Mahmood'), 'Tariq Mahmood');
+  assert.equal(LeadBotService.extractDirectFatherName('father name is Tariq Mahmood'), 'Tariq Mahmood');
+  assert.equal(LeadBotService.extractDirectFatherName('fther name Tariq Mahmood'), 'Tariq Mahmood');
+  assert.equal(LeadBotService.extractDirectFatherName('wanna change father name'), null);
+
+  // 4. Conversation State Flow: Qualified student asking to change father name
+  let mockLead = {
+    id: 43,
+    campaign_id: 1,
+    full_name: 'Shahzad',
+    father_name: 'Original Father',
+    phone_normalized: '923101596156',
+    cnic: '61101-5367137-9',
+    email: 'shahzadawan@gmail.com',
+    city: 'Muzaffarabad',
+    prior_degree: 'ICS',
+    fsc_marks: 700,
+    has_maths: 1,
+    eligible_for: 'SE, SET, CET',
+    eligibility_status: 'ELIGIBLE',
+    ineligibility_reason: null,
+    conversation_state: 'QUALIFIED',
+    chat_history: JSON.stringify([]),
+  };
+
+  let studentRecord = {
+    lead_id: 43,
+    full_name: 'Shahzad',
+    father_name: 'Original Father',
+  };
+
+  const mockDbConnection = {
+    async query(sql) {
+      if (sql.includes('FROM mkt_leads')) {
+        return [[mockLead]];
+      }
+      return [[]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) {
+        const setClause = sql.split('SET ')[1]?.split(' WHERE')[0] || '';
+        const assignments = setClause.split(', ').filter(a => a.includes('?'));
+        assignments.forEach((assign, idx) => {
+          if (assign.startsWith('conversation_state')) mockLead.conversation_state = params[idx];
+          if (assign.startsWith('full_name')) mockLead.full_name = params[idx];
+          if (assign.startsWith('father_name')) mockLead.father_name = params[idx];
+        });
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('UPDATE adm_students')) {
+        const setClause = sql.split('SET ')[1]?.split(' WHERE')[0] || '';
+        const assignments = setClause.split(', ').filter(a => a.includes('?'));
+        assignments.forEach((assign, idx) => {
+          if (assign.startsWith('full_name')) studentRecord.full_name = params[idx];
+          if (assign.startsWith('father_name')) studentRecord.father_name = params[idx];
+        });
+        return [{ affectedRows: 1 }];
+      }
+      return [{ affectedRows: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Turn 1: In QUALIFIED state, student sends "I wanna chnage my fther name"
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923101596156',
+    messageBody: 'I wanna chnage my fther name',
+  }, mockDb);
+
+  // MUST transition to AWAITING_FATHER_NAME, NOT AWAITING_NAME!
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  assert.ok(turn1.reply.includes("Father's Name"));
+  assert.ok(!turn1.reply.includes("Full Name"));
+  // Student's full_name MUST remain 'Shahzad', NOT corrupted to 'wanna change father name'
+  assert.equal(mockLead.full_name, 'Shahzad');
+
+  // Turn 2: Even if student accidentally typed "wanna change father name" again, it should NOT become their name!
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923101596156',
+    messageBody: 'wanna change father name',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_FATHER_NAME);
+  assert.ok(/Father'?s Name/i.test(turn2.reply));
+  assert.equal(mockLead.full_name, 'Shahzad');
+
+  // Turn 3: Student provides the actual father name "Tariq Mahmood"
+  const turn3 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923101596156',
+    messageBody: 'Tariq Mahmood',
+  }, mockDb);
+
+  assert.equal(turn3.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn3.reply.includes('Tariq Mahmood'));
+  assert.ok(turn3.reply.includes('Shahzad'));
+  assert.ok(turn3.reply.includes('Admissions Pre-Registration Updated'));
+  assert.equal(mockLead.full_name, 'Shahzad');
+  assert.equal(mockLead.father_name, 'Tariq Mahmood');
+  assert.equal(studentRecord.father_name, 'Tariq Mahmood');
+
+  // Turn 4: Direct correction in QUALIFIED state with "wanna change father name to Muhammad Aslam"
+  const turn4 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923101596156',
+    messageBody: 'wanna change father name to Muhammad Aslam',
+  }, mockDb);
+
+  assert.equal(turn4.state, CONVERSATION_STATE.QUALIFIED);
+  assert.ok(turn4.reply.includes('Muhammad Aslam'));
+  assert.ok(turn4.reply.includes('Shahzad'));
+  assert.equal(mockLead.full_name, 'Shahzad');
+  assert.equal(mockLead.father_name, 'Muhammad Aslam');
+  assert.equal(studentRecord.father_name, 'Muhammad Aslam');
+});

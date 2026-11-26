@@ -16,6 +16,128 @@ import {
   formatDiscrepancyMessage,
 } from './portal-message.service.js';
 
+/**
+ * Format proper title-cased legal name for ALL CAPS or all-lower strings
+ * @param {string} name
+ * @returns {string|null}
+ */
+export function formatProperName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const clean = name.trim().replace(/\s+/g, ' ');
+  if (clean.length < 2) return null;
+  if (clean === clean.toUpperCase() || clean === clean.toLowerCase()) {
+    return clean
+      .toLowerCase()
+      .split(' ')
+      .map((w) => {
+        if (!w) return '';
+        return w
+          .split('-')
+          .map((sub) => (sub ? sub.charAt(0).toUpperCase() + sub.slice(1) : ''))
+          .join('-');
+      })
+      .join(' ');
+  }
+  return clean;
+}
+
+/**
+ * Resolves the official legal full name and father's full name from verified documents.
+ * Priority: CNIC_FRONT > FSC_MARKSHEET > MATRIC_MARKSHEET > DOMICILE / gazette.
+ * When multiple documents are verified, the longest legal name is preferred.
+ *
+ * @param {Object} params
+ * @param {Array} [params.verifiedDocs=[]]
+ * @param {Object} [params.currentExtracted=null]
+ * @param {Object} [params.currentPortal=null]
+ * @returns {{ fullName: string|null, fatherName: string|null }}
+ */
+export function resolveBestVerifiedNames({ verifiedDocs = [], currentExtracted = null, currentPortal = null } = {}) {
+  const candidateNames = [];
+  const fatherNames = [];
+
+  const addCandidate = (name, priority) => {
+    if (!name || typeof name !== 'string') return;
+    const clean = name.trim().replace(/\s+/g, ' ');
+    if (clean.length >= 2) {
+      candidateNames.push({ name: clean, priority, len: clean.length });
+    }
+  };
+
+  const addFather = (name, priority) => {
+    if (!name || typeof name !== 'string') return;
+    const clean = name.trim().replace(/\s+/g, ' ');
+    if (clean.length >= 2) {
+      fatherNames.push({ name: clean, priority, len: clean.length });
+    }
+  };
+
+  const getDocPriority = (docType) => {
+    switch (docType) {
+      case DOCUMENT_TYPES.CNIC_FRONT:
+      case 'CNIC_FRONT':
+        return 1;
+      case DOCUMENT_TYPES.FSC_MARKSHEET:
+      case 'FSC_MARKSHEET':
+        return 2;
+      case DOCUMENT_TYPES.MATRIC_MARKSHEET:
+      case 'MATRIC_MARKSHEET':
+        return 3;
+      case DOCUMENT_TYPES.DOMICILE:
+      case 'DOMICILE':
+        return 4;
+      default:
+        return 5;
+    }
+  };
+
+  if (Array.isArray(verifiedDocs)) {
+    for (const doc of verifiedDocs) {
+      const priority = getDocPriority(doc.doc_type);
+      let ext = doc.extracted_data;
+      if (typeof ext === 'string') {
+        try { ext = JSON.parse(ext); } catch { ext = null; }
+      }
+      if (ext && typeof ext === 'object') {
+        addCandidate(ext.candidateName || ext.name || ext.full_name, priority);
+        addFather(ext.fatherName || ext.father_name, priority);
+      }
+      let pv = doc.portal_verification_data;
+      if (typeof pv === 'string') {
+        try { pv = JSON.parse(pv); } catch { pv = null; }
+      }
+      if (pv && typeof pv === 'object') {
+        addCandidate(pv.candidateName || pv.studentName || pv.name, priority);
+        addFather(pv.fatherName || pv.father_name, priority);
+      }
+    }
+  }
+
+  if (currentExtracted && typeof currentExtracted === 'object') {
+    addCandidate(currentExtracted.candidateName || currentExtracted.name || currentExtracted.full_name, 2);
+    addFather(currentExtracted.fatherName || currentExtracted.father_name, 2);
+  }
+  if (currentPortal && typeof currentPortal === 'object') {
+    addCandidate(currentPortal.candidateName || currentPortal.studentName || currentPortal.name, 2);
+    addFather(currentPortal.fatherName || currentPortal.father_name, 2);
+  }
+
+  candidateNames.sort((a, b) => {
+    if (b.len !== a.len) return b.len - a.len;
+    return a.priority - b.priority;
+  });
+
+  fatherNames.sort((a, b) => {
+    if (b.len !== a.len) return b.len - a.len;
+    return a.priority - b.priority;
+  });
+
+  const bestFullName = candidateNames[0]?.name ? formatProperName(candidateNames[0].name) : null;
+  const bestFatherName = fatherNames[0]?.name ? formatProperName(fatherNames[0].name) : null;
+
+  return { fullName: bestFullName, fatherName: bestFatherName };
+}
+
 export class VerificationDecisionService {
   /**
    * Evaluate verification outcome for a document against student declared records
@@ -314,6 +436,7 @@ export class VerificationDecisionService {
         student,
         docType,
         extractedOcr,
+        portalVerification,
         connection,
       });
     }
@@ -363,7 +486,7 @@ export class VerificationDecisionService {
   /**
    * Condition A: Verified Match
    */
-  static async _handleVerifiedMatch({ documentId, student, docType, extractedOcr, connection }) {
+  static async _handleVerifiedMatch({ documentId, student, docType, extractedOcr, portalVerification = null, connection }) {
     // Update document record
     await connection.execute(
       `UPDATE adm_student_documents
@@ -404,7 +527,7 @@ export class VerificationDecisionService {
 
     // Check that all mandatory admission documents exist and are verified
     const [verifiedDocs] = await connection.execute(
-      `SELECT doc_type FROM adm_student_documents
+      `SELECT doc_type, extracted_data, portal_verification_data FROM adm_student_documents
         WHERE student_id = ?
           AND verification_status IN (?, ?)`,
       [student.id, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
@@ -432,6 +555,14 @@ export class VerificationDecisionService {
         [finalStatus, student.id]
       );
     }
+
+    // Sync student's legal full name and father's full name from verified documents
+    await this.syncVerifiedStudentNames({
+      studentId: student.id,
+      connection,
+      currentExtracted: extractedOcr,
+      currentPortal: portalVerification,
+    });
 
     // Enqueue MIGRATE_GDRIVE outbox job to archive file and keep Cloudflare R2 / Inodes clean
     const [docRow] = await connection.execute(
@@ -559,5 +690,76 @@ export class VerificationDecisionService {
       overallStatus: STUDENT_OVERALL_STATUS.NEEDS_MANUAL_REVIEW,
       discrepancyReason,
     };
+  }
+
+  /**
+   * Consolidates and updates the student's legal full name and father's full name
+   * from verified documents (CNIC_FRONT > FSC_MARKSHEET > MATRIC_MARKSHEET > DOMICILE / gazette).
+   *
+   * @param {Object} params
+   * @param {number} params.studentId
+   * @param {any} [params.connection=pool]
+   * @param {Object} [params.currentExtracted]
+   * @param {Object} [params.currentPortal]
+   * @returns {Promise<{ fullName: string|null, fatherName: string|null }>}
+   */
+  static async syncVerifiedStudentNames({ studentId, connection = pool, currentExtracted = null, currentPortal = null } = {}) {
+    if (!studentId) return { fullName: null, fatherName: null };
+
+    try {
+      let verifiedDocs = [];
+      try {
+        const [rows] = await connection.execute(
+          `SELECT doc_type, extracted_data, portal_verification_data
+             FROM adm_student_documents
+            WHERE student_id = ?
+              AND verification_status IN (?, ?)
+            ORDER BY CASE doc_type
+              WHEN 'CNIC_FRONT' THEN 1
+              WHEN 'FSC_MARKSHEET' THEN 2
+              WHEN 'MATRIC_MARKSHEET' THEN 3
+              WHEN 'DOMICILE' THEN 4
+              ELSE 5
+            END ASC, id DESC`,
+          [studentId, DOCUMENT_VERIFICATION_STATUS.MATCHED, DOCUMENT_VERIFICATION_STATUS.PORTAL_VERIFIED]
+        );
+        verifiedDocs = rows || [];
+      } catch {
+        verifiedDocs = [];
+      }
+
+      const { fullName, fatherName } = resolveBestVerifiedNames({
+        verifiedDocs,
+        currentExtracted,
+        currentPortal,
+      });
+
+      if (fullName || fatherName) {
+        await connection.execute(
+          `UPDATE adm_students
+              SET full_name = COALESCE(?, full_name),
+                  father_name = COALESCE(?, father_name)
+            WHERE id = ?`,
+          [fullName, fatherName, studentId]
+        );
+
+        try {
+          await connection.execute(
+            `UPDATE mkt_leads l
+               JOIN adm_students s ON s.lead_id = l.id
+                SET l.full_name = COALESCE(?, l.full_name),
+                    l.father_name = COALESCE(?, l.father_name)
+              WHERE s.id = ?`,
+            [fullName, fatherName, studentId]
+          );
+        } catch {
+          // Non-blocking in mock mode
+        }
+      }
+
+      return { fullName, fatherName };
+    } catch {
+      return { fullName: null, fatherName: null };
+    }
   }
 }

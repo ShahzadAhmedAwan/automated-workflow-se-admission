@@ -1,6 +1,6 @@
 export const REFRESH_COOKIE = 'refresh_token';
 export const CSRF_COOKIE = 'csrf_token';
-export const ROLE_NAMES = Object.freeze(['SUPER_ADMIN', 'ADMISSION_OFFICER', 'VERIFIER', 'AUDITOR']);
+export const ROLE_NAMES = Object.freeze(['SUPER_ADMIN']);
 
 export const PERMISSIONS = Object.freeze({
   USERS_MANAGE: 'users.manage',

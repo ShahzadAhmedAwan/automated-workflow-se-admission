@@ -95,11 +95,23 @@ verificationRoutes.post(
   gazetteUpload.single('gazette'),
   StaffVerificationController.saveBoardSource
 );
+verificationRoutes.post(
+  '/board-sources/:sourceId/activate',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.SOURCES_MANAGE),
+  StaffVerificationController.activateBoardSource
+);
+verificationRoutes.post(
+  '/board-sources/:sourceId/deactivate',
+  authenticate,
+  requirePermission(VERIFICATION_PERMISSIONS.SOURCES_MANAGE),
+  StaffVerificationController.deactivateBoardSource
+);
 verificationRoutes.delete(
   '/board-sources/:sourceId',
   authenticate,
   requirePermission(VERIFICATION_PERMISSIONS.SOURCES_MANAGE),
-  StaffVerificationController.deactivateBoardSource
+  StaffVerificationController.deleteBoardSource
 );
 verificationRoutes.get(
   '/board-sources/:sourceId/gazette',

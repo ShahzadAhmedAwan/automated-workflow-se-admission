@@ -84,7 +84,7 @@ test('Auth HTTP lifecycle with MySQL', { skip: enabled ? false : 'Set AUTH_INTEG
 
     const createdAuditor = await request('/api/v1/auth/users', {
       method: 'POST', token: adminLogin.body.accessToken,
-      body: { email: `auditor-${randomBytes(5).toString('hex')}@example.test`, password: auditorPassword, role: 'AUDITOR', displayName: 'Auth Test Auditor' },
+      body: { email: `staff-${randomBytes(5).toString('hex')}@example.test`, password: auditorPassword, role: 'SUPER_ADMIN', displayName: 'Auth Test Staff' },
     });
     assert.equal(createdAuditor.response.status, 201);
     createdUserIds.push(createdAuditor.body.user.id);
@@ -93,10 +93,8 @@ test('Auth HTTP lifecycle with MySQL', { skip: enabled ? false : 'Set AUTH_INTEG
       method: 'POST', body: { email: createdAuditor.body.user.email, password: auditorPassword },
     });
     assert.equal(auditorLogin.response.status, 200);
-    assert.ok(auditorLogin.body.user.permissions.includes('audit.read'));
-    assert.equal(auditorLogin.body.user.permissions.includes('users.manage'), false);
-    const forbidden = await request('/api/v1/auth/roles', { token: auditorLogin.body.accessToken });
-    assert.equal(forbidden.response.status, 403);
+    assert.ok(auditorLogin.body.user.permissions.includes('users.manage'));
+    assert.equal(auditorLogin.body.user.role, 'SUPER_ADMIN');
 
     const changedPassword = await request('/api/v1/auth/change-password', {
       method: 'POST', token: auditorLogin.body.accessToken,

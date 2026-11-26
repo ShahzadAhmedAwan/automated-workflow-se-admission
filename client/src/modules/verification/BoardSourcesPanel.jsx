@@ -80,7 +80,8 @@ export function BoardSourcesPanel() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
-  const [confirmSource, setConfirmSource] = useState(null);
+  const [confirmDeactivateSource, setConfirmDeactivateSource] = useState(null);
+  const [confirmDeleteSource, setConfirmDeleteSource] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Active Filter: 'ALL' | 'HSSC' | 'SSC' | 'PORTAL'
@@ -128,10 +129,16 @@ export function BoardSourcesPanel() {
     setShowAdvanced(hasCustom);
     setForm({
       boardName: source.board_name,
-      boardAliases: (typeof source.board_aliases === 'string'
-        ? JSON.parse(source.board_aliases)
-        : source.board_aliases || []
-      ).join(', '),
+      boardAliases: (() => {
+        if (!source.board_aliases) return '';
+        if (Array.isArray(source.board_aliases)) return source.board_aliases.join(', ');
+        try {
+          const parsed = JSON.parse(source.board_aliases);
+          return Array.isArray(parsed) ? parsed.join(', ') : String(parsed);
+        } catch {
+          return String(source.board_aliases);
+        }
+      })(),
       academicYear: source.academic_year || '2024',
       examLevel: source.exam_level || 'HSSC',
       examSession: source.exam_session || 'ANNUAL',
@@ -185,19 +192,46 @@ export function BoardSourcesPanel() {
   }
 
   function handleDeactivateClick(source) {
-    setConfirmSource(source);
+    setConfirmDeactivateSource(source);
+  }
+
+  function handleDeleteClick(source) {
+    setConfirmDeleteSource(source);
+  }
+
+  async function handleActivate(source) {
+    try {
+      await verificationApi.activateBoardSource(source.id);
+      await loadSources();
+      setMessage({ type: 'success', text: `Activated ${source.board_name} source.` });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Could not activate this board source.' });
+    }
   }
 
   async function confirmDeactivate() {
-    if (!confirmSource) return;
+    if (!confirmDeactivateSource) return;
     try {
-      await verificationApi.deactivateBoardSource(confirmSource.id);
+      await verificationApi.deactivateBoardSource(confirmDeactivateSource.id);
       await loadSources();
-      setMessage({ type: 'success', text: `Turned off ${confirmSource.board_name} source.` });
+      setMessage({ type: 'success', text: `Turned off ${confirmDeactivateSource.board_name} source.` });
     } catch (error) {
       setMessage({ type: 'error', text: error.message || 'Could not update this board source.' });
     } finally {
-      setConfirmSource(null);
+      setConfirmDeactivateSource(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!confirmDeleteSource) return;
+    try {
+      await verificationApi.deleteBoardSource(confirmDeleteSource.id);
+      await loadSources();
+      setMessage({ type: 'success', text: `Permanently deleted ${confirmDeleteSource.board_name}.` });
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message || 'Could not delete this board source.' });
+    } finally {
+      setConfirmDeleteSource(null);
     }
   }
 
@@ -752,7 +786,9 @@ export function BoardSourcesPanel() {
                             key={source.id}
                             source={source}
                             onEdit={editSource}
+                            onActivate={handleActivate}
                             onDeactivate={handleDeactivateClick}
+                            onDelete={handleDeleteClick}
                             onToggleTester={toggleTester}
                             isExpanded={expandedTesterId === source.id}
                             testInput={testRollInputs[source.id] || ''}
@@ -783,7 +819,9 @@ export function BoardSourcesPanel() {
                             key={source.id}
                             source={source}
                             onEdit={editSource}
+                            onActivate={handleActivate}
                             onDeactivate={handleDeactivateClick}
+                            onDelete={handleDeleteClick}
                             onToggleTester={toggleTester}
                             isExpanded={expandedTesterId === source.id}
                             testInput={testRollInputs[source.id] || ''}
@@ -814,7 +852,9 @@ export function BoardSourcesPanel() {
                             key={source.id}
                             source={source}
                             onEdit={editSource}
+                            onActivate={handleActivate}
                             onDeactivate={handleDeactivateClick}
+                            onDelete={handleDeleteClick}
                             onToggleTester={toggleTester}
                             isExpanded={expandedTesterId === source.id}
                             testInput={testRollInputs[source.id] || ''}
@@ -845,7 +885,9 @@ export function BoardSourcesPanel() {
                             key={source.id}
                             source={source}
                             onEdit={editSource}
+                            onActivate={handleActivate}
                             onDeactivate={handleDeactivateClick}
+                            onDelete={handleDeleteClick}
                             onToggleTester={toggleTester}
                             isExpanded={expandedTesterId === source.id}
                             testInput={testRollInputs[source.id] || ''}
@@ -867,7 +909,9 @@ export function BoardSourcesPanel() {
                       key={source.id}
                       source={source}
                       onEdit={editSource}
+                      onActivate={handleActivate}
                       onDeactivate={handleDeactivateClick}
+                      onDelete={handleDeleteClick}
                       onToggleTester={toggleTester}
                       isExpanded={expandedTesterId === source.id}
                       testInput={testRollInputs[source.id] || ''}
@@ -884,16 +928,29 @@ export function BoardSourcesPanel() {
         </section>
       </div>
 
-      {/* Confirmation Dialog */}
-      {confirmSource && (
+      {/* Deactivate Confirmation Dialog */}
+      {confirmDeactivateSource && (
         <ConfirmDialog
-          isOpen={Boolean(confirmSource)}
+          isOpen={Boolean(confirmDeactivateSource)}
           title="Turn Off Board Source"
-          message={`Turn off the ${confirmSource.board_name} (${confirmSource.academic_year}) source? It will no longer be queried during candidate document verification.`}
+          message={`Turn off the ${confirmDeactivateSource.board_name} (${confirmDeactivateSource.academic_year}) source? It will no longer be queried during candidate document verification.`}
           confirmLabel="Turn Off Source"
           tone="warning"
           onConfirm={confirmDeactivate}
-          onCancel={() => setConfirmSource(null)}
+          onCancel={() => setConfirmDeactivateSource(null)}
+        />
+      )}
+
+      {/* Delete Confirmation Dialog */}
+      {confirmDeleteSource && (
+        <ConfirmDialog
+          isOpen={Boolean(confirmDeleteSource)}
+          title="Delete Board Source Permanently"
+          message={`Are you sure you want to permanently delete "${confirmDeleteSource.board_name}"? The archive and its stored PDF file will be removed permanently. This action cannot be undone.`}
+          confirmLabel="Delete Permanently"
+          tone="danger"
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirmDeleteSource(null)}
         />
       )}
     </div>
@@ -906,7 +963,9 @@ export function BoardSourcesPanel() {
 function SourceCard({
   source,
   onEdit,
+  onActivate,
   onDeactivate,
+  onDelete,
   onToggleTester,
   isExpanded,
   testInput,
@@ -992,20 +1051,40 @@ function SourceCard({
               {isExpanded ? 'Close' : 'Test Roll'}
             </button>
           ) : null}
+          {!isActive && onActivate ? (
+            <button
+              type="button"
+              onClick={() => onActivate(source)}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 cursor-pointer transition"
+            >
+              Activate
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => onEdit(source)}
-            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+            className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer transition"
           >
             Edit
           </button>
-          {isActive ? (
+          {isActive && onDeactivate ? (
             <button
               type="button"
               onClick={() => onDeactivate(source)}
-              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-200 cursor-pointer"
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-800 cursor-pointer transition"
+              title="Turn off automated verification against this source"
             >
               Turn off
+            </button>
+          ) : null}
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={() => onDelete(source)}
+              className="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50 hover:border-rose-300 cursor-pointer transition"
+              title="Permanently delete this board source archive"
+            >
+              Delete
             </button>
           ) : null}
         </div>

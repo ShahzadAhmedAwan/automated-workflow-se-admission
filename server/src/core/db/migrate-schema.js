@@ -105,6 +105,27 @@ export async function ensureDatabaseMigrations(db = pool) {
     } catch (err) {
       console.warn('[Auto-Migration] Note on adm_intake_tokens check:', err.message);
     }
+
+    // 5. Enforce single SUPER_ADMIN role architecture
+    try {
+      const [superRole] = await connection.query(`SELECT id FROM sys_roles WHERE name = 'SUPER_ADMIN'`);
+      if (superRole.length) {
+        const superAdminId = superRole[0].id;
+        await connection.query(
+          `UPDATE sys_user_roles SET role_id = ? WHERE role_id != ?`,
+          [superAdminId, superAdminId]
+        );
+        await connection.query(
+          `DELETE FROM sys_role_permissions WHERE role_id != ?`,
+          [superAdminId]
+        );
+        await connection.query(
+          `DELETE FROM sys_roles WHERE name != 'SUPER_ADMIN'`
+        );
+      }
+    } catch (err) {
+      console.warn('[Auto-Migration] Note on single SUPER_ADMIN role sync:', err.message);
+    }
   } catch (error) {
     // If database connection is not available yet (e.g. in test env), don't crash
     console.warn('[Auto-Migration] Database auto-migration deferred:', error.message);

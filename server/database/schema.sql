@@ -124,10 +124,7 @@ CREATE TABLE IF NOT EXISTS outbox_jobs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO sys_roles (name, description) VALUES
-  ('SUPER_ADMIN', 'Full system access, user management, and protected merit snapshot actions.'),
-  ('ADMISSION_OFFICER', 'Manages campaigns, admission policies, and merit runs.'),
-  ('VERIFIER', 'Reviews candidate documents and reissues intake tokens.'),
-  ('AUDITOR', 'Read-only access to audit records, merit lists, and candidate history.')
+  ('SUPER_ADMIN', 'Full system access, user management, and protected merit snapshot actions.')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 INSERT INTO sys_permissions (name, description) VALUES
@@ -147,21 +144,6 @@ ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 INSERT IGNORE INTO sys_role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM sys_roles r CROSS JOIN sys_permissions p WHERE r.name = 'SUPER_ADMIN';
-
-INSERT IGNORE INTO sys_role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM sys_roles r JOIN sys_permissions p ON p.name IN (
-  'marketing.campaigns.manage', 'verification.documents.review', 'merit.policies.manage', 'merit.run', 'merit.read', 'candidates.read'
-) WHERE r.name = 'ADMISSION_OFFICER';
-
-INSERT IGNORE INTO sys_role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM sys_roles r JOIN sys_permissions p ON p.name IN (
-  'verification.documents.review', 'verification.tokens.reissue', 'candidates.read'
-) WHERE r.name = 'VERIFIER';
-
-INSERT IGNORE INTO sys_role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM sys_roles r JOIN sys_permissions p ON p.name IN (
-  'audit.read', 'merit.read', 'candidates.read'
-) WHERE r.name = 'AUDITOR';
 
 
 -- ============================================================================

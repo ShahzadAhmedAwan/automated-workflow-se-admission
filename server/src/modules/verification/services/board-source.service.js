@@ -360,9 +360,38 @@ export class BoardSourceService {
     }
   }
 
+  static async activate(id, actorId, db = pool) {
+    const [result] = await db.execute(`UPDATE adm_board_sources SET is_active = TRUE, updated_by = ? WHERE id = ?`, [actorId, id]);
+    if (result.affectedRows !== 1) throw new AppError(404, 'BOARD_SOURCE_NOT_FOUND', 'Board source was not found.');
+
+    const [rows] = await db.execute(`SELECT exam_level, source_type FROM adm_board_sources WHERE id = ?`, [id]);
+    if (rows.length && rows[0].source_type === 'GAZETTE') {
+      this.triggerAutoVerificationForGazette({ examLevel: rows[0].exam_level, actorId, db }).catch((err) =>
+        console.warn('[Gazette Auto-Verification] Error triggering scan on activation:', err.message)
+      );
+    }
+    return { success: true };
+  }
+
   static async deactivate(id, actorId, db = pool) {
     const [result] = await db.execute(`UPDATE adm_board_sources SET is_active = FALSE, updated_by = ? WHERE id = ?`, [actorId, id]);
     if (result.affectedRows !== 1) throw new AppError(404, 'BOARD_SOURCE_NOT_FOUND', 'Board source was not found.');
+    return { success: true };
+  }
+
+  static async delete(id, actorId, db = pool) {
+    const [rows] = await db.execute(`SELECT id, storage_key, storage_provider FROM adm_board_sources WHERE id = ?`, [id]);
+    if (!rows.length) throw new AppError(404, 'BOARD_SOURCE_NOT_FOUND', 'Board source was not found.');
+
+    const source = rows[0];
+    const [result] = await db.execute(`DELETE FROM adm_board_sources WHERE id = ?`, [id]);
+    if (result.affectedRows !== 1) throw new AppError(404, 'BOARD_SOURCE_NOT_FOUND', 'Board source was not found.');
+
+    if (source.storage_key) {
+      await StorageService.deleteFile(source.storage_key, source.storage_provider).catch((err) =>
+        console.warn(`[Board Source Delete] Could not delete stored file ${source.storage_key}:`, err.message)
+      );
+    }
     return { success: true };
   }
 }

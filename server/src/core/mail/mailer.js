@@ -62,18 +62,6 @@ const ROLE_DESCRIPTIONS = Object.freeze({
     title: 'Super Administrator',
     description: 'You have unrestricted access to manage system accounts, configure policies, review full audit logs, and oversee all admissions operations.',
   },
-  ADMISSION_OFFICER: {
-    title: 'Admission Officer',
-    description: 'You have permissions to manage applicant marketing campaigns, admission policies, and merit calculation cycles.',
-  },
-  VERIFIER: {
-    title: 'Verification Officer',
-    description: 'You are assigned to the document verification queue to inspect uploaded marksheets, certificates, and candidate intake records.',
-  },
-  AUDITOR: {
-    title: 'System Auditor',
-    description: 'You have read-only audit inspection rights across system audit trails, candidate history, and finalized merit snapshots.',
-  },
 });
 
 export function generateUserWelcomeContent({ email, displayName, role, initialPassword, loginUrl = config.APP_ORIGIN }) {

@@ -32,9 +32,23 @@ export class StaffVerificationController {
     } catch (err) { next(err); }
   }
 
+  static async activateBoardSource(req, res, next) {
+    try {
+      const result = await BoardSourceService.activate(Number(req.params.sourceId), req.auth.userId);
+      res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
   static async deactivateBoardSource(req, res, next) {
     try {
       const result = await BoardSourceService.deactivate(Number(req.params.sourceId), req.auth.userId);
+      res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  static async deleteBoardSource(req, res, next) {
+    try {
+      const result = await BoardSourceService.delete(Number(req.params.sourceId), req.auth.userId);
       res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
   }

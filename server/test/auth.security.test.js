@@ -84,7 +84,8 @@ test('access JWTs are signed with the configured audience, issuer and session bi
 test('auth request schemas constrain login, role assignment and password changes', () => {
   assert.equal(schemas.loginSchema.safeParse({ email: 'ADMIN@EXAMPLE.COM', password: 'anything' }).data.email, 'admin@example.com');
   assert.equal(schemas.loginSchema.safeParse({ email: 'bad', password: 'pw' }).success, false);
-  assert.equal(schemas.createUserSchema.safeParse({ email: 'new@example.com', password: 'SecureExample2026', role: 'AUDITOR', displayName: 'Auditor' }).success, true);
+  assert.equal(schemas.createUserSchema.safeParse({ email: 'new@example.com', password: 'SecureExample2026', role: 'SUPER_ADMIN', displayName: 'Super Admin' }).success, true);
+  assert.equal(schemas.createUserSchema.safeParse({ email: 'new@example.com', password: 'SecureExample2026', role: 'AUDITOR', displayName: 'Auditor' }).success, false);
   assert.equal(schemas.createUserSchema.safeParse({ email: 'new@example.com', password: 'SecureExample2026', role: 'ROOT', displayName: 'User' }).success, false);
   assert.equal(schemas.changePasswordSchema.safeParse({ currentPassword: 'old', newPassword: 'SecureExample2026' }).success, true);
 });

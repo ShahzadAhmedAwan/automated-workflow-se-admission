@@ -7,7 +7,7 @@ import {
   INELIGIBILITY_REASON,
   PROGRAM_ELIGIBILITY,
 } from '../marketing.constants.js';
-import { AIKnowledgeService } from './ai-knowledge.service.js';
+import { AIKnowledgeService, stripEmojis } from './ai-knowledge.service.js';
 
 export class LeadBotService {
   /**
@@ -76,10 +76,35 @@ export class LeadBotService {
     const clean = text.trim();
     // Cannot be a pure question or numbers
     if (clean.length < 2 || clean.length > 80) return false;
+    if (clean.includes('?') || clean.includes('؟')) return false;
     if (AIKnowledgeService.isQuestion(clean)) return false;
     if (/^\d+$/.test(clean)) return false;
+
+    // Reject correction intent: if it's a correction request, it is NOT a name!
+    if (LeadBotService.isCorrectionIntent(clean)) return false;
+
+    // Reject intent verbs and request phrases (including typos like chnage, fther)
+    const intentPhrasePattern = /\b(wanna|want|wnt|would\s+like|need|can\s+i|please|plz|change|chnage|chagne|chaneg|chng|correct|correction|cor+ect|edit|update|updat|modify|replace|reset|delete|remove|fix|enter|reenter|write|rewrite|again)\b/i;
+    if (intentPhrasePattern.test(clean)) return false;
+
+    // Reject Roman Urdu intent and relational words
+    const urduIntentPattern = /\b(badalna|badal|theek|thik|sahi|durust|ghalti|galti|galat|ghalat|glat|dobara|dubara|karna|karni|krna|krni|chahiye|chahye|mera|meri|apna|apni|mujhe|hoga|hogi|hain|hein|hai|batao|batayein|bta|bata|lena|leni|zarrori|zaruri|zaroori)\b/i;
+    if (urduIntentPattern.test(clean)) return false;
+
+    // Reject field names when standalone or in phrases (including typos fther, fathr, fathe)
+    const fieldWordsPattern = /\b(father|fther|fathr|fathe|fthr|walid|walad|abbu|abu|mother|valida|ammi|marks|score|fsc|matric|cnic|email|mail|group|subject)\b/i;
+    if (fieldWordsPattern.test(clean)) return false;
+
+    // Reject non-name admissions or interrogative words
+    const nonNamePattern = /\b(name|naam|full name|fee|fees|hostel|hostels|admission|admissions|apply|criteria|eligibility|eligible|test|entry|entrance|percentage|merit|campus|chehla|uajk|university|program|programs|degree|engineering|technology|pre[- ]?med|pre[- ]?eng|ics|dae|challan|scholarship|scholarships|document|documents|deadline|schedule|class|classes|syllabus|contact|helpline|coordinator|math|mathematics|maths|kya|kab|kahan|kidhar|kitna|kitni|kitne|kaise|kaisay|konsa|konsi|kon|koun|kyu|kion)\b/i;
+    if (nonNamePattern.test(clean)) return false;
+
+    // Maximum word count for a personal name: 1 to 5 words
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length > 5) return false;
+
     // Must contain letters
-    return /^[a-zA-Z\s.']{2,80}$/.test(clean);
+    return /^[a-zA-Z\s.'-]{2,80}$/.test(clean);
   }
 
   /**
@@ -273,47 +298,322 @@ export class LeadBotService {
   }
 
   /**
+   * Helper to determine if an input is a direct group declaration rather than an inquiry about that group
+   */
+  static isDirectGroupDeclaration(text) {
+    if (!text || typeof text !== 'string') return false;
+    const clean = text.trim().toLowerCase();
+    if (clean.includes('?') || clean.includes('؟')) return false;
+
+    // If it contains inquiry words or phrases, it's an inquiry, not a direct declaration
+    const inquiryWords = /\b(can|could|will|would|is|are|how|what|why|kya|kab|kahan|kidhar|kitna|kitni|kitne|kitnay|kaise|kaisay|konsa|konsi|kon|koun|kar sakte|kr skte|kr sakty|kar sakti|mil sakta|mil sakti|quota|policy|fees|fee|hostel|test|criteria|eligible|eligibility|merit|deadline|batao|batayein|bta|chahiye|chahye|detail|details|info|information|apply|admission|admissions)\b/i;
+    if (inquiryWords.test(clean)) return false;
+
+    // Plain academic groups
+    const pureGroups = [
+      'pre-medical', 'pre medical', 'pre-med', 'pre med', 'medical', 'med', 'biology', 'bio',
+      'pre-engineering', 'pre engineering', 'pre-eng', 'pre eng', 'engineering', 'eng', 'engg', 'non-med', 'non medical',
+      'ics', 'i.c.s', 'computer science', 'cs', 'comp',
+      'dae', 'd.a.e', 'diploma',
+      'arts', 'humanities', 'commerce', 'icom', 'fa',
+      'math', 'maths', 'mathematics',
+      'yes', 'han', 'ji', 'jee', 'yup', 'yeah',
+      'no', 'nahi', 'nah'
+    ];
+
+    if (pureGroups.includes(clean)) return true;
+
+    // Short declarations like "fsc pre medical", "studied pre-engineering", "i did ics", "my group was pre-med"
+    if (
+      /^(i\s+(did|studied|have|completed)|my\s+(group|field|background)\s+(was|is))\s+[a-z\s-]+$/i.test(clean) &&
+      !inquiryWords.test(clean)
+    ) {
+      return true;
+    }
+
+    // Short phrase (at most 3 words) matching classifyAcademicGroup
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length <= 3 && !inquiryWords.test(clean) && LeadBotService.classifyAcademicGroup(clean)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Helper to return standard re-prompt text for an intake state
    */
   static getPromptForState(state, lead = {}) {
-    const hint = "\n\n_(If you have any questions, feel free to ask!)_";
     switch (state) {
       case CONVERSATION_STATE.AWAITING_NAME:
-        return "Could you please tell me your *Full Name*?" + hint;
+        return "Could you please tell me your *Full Name*?";
       case CONVERSATION_STATE.AWAITING_FATHER_NAME:
-        return "Could you please tell me your *Father's Name*?" + hint;
+        return "Could you please tell me your *Father's Name*?";
       case CONVERSATION_STATE.AWAITING_MARKS:
         if (lead.fsc_marks) {
-          return "Could you please let us know your *Total Marks* (e.g. out of *1100* or *550*)?" + hint;
+          return "Could you please let us know your *Total Marks* (e.g. out of *1100* or *550*)?";
         }
-        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)" + hint;
+        return "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
       case CONVERSATION_STATE.AWAITING_MATHS:
-        return "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)" + hint;
+        return "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
       case CONVERSATION_STATE.AWAITING_CNIC:
-        return "Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*)." + hint;
+        return "Please provide your 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).";
       case CONVERSATION_STATE.AWAITING_EMAIL:
-        return "Please provide your active *Email Address* (e.g. *applicant@example.com*) for official portal access." + hint;
+        return "Please provide your active *Email Address* (e.g. *applicant@example.com*) for official portal access.";
       default:
-        return "Please let us know how we can assist you." + hint;
+        return "Please let us know how we can assist you.";
     }
   }
 
   /**
    * Helper to detect correction / edit / mistake intent in English and Roman Urdu
+   * Handles typos such as chnage, fther, etc.
    */
   static isCorrectionIntent(text) {
     if (!text) return false;
     const clean = text.trim().toLowerCase();
     const patterns = [
       /\b(mistake|ghalti|galti|galati|ghlti|wrong|galat|ghalat)\b/i,
-      /\b(correct|correction|edit|change|update|modify|replace|reset)\b/i,
-      /\b(wanna correct|want to correct|can i change|kuch change|theek karna|sahi karna|durust)\b/i,
+      /\b(correct|correction|cor+ect|edit|change|chnage|chenge|chagne|chaneg|chng|update|updat|updte|modify|replace|reset)\b/i,
+      /\b(wanna|want to|wnt to|can i|need to|could i|plz|please)\s+(correct|correction|change|chnage|chenge|edit|update|replace|modify)\b/i,
+      /\b(wanna\s+chnage|wanna\s+change|want\s+to\s+chnage|want\s+to\s+change)\b/i,
+      /\b(theek karna|sahi karna|durust|badalna|badal do|tabdeel)\b/i,
       /\b(by mistake|mistakenly|glat likh|ghalat likh|wrong entry|i made a mistake|i did a mistake)\b/i,
-      /\b(change marks|change name|change cnic|change email|change father|change group)\b/i,
+      /\b(change|chnage|chenge|correct|edit|update)\s+(my\s+)?(marks?|name|naam|cnic|email|mail|father|fther|fathr|fathe|walid|abbu|group)\b/i,
       /\b(write (my )?name again|dobara naam|name change|naam badalna|naam dobara)\b/i,
       /\b(can i write|can i enter|can i re[- ]?enter|dubara likh|dobara likh)\b/i,
     ];
     return patterns.some((p) => p.test(clean));
+  }
+
+  /**
+   * Identifies the specific target field for correction from user input (English & Roman Urdu)
+   * Prioritizes Father's Name over Full Name so phrases like "change father name" or "chnage fther name" never match "name"
+   */
+  static detectCorrectionField(text) {
+    if (!text) return null;
+    const clean = text.trim().toLowerCase();
+
+    // 1. All details / Start over
+    if (
+      clean === '7' ||
+      clean === 'all' ||
+      clean === 'start over' ||
+      clean === 'everything' ||
+      /\b(restart|start over|re-enter|all details|all info|scratch|dobara shuru|shuru se)\b/i.test(clean)
+    ) {
+      return 'ALL';
+    }
+
+    // 2. Father's Name (CHECK FIRST before candidate name to avoid "father name" matching "name")
+    if (
+      clean === '2' ||
+      clean === 'father' ||
+      clean === 'fther' ||
+      clean === 'father name' ||
+      clean === "father's name" ||
+      clean === 'fther name' ||
+      /\b(father|fther|fathr|fathe|fthr|walid|walad|abbu|abu|baba|papa|walidiyat)\b/i.test(clean)
+    ) {
+      return 'FATHER_NAME';
+    }
+
+    // 3. Full Name (ONLY if father terms are NOT present)
+    const hasFatherTerm = /\b(father|fther|fathr|fathe|fthr|walid|walad|abbu|abu|baba|papa|walidiyat)\b/i.test(clean);
+    if (!hasFatherTerm) {
+      if (
+        clean === '1' ||
+        clean === 'name' ||
+        clean === 'full name' ||
+        clean === 'my name' ||
+        clean === 'naam' ||
+        clean === 'mera naam' ||
+        /\b(write (my )?name again|can i (change|chnage|write|enter|re[- ]?enter) (my )?name|change (my )?name|chnage (my )?name|correct (my )?name|naam (change|chnage|galat|ghalat|dobara|dubara)|mera naam|apna naam|candidate name|student name)\b/i.test(clean) ||
+        (/\b(change|chnage|chenge|correct|edit|update|wrong)\b/i.test(clean) && /\b(name|naam)\b/i.test(clean))
+      ) {
+        return 'FULL_NAME';
+      }
+    }
+
+    // 4. Marks / Score
+    if (
+      clean === '3' ||
+      clean === 'marks' ||
+      clean === 'mark' ||
+      clean === 'score' ||
+      clean === 'fsc' ||
+      clean === 'fsc marks' ||
+      /\b(mark|marks|score|fsc|matric|dae|ics marks|obtained marks)\b/i.test(clean)
+    ) {
+      return 'MARKS';
+    }
+
+    // 5. Academic Group / Maths
+    if (
+      clean === '4' ||
+      clean === 'group' ||
+      clean === 'academic group' ||
+      clean === 'maths' ||
+      clean === 'math' ||
+      clean === 'pre-medical' ||
+      clean === 'pre-engineering' ||
+      /\b(group|math|maths|mathematics|subject|pre-med|pre-eng)\b/i.test(clean)
+    ) {
+      return 'ACADEMIC_GROUP';
+    }
+
+    // 6. CNIC / Form-B
+    if (
+      clean === '5' ||
+      clean === 'cnic' ||
+      clean === 'b-form' ||
+      clean === 'form b' ||
+      clean === 'form-b' ||
+      clean === 'bform' ||
+      /\b(cnic|b-form|form-b|bform|bay form|b form|id card|shanakhti)\b/i.test(clean)
+    ) {
+      return 'CNIC';
+    }
+
+    // 7. Email Address
+    if (
+      clean === '6' ||
+      clean === 'email' ||
+      clean === 'email address' ||
+      clean === 'mail' ||
+      clean === 'gmail' ||
+      /\b(email|mail|e-mail|gmail)\b/i.test(clean)
+    ) {
+      return 'EMAIL';
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts direct father name value if student provides it in the message
+   * e.g. "father name is Tariq Mahmood", "change father name to Muhammad Ali", "abbu ka naam Tariq hai", "fther name Tariq"
+   */
+  static extractDirectFatherName(text) {
+    if (!text) return null;
+    const clean = text.trim();
+
+    // Pattern 1: (wanna change/chnage...) father/fther/walid/abbu name to <NAME>
+    const changeToMatch = clean.match(/(?:(?:wanna|want\s+to|can\s+i|plz|please)?\s*(?:change|chnage|chenge|correct|edit|update)\s*(?:my\s*)?(?:father(?:'s)?|fther(?:'s)?|walid|abbu)\s*(?:name|naam)?\s*(?:to|is|=|:)\s*)([a-zA-Z\s.']{2,80})/i);
+    if (changeToMatch && LeadBotService.isValidName(changeToMatch[1])) {
+      return changeToMatch[1].trim();
+    }
+
+    // Pattern 2: father/fther/walid/abbu (name/naam) (is/to/:/hai/=) <NAME>
+    const directMatch = clean.match(/(?:father|fther|walid|abbu)\s*(?:(?:'s\s+)?name|naam)?\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
+    if (directMatch && LeadBotService.isValidName(directMatch[1])) {
+      return directMatch[1].trim();
+    }
+
+    // Pattern 3: father/fther/walid/abbu (name/naam) <NAME> (space separated e.g. "fther name Tariq Mahmood")
+    const spaceMatch = clean.match(/(?:father|fther|walid|abbu)\s*(?:'s)?\s*(?:name|naam)\s+([a-zA-Z\s.']{2,80})/i);
+    if (spaceMatch && LeadBotService.isValidName(spaceMatch[1])) {
+      return spaceMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Extracts direct candidate full name value if student provides it in the message
+   * e.g. "my name is Shahzad", "change name to Shahzad Awan", "name Ali"
+   */
+  static extractDirectFullName(text) {
+    if (!text) return null;
+    const clean = text.trim();
+
+    // If father terms are mentioned, this is not a candidate direct name
+    if (/\b(father|fther|fathr|fathe|fthr|walid|abbu|baba|papa)\b/i.test(clean)) {
+      return null;
+    }
+
+    // Pattern 1: (wanna change/chnage...) name to <NAME>
+    const changeToMatch = clean.match(/(?:(?:wanna|want\s+to|can\s+i|plz|please)?\s*(?:change|chnage|chenge|correct|edit|update)\s*(?:my\s*)?(?:full\s*)?name\s*(?:to|is|=|:)\s*)([a-zA-Z\s.']{2,80})/i);
+    if (changeToMatch && LeadBotService.isValidName(changeToMatch[1])) {
+      return changeToMatch[1].trim();
+    }
+
+    // Pattern 2: (my) name/naam (is/to/:/hai/=) <NAME>
+    const directMatch = clean.match(/(?:(?:my\s+)?(?:full\s*)?name|naam)\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
+    if (directMatch && LeadBotService.isValidName(directMatch[1])) {
+      return directMatch[1].trim();
+    }
+
+    // Pattern 3: (my) full name/naam <NAME>
+    const spaceMatch = clean.match(/(?:(?:my\s+)?(?:full\s*)?name|naam)\s+([a-zA-Z\s.']{2,80})/i);
+    if (spaceMatch && LeadBotService.isValidName(spaceMatch[1])) {
+      return spaceMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolves correction intent and entity field using rule-based and Gemini classification
+   */
+  static async resolveCorrectionIntent(messageText) {
+    if (!messageText) return null;
+    const clean = messageText.trim();
+    if (!clean) return null;
+
+    // 1. Direct father name provided
+    const directFather = LeadBotService.extractDirectFatherName(clean);
+    if (directFather) {
+      return {
+        field: 'FATHER_NAME',
+        directValue: directFather,
+        confidence: 0.98,
+      };
+    }
+
+    // 2. Direct full name provided
+    const directName = LeadBotService.extractDirectFullName(clean);
+    if (directName) {
+      return {
+        field: 'FULL_NAME',
+        directValue: directName,
+        confidence: 0.98,
+      };
+    }
+
+    // 3. Deterministic field detection
+    const detectedField = LeadBotService.detectCorrectionField(clean);
+    if (detectedField) {
+      return {
+        field: detectedField,
+        directValue: null,
+        confidence: 0.95,
+      };
+    }
+
+    // 4. If correction intent exists or Gemini API can classify ambiguous queries
+    if (LeadBotService.isCorrectionIntent(clean)) {
+      try {
+        const geminiResult = await AIKnowledgeService.classifyCorrectionWithGemini(clean);
+        if (geminiResult && geminiResult.field && geminiResult.field !== 'NONE') {
+          return {
+            field: geminiResult.field,
+            directValue: geminiResult.directValue || null,
+            confidence: 0.9,
+          };
+        }
+      } catch (err) {
+        // Fallback silently
+      }
+
+      return {
+        field: 'UNKNOWN',
+        directValue: null,
+        confidence: 0.5,
+      };
+    }
+
+    return null;
   }
 
   /**
@@ -337,7 +637,7 @@ export class LeadBotService {
       `- CNIC / B-Form: ${cnic || 'On Record'}\n` +
       `- Email: ${email || 'On Record'}\n` +
       `- FSc Marks: ${marks || 'Recorded'}\n\n` +
-      `If any correction, tell us.\n\n` +
+      `If any information needs correction, please let us know.\n\n` +
       `*Next Step:*\n` +
       `Your official document upload portal link will be sent to you in 1 minute.\n\n` +
       `If you have any questions regarding hostel, fees, or entry test, feel free to ask anytime!`
@@ -349,7 +649,7 @@ export class LeadBotService {
    */
   static getCorrectionMenuText() {
     return (
-      "No problem at all! You can easily update your information.\n\n" +
+      "You can easily update your information.\n\n" +
       "What would you like to correct?\n" +
       "1. Full Name\n" +
       "2. Father's Name\n" +
@@ -711,17 +1011,61 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
-          } else if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            break;
+          }
+
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
             nextState = CONVERSATION_STATE.AWAITING_NAME;
-          } else if (AIKnowledgeService.isQuestion(messageBody)) {
+            break;
+          }
+
+          // Check if candidate is asking to change or correct another field (e.g. father name, marks)
+          const correctionInName = await LeadBotService.resolveCorrectionIntent(messageBody);
+          if (correctionInName && correctionInName.field && correctionInName.field !== 'FULL_NAME') {
+            if (correctionInName.field === 'FATHER_NAME') {
+              if (correctionInName.directValue) {
+                fatherName = correctionInName.directValue;
+                replyText = `Thank you! Father's Name recorded as *${fatherName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
+                nextState = CONVERSATION_STATE.AWAITING_NAME;
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                replyText = "Please provide your correct *Father's Name*.";
+              }
+              break;
+            } else if (correctionInName.field === 'MARKS') {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
+              break;
+            } else if (correctionInName.field === 'CNIC') {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
+              break;
+            } else if (correctionInName.field === 'EMAIL') {
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
+              break;
+            } else if (correctionInName.field === 'ACADEMIC_GROUP') {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
+              break;
+            }
+          }
+
+          if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
               `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_NAME;
-          } else if (LeadBotService.isValidName(messageBody)) {
-            fullName = messageBody.trim();
+            break;
+          }
+
+          const directName = LeadBotService.extractDirectFullName(messageBody);
+          const candidateName = directName || (LeadBotService.isValidName(messageBody) ? messageBody.trim() : null);
+
+          if (candidateName) {
+            fullName = candidateName;
             if (fatherName && cnic && email && marksObtained) {
               nextState = CONVERSATION_STATE.QUALIFIED;
               qualificationChanged = true;
@@ -779,17 +1123,61 @@ export class LeadBotService {
             qualificationChanged = true;
             isEligible = false;
             ineligibilityReason = INELIGIBILITY_REASON.NOT_INTERESTED;
-          } else if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
+            break;
+          }
+
+          if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
             nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-          } else if (AIKnowledgeService.isQuestion(messageBody)) {
+            break;
+          }
+
+          // Check if candidate is asking to change or correct another field (e.g. name, marks)
+          const correctionInFather = await LeadBotService.resolveCorrectionIntent(messageBody);
+          if (correctionInFather && correctionInFather.field && correctionInFather.field !== 'FATHER_NAME') {
+            if (correctionInFather.field === 'FULL_NAME') {
+              if (correctionInFather.directValue) {
+                fullName = correctionInFather.directValue;
+                replyText = `Thank you! Full Name updated to *${fullName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
+                nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_NAME;
+                replyText = "Please provide your correct *Full Name*.";
+              }
+              break;
+            } else if (correctionInFather.field === 'MARKS') {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
+              break;
+            } else if (correctionInFather.field === 'CNIC') {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
+              break;
+            } else if (correctionInFather.field === 'EMAIL') {
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
+              break;
+            } else if (correctionInFather.field === 'ACADEMIC_GROUP') {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
+              break;
+            }
+          }
+
+          if (AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
             replyText =
               `${aiAnswer}\n\n` +
               `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-          } else if (LeadBotService.isValidName(messageBody)) {
-            fatherName = messageBody.trim();
+            break;
+          }
+
+          const directFather = LeadBotService.extractDirectFatherName(messageBody);
+          const candidateFather = directFather || (LeadBotService.isValidName(messageBody) ? messageBody.trim() : null);
+
+          if (candidateFather) {
+            fatherName = candidateFather;
             if (cnic && email && marksObtained) {
               nextState = CONVERSATION_STATE.QUALIFIED;
               qualificationChanged = true;
@@ -850,6 +1238,40 @@ export class LeadBotService {
             replyText = "Yes, please ask your question! What would you like to know?";
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
             break;
+          }
+
+          // Check if student wants to correct or redirect to another field (e.g. father's name or full name)
+          const correctionInMarks = await LeadBotService.resolveCorrectionIntent(messageBody);
+          if (correctionInMarks && correctionInMarks.field && correctionInMarks.field !== 'MARKS') {
+            if (correctionInMarks.field === 'FATHER_NAME') {
+              if (correctionInMarks.directValue) {
+                fatherName = correctionInMarks.directValue;
+                replyText = `Thank you! Father's Name updated to *${fatherName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                replyText = "Please provide your correct *Father's Name*.";
+              }
+              break;
+            } else if (correctionInMarks.field === 'FULL_NAME') {
+              if (correctionInMarks.directValue) {
+                fullName = correctionInMarks.directValue;
+                replyText = `Thank you! Full Name updated to *${fullName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_NAME;
+                replyText = "Please provide your correct *Full Name*.";
+              }
+              break;
+            } else if (correctionInMarks.field === 'CNIC') {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
+              break;
+            } else if (correctionInMarks.field === 'EMAIL') {
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+              replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
+              break;
+            }
           }
 
           const lastOutbound = history.filter((h) => h.direction === 'OUTBOUND').slice(-1)[0]?.text || '';
@@ -972,13 +1394,13 @@ export class LeadBotService {
             replyText =
               `${aiAnswer}\n\n` +
               `*To check your program eligibility:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
-            nextState = CONVERSATION_STATE.AWAITING_MARKS;
-          } else if (!parsed) {
-            replyText =
-              "We couldn't quite read your marks. Please provide your obtained and total marks (for example: *890/1100* or *420/550*).\n\n" +
-              "If you have a question about eligibility or fees, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_MARKS;
-          } else {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            } else if (!parsed) {
+              replyText =
+                "We couldn't quite read your marks. Please provide your obtained and total marks (for example: *890/1100* or *420/550*).\n\n" +
+                "If you have a question about eligibility or fees, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            } else {
             // Full ratio parsed (e.g. 890/1100 or a different total)
             marksObtained = parsed.obtained;
 
@@ -1083,6 +1505,16 @@ export class LeadBotService {
             break;
           }
 
+          // If the message is an inquiry / question (and not a direct group declaration like "ICS" or "Pre-Medical")
+          if (!LeadBotService.isDirectGroupDeclaration(messageBody) && AIKnowledgeService.isQuestion(messageBody)) {
+            const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
+            replyText =
+              `${aiAnswer}\n\n` +
+              `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
+            nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            break;
+          }
+
           // Classification of study group (Pre-Eng, Pre-Med, ICS, DAE, etc.)
           const groupResult = LeadBotService.classifyAcademicGroup(messageBody);
 
@@ -1167,6 +1599,44 @@ export class LeadBotService {
               `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
             nextState = CONVERSATION_STATE.AWAITING_MATHS;
           } else {
+            // Check if candidate wants to correct another field (e.g. father's name, full name, or marks)
+            const correctionInMaths = await LeadBotService.resolveCorrectionIntent(messageBody);
+            if (correctionInMaths && correctionInMaths.field && correctionInMaths.field !== 'ACADEMIC_GROUP') {
+              if (correctionInMaths.field === 'FATHER_NAME') {
+                if (correctionInMaths.directValue) {
+                  fatherName = correctionInMaths.directValue;
+                  replyText = `Thank you! Father's Name updated to *${fatherName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                  replyText = "Please provide your correct *Father's Name*.";
+                }
+                break;
+              } else if (correctionInMaths.field === 'FULL_NAME') {
+                if (correctionInMaths.directValue) {
+                  fullName = correctionInMaths.directValue;
+                  replyText = `Thank you! Full Name updated to *${fullName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_NAME;
+                  replyText = "Please provide your correct *Full Name*.";
+                }
+                break;
+              } else if (correctionInMaths.field === 'MARKS') {
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
+                break;
+              } else if (correctionInMaths.field === 'CNIC') {
+                nextState = CONVERSATION_STATE.AWAITING_CNIC;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
+                break;
+              } else if (correctionInMaths.field === 'EMAIL') {
+                nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
+                break;
+              }
+            }
+
             // Conversational grace fallback
             if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
               const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
@@ -1206,6 +1676,45 @@ export class LeadBotService {
           }
 
           const parsedCnic = LeadBotService.parseCnic(messageBody);
+
+          if (!parsedCnic) {
+            const correctionInCnic = await LeadBotService.resolveCorrectionIntent(messageBody);
+            if (correctionInCnic && correctionInCnic.field && correctionInCnic.field !== 'CNIC') {
+              if (correctionInCnic.field === 'FATHER_NAME') {
+                if (correctionInCnic.directValue) {
+                  fatherName = correctionInCnic.directValue;
+                  replyText = `Thank you! Father's Name updated to *${fatherName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_CNIC;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                  replyText = "Please provide your correct *Father's Name*.";
+                }
+                break;
+              } else if (correctionInCnic.field === 'FULL_NAME') {
+                if (correctionInCnic.directValue) {
+                  fullName = correctionInCnic.directValue;
+                  replyText = `Thank you! Full Name updated to *${fullName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_CNIC;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_NAME;
+                  replyText = "Please provide your correct *Full Name*.";
+                }
+                break;
+              } else if (correctionInCnic.field === 'MARKS') {
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
+                break;
+              } else if (correctionInCnic.field === 'ACADEMIC_GROUP') {
+                nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
+                break;
+              } else if (correctionInCnic.field === 'EMAIL') {
+                nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
+                break;
+              }
+            }
+          }
 
           if (!parsedCnic && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
@@ -1264,6 +1773,45 @@ export class LeadBotService {
           }
 
           const parsedEmail = LeadBotService.parseEmail(messageBody);
+
+          if (!parsedEmail) {
+            const correctionInEmail = await LeadBotService.resolveCorrectionIntent(messageBody);
+            if (correctionInEmail && correctionInEmail.field && correctionInEmail.field !== 'EMAIL') {
+              if (correctionInEmail.field === 'FATHER_NAME') {
+                if (correctionInEmail.directValue) {
+                  fatherName = correctionInEmail.directValue;
+                  replyText = `Thank you! Father's Name updated to *${fatherName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                  replyText = "Please provide your correct *Father's Name*.";
+                }
+                break;
+              } else if (correctionInEmail.field === 'FULL_NAME') {
+                if (correctionInEmail.directValue) {
+                  fullName = correctionInEmail.directValue;
+                  replyText = `Thank you! Full Name updated to *${fullName}*.\n\n${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead)}`;
+                  nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+                } else {
+                  nextState = CONVERSATION_STATE.AWAITING_NAME;
+                  replyText = "Please provide your correct *Full Name*.";
+                }
+                break;
+              } else if (correctionInEmail.field === 'MARKS') {
+                nextState = CONVERSATION_STATE.AWAITING_MARKS;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead);
+                break;
+              } else if (correctionInEmail.field === 'ACADEMIC_GROUP') {
+                nextState = CONVERSATION_STATE.AWAITING_MATHS;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead);
+                break;
+              } else if (correctionInEmail.field === 'CNIC') {
+                nextState = CONVERSATION_STATE.AWAITING_CNIC;
+                replyText = LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead);
+                break;
+              }
+            }
+          }
 
           if (!parsedEmail && AIKnowledgeService.isQuestion(messageBody)) {
             const aiAnswer = await AIKnowledgeService.answerQuestion(messageBody, history);
@@ -1442,143 +1990,96 @@ export class LeadBotService {
             break;
           }
 
-          // 4. Candidate provides Name directly (e.g. "name is Java Script", "change name to Java Script")
-          const directNameMatch = messageBody.match(/(?:(?:my\s+)?name|naam)\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
-          if (directNameMatch && LeadBotService.isValidName(directNameMatch[1])) {
-            fullName = directNameMatch[1].trim();
-            qualificationChanged = true;
-            isEligible = true;
-            nextState = CONVERSATION_STATE.QUALIFIED;
-            replyText = LeadBotService.formatConfirmationMessage({
-              fullName,
-              fatherName,
-              cnic,
-              email,
-              marks: marksObtained,
-              isUpdated: true,
-            });
-            break;
+          // 4. Check correction intent and direct field updates (Gemini AI assisted + deterministic priority)
+          const correction = await LeadBotService.resolveCorrectionIntent(messageBody);
+          if (correction && correction.field) {
+            if (correction.field === 'FATHER_NAME') {
+              if (correction.directValue) {
+                fatherName = correction.directValue;
+                qualificationChanged = true;
+                isEligible = true;
+                nextState = CONVERSATION_STATE.QUALIFIED;
+                replyText = LeadBotService.formatConfirmationMessage({
+                  fullName,
+                  fatherName,
+                  cnic,
+                  email,
+                  marks: marksObtained,
+                  isUpdated: true,
+                });
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+                replyText = "Please provide your correct *Father's Name*.";
+              }
+              break;
+            }
+
+            if (correction.field === 'FULL_NAME') {
+              if (correction.directValue) {
+                fullName = correction.directValue;
+                qualificationChanged = true;
+                isEligible = true;
+                nextState = CONVERSATION_STATE.QUALIFIED;
+                replyText = LeadBotService.formatConfirmationMessage({
+                  fullName,
+                  fatherName,
+                  cnic,
+                  email,
+                  marks: marksObtained,
+                  isUpdated: true,
+                });
+              } else {
+                nextState = CONVERSATION_STATE.AWAITING_NAME;
+                replyText = "Please provide your correct *Full Name*.";
+              }
+              break;
+            }
+
+            if (correction.field === 'MARKS') {
+              nextState = CONVERSATION_STATE.AWAITING_MARKS;
+              replyText = "What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
+              break;
+            }
+
+            if (correction.field === 'ACADEMIC_GROUP') {
+              nextState = CONVERSATION_STATE.AWAITING_MATHS;
+              replyText = "Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
+              break;
+            }
+
+            if (correction.field === 'CNIC') {
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+              replyText = "Please provide your correct 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).";
+              break;
+            }
+
+            if (correction.field === 'EMAIL') {
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+              replyText = "Please provide your correct active *Email Address* (e.g. *applicant@example.com*).";
+              break;
+            }
+
+            if (correction.field === 'ALL') {
+              fullName = 'Prospective Applicant';
+              fatherName = null;
+              marksObtained = null;
+              hasMaths = null;
+              cnic = null;
+              email = null;
+              priorDegree = null;
+              nextState = CONVERSATION_STATE.AWAITING_NAME;
+              replyText = "Let's restart your admission registration from scratch. What is your *Full Name*?";
+              break;
+            }
+
+            if (correction.field === 'UNKNOWN') {
+              nextState = CONVERSATION_STATE.QUALIFIED;
+              replyText = LeadBotService.getCorrectionMenuText();
+              break;
+            }
           }
 
-          // 5. Candidate provides Father's Name directly (e.g. "father name is Tariq", "abbu ka naam Tariq")
-          const directFatherMatch = messageBody.match(/(?:father|walid|abbu)\s*(?:(?:'s\s+)?name|naam)?\s*(?:is|hai|to|:|=)\s*([a-zA-Z\s.']{2,80})/i);
-          if (directFatherMatch && LeadBotService.isValidName(directFatherMatch[1])) {
-            fatherName = directFatherMatch[1].trim();
-            qualificationChanged = true;
-            isEligible = true;
-            nextState = CONVERSATION_STATE.QUALIFIED;
-            replyText = LeadBotService.formatConfirmationMessage({
-              fullName,
-              fatherName,
-              cnic,
-              email,
-              marks: marksObtained,
-              isUpdated: true,
-            });
-            break;
-          }
-
-          // 6. Candidate selects specific field to edit (Option 1 to 7 or field keywords)
-          if (
-            clean === '1' ||
-            clean === 'name' ||
-            clean === 'full name' ||
-            /\b(write (my )?name again|can i (change|write|enter|re[- ]?enter) (my )?name|change (my )?name|correct (my )?name|naam (change|galat|ghalat|dobara|dubara)|mera naam)\b/i.test(clean) ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(name|naam)\b/i.test(clean) ||
-            /\b(name|naam)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_NAME;
-            replyText = "Yes, absolutely! What is your correct *Full Name*?";
-            break;
-          }
-
-          if (
-            clean === '2' ||
-            clean === 'father' ||
-            clean === 'father name' ||
-            clean === "father's name" ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(father|walid|abbu)\b/i.test(clean) ||
-            /\b(father|walid|abbu)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
-            replyText = "No problem! What is your correct *Father's Name*?";
-            break;
-          }
-
-          if (
-            clean === '3' ||
-            clean === 'marks' ||
-            clean === 'score' ||
-            clean === 'fsc' ||
-            clean === 'fsc marks' ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(mark|marks|score|fsc)\b/i.test(clean) ||
-            /\b(mark|marks|score|fsc)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            replyText = "No problem! What was your score in FSc / ICS / DAE (Part 1 or 2)? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*)";
-            break;
-          }
-
-          if (
-            clean === '4' ||
-            clean === 'group' ||
-            clean === 'academic group' ||
-            clean === 'maths' ||
-            clean === 'pre-medical' ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(group|math|maths|subject|pre-med|pre-eng)\b/i.test(clean) ||
-            /\b(group|math|maths|subject|pre-med|pre-eng)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_MATHS;
-            replyText = "No problem! Did you study Mathematics or what was your academic group? (e.g. *Pre-Engineering*, *ICS*, *Pre-Medical*, or *DAE*)";
-            break;
-          }
-
-          if (
-            clean === '5' ||
-            clean === 'cnic' ||
-            clean === 'b-form' ||
-            clean === 'form b' ||
-            clean === 'form-b' ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(cnic|b-form|form-b|bform|id card|shanakhti)\b/i.test(clean) ||
-            /\b(cnic|b-form|form-b|bform|id card|shanakhti)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_CNIC;
-            replyText = "No problem! Please provide your correct 13-digit CNIC or Form-B number (e.g. *12345-1234567-1*).";
-            break;
-          }
-
-          if (
-            clean === '6' ||
-            clean === 'email' ||
-            clean === 'email address' ||
-            /\b(change|correct|edit|update|wrong)\b.*\b(email|mail)\b/i.test(clean) ||
-            /\b(email|mail)\b.*\b(change|correct|edit|update|wrong|ghalat|galat)\b/i.test(clean)
-          ) {
-            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
-            replyText = "No problem! Please provide your correct active *Email Address* (e.g. *applicant@example.com*).";
-            break;
-          }
-
-          if (
-            clean === '7' ||
-            clean === 'all' ||
-            clean === 'start over' ||
-            clean === 'everything' ||
-            /\b(restart|start over|re-enter|all details|dobara)\b/i.test(clean)
-          ) {
-            fullName = 'Prospective Applicant';
-            fatherName = null;
-            marksObtained = null;
-            hasMaths = null;
-            cnic = null;
-            email = null;
-            priorDegree = null;
-            nextState = CONVERSATION_STATE.AWAITING_NAME;
-            replyText = "Let's restart your admission registration from scratch. What is your *Full Name*?";
-            break;
-          }
-
-          // 7. General statement of mistake or desire to correct (e.g. "I did a mistake", "ghalti ho gaii", "I wanna correct something")
+          // 5. General statement of mistake or desire to correct (e.g. "I did a mistake", "ghalti ho gaii", "I wanna correct something")
           if (LeadBotService.isCorrectionIntent(messageBody)) {
             nextState = CONVERSATION_STATE.QUALIFIED;
             replyText = LeadBotService.getCorrectionMenuText();
@@ -1658,7 +2159,7 @@ export class LeadBotService {
             }
           } else if (LeadBotService.isCorrectionIntent(messageBody)) {
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            replyText = "No problem at all! Let's update your marks. What was your score in FSc / ICS / DAE? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*).";
+            replyText = "Let's update your marks. What was your score in FSc / ICS / DAE? (Please provide obtained and total marks, e.g. *890/1100* or *420/550*).";
           } else if (LeadBotService.isAffirmative(messageBody)) {
             if (fullName) {
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
@@ -1689,6 +2190,8 @@ export class LeadBotService {
           nextState = CONVERSATION_STATE.AWAITING_INTEREST;
         }
       }
+
+      replyText = stripEmojis(replyText);
 
       // Save updated state and enqueue outbound reply
       await LeadBotService.saveTurnAndQueueReply(
@@ -1779,11 +2282,12 @@ export class LeadBotService {
     extraFields = {},
     options = { queueReply: true }
   ) {
+    const cleanReply = stripEmojis(replyText);
     const safeHistory = Array.isArray(history) ? history : [];
     const updatedHistory = [
       ...safeHistory,
       { direction: 'INBOUND', text: inboundText, timestamp: new Date(timestamp).toISOString() },
-      { direction: 'OUTBOUND', text: replyText, timestamp: new Date().toISOString() },
+      { direction: 'OUTBOUND', text: cleanReply, timestamp: new Date().toISOString() },
     ];
 
     const updates = [
@@ -1841,6 +2345,50 @@ export class LeadBotService {
       params
     );
 
+    // Sync to adm_students if student record exists for this lead or phone
+    try {
+      const studentUpdates = [];
+      const studentParams = [];
+      if (extraFields.fullName !== undefined) {
+        studentUpdates.push('full_name = ?');
+        studentParams.push(extraFields.fullName);
+      }
+      if (extraFields.fatherName !== undefined) {
+        studentUpdates.push('father_name = ?');
+        studentParams.push(extraFields.fatherName);
+      }
+      if (extraFields.cnic !== undefined) {
+        studentUpdates.push('cnic = ?');
+        studentParams.push(extraFields.cnic);
+      }
+      if (extraFields.email !== undefined) {
+        studentUpdates.push('email = ?');
+        studentParams.push(extraFields.email);
+      }
+      if (extraFields.fscMarks !== undefined) {
+        studentUpdates.push('fsc_obtained_marks = ?');
+        studentParams.push(extraFields.fscMarks);
+      }
+      if (extraFields.priorDegree !== undefined) {
+        studentUpdates.push('prior_degree = ?');
+        studentParams.push(extraFields.priorDegree);
+      }
+      if (extraFields.eligibleFor !== undefined) {
+        studentUpdates.push('eligible_for = ?');
+        studentParams.push(extraFields.eligibleFor);
+      }
+
+      if (studentUpdates.length > 0) {
+        studentParams.push(leadId, phoneNormalized);
+        await connection.execute(
+          `UPDATE adm_students SET ${studentUpdates.join(', ')} WHERE lead_id = ? OR phone_normalized = ?`,
+          studentParams
+        );
+      }
+    } catch {
+      // Non-blocking in case adm_students table is not present in mock environments
+    }
+
     // Enqueue outbound reply if enabled (defaults to true for webhook/async flows, false when directly sent via socket)
     if (options.queueReply !== false) {
       await dispatchJob({
@@ -1849,7 +2397,7 @@ export class LeadBotService {
         payload: {
           recipientPhone: phoneNormalized,
           messageType: 'TRANSACTIONAL',
-          messageText: replyText,
+          messageText: cleanReply,
           metadata: { leadId, state: nextState },
         },
         connection,

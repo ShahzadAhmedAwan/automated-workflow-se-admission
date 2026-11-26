@@ -6,6 +6,7 @@ if (process.env.AUTH_INTEGRATION === '1') {
   await import('./auth.critical.test.js');
   await import('./auth.mocked-service.test.js');
   await import('./marketing.test.js');
+  await import('./marketing-leads-and-verification-filters.test.js');
   await import('./verification.test.js');
   await import('./merit.test.js');
   await import('./verification.integration.test.js');

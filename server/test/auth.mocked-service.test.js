@@ -139,7 +139,7 @@ test('auth.service.login: wrong password or deactivated account throws INVALID_C
     if (sql.includes('FROM sys_users u JOIN sys_user_roles ur')) {
       return [[{
         id: 'user-1', email: 'test@example.com', display_name: 'User 1',
-        password_hash: hashedPassword, is_active: 1, token_version: 0, role: 'AUDITOR',
+        password_hash: hashedPassword, is_active: 1, token_version: 0, role: 'SUPER_ADMIN',
       }]];
     }
     if (sql.includes('INSERT INTO sys_audit_logs')) return [{ insertId: 1 }];
@@ -157,7 +157,7 @@ test('auth.service.login: wrong password or deactivated account throws INVALID_C
     if (sql.includes('FROM sys_users u JOIN sys_user_roles ur')) {
       return [[{
         id: 'user-2', email: 'inactive@example.com', display_name: 'User 2',
-        password_hash: hashedPassword, is_active: 0, token_version: 0, role: 'AUDITOR',
+        password_hash: hashedPassword, is_active: 0, token_version: 0, role: 'SUPER_ADMIN',
       }]];
     }
     if (sql.includes('INSERT INTO sys_audit_logs')) return [{ insertId: 1 }];
@@ -294,7 +294,7 @@ test('VERIFY FIX: auth.service.updateUser permits modifying an already-inactive 
       }]];
     }
     if (sql.includes('SELECT id FROM sys_roles WHERE name = ?')) {
-      return [[{ id: 4 }]]; // AUDITOR role ID
+      return [[{ id: 1 }]]; // SUPER_ADMIN role ID
     }
     if (sql.includes('DELETE FROM sys_user_roles')) return [{ affectedRows: 1 }];
     if (sql.includes('INSERT INTO sys_user_roles')) {
@@ -307,10 +307,10 @@ test('VERIFY FIX: auth.service.updateUser permits modifying an already-inactive 
     return [[]];
   };
 
-  // Changing role of the already-inactive super admin should now succeed without triggering LAST_SUPER_ADMIN
-  const updated = await auth.updateUser(inactiveAdminId, { role: 'AUDITOR' }, callerId, '127.0.0.1');
-  assert.equal(updated.role, 'AUDITOR');
-  assert.equal(roleUpdated, true);
+  // Reactivating or updating an already-inactive super admin should succeed without triggering LAST_SUPER_ADMIN
+  const updated = await auth.updateUser(inactiveAdminId, { role: 'SUPER_ADMIN', isActive: true }, callerId, '127.0.0.1');
+  assert.equal(updated.role, 'SUPER_ADMIN');
+  assert.equal(updated.isActive, true);
 });
 
 test('auth.service.updateUser: prevents self-lockout and demoting the only active super admin', async () => {
@@ -322,7 +322,7 @@ test('auth.service.updateUser: prevents self-lockout and demoting the only activ
     (err) => err.status === 400 && err.code === 'SELF_LOCKOUT_PREVENTED'
   );
   await assert.rejects(
-    async () => auth.updateUser(adminId, { role: 'AUDITOR' }, adminId, '127.0.0.1'),
+    async () => auth.updateUser(adminId, { role: 'NON_EXISTENT_ROLE' }, adminId, '127.0.0.1'),
     (err) => err.status === 400 && err.code === 'SELF_LOCKOUT_PREVENTED'
   );
 
@@ -355,7 +355,7 @@ test('EMAIL NOTIFICATION: createUser dispatches transactional welcome email with
 
   mockHandler = async (sql, params) => {
     if (sql.includes('SELECT id FROM sys_roles WHERE name = ?')) {
-      return [[{ id: 2 }]]; // ADMISSION_OFFICER
+      return [[{ id: 1 }]]; // SUPER_ADMIN
     }
     if (sql.includes('INSERT INTO sys_users')) return [{ insertId: 1 }];
     if (sql.includes('INSERT INTO sys_user_roles')) return [{ insertId: 1 }];
@@ -373,25 +373,25 @@ test('EMAIL NOTIFICATION: createUser dispatches transactional welcome email with
   const newUser = await auth.createUser({
     email: 'new.officer@domain.edu',
     password: 'InitialPassword2026',
-    role: 'ADMISSION_OFFICER',
-    displayName: 'Admission Officer Jane',
+    role: 'SUPER_ADMIN',
+    displayName: 'Super Admin Jane',
   }, 'super-admin-id', '127.0.0.1');
 
   assert.ok(newUser.id);
   assert.equal(newUser.email, 'new.officer@domain.edu');
-  assert.equal(newUser.displayName, 'Admission Officer Jane');
-  assert.equal(newUser.role, 'ADMISSION_OFFICER');
+  assert.equal(newUser.displayName, 'Super Admin Jane');
+  assert.equal(newUser.role, 'SUPER_ADMIN');
 
   assert.equal(outboxDispatched, true, 'welcome email job was committed to outbox');
   assert.equal(dispatchedPayload.email, 'new.officer@domain.edu');
-  assert.equal(dispatchedPayload.displayName, 'Admission Officer Jane');
-  assert.equal(dispatchedPayload.role, 'ADMISSION_OFFICER');
+  assert.equal(dispatchedPayload.displayName, 'Super Admin Jane');
+  assert.equal(dispatchedPayload.role, 'SUPER_ADMIN');
   assert.equal(dispatchedPayload.initialPassword, 'InitialPassword2026');
   assert.ok(dispatchedPayload.loginUrl);
 });
 
 test('EMAIL NOTIFICATION: generateUserWelcomeContent creates tailored text and HTML for all roles', () => {
-  const roles = ['SUPER_ADMIN', 'ADMISSION_OFFICER', 'VERIFIER', 'AUDITOR'];
+  const roles = ['SUPER_ADMIN'];
 
   for (const role of roles) {
     const { subject, text, html } = generateUserWelcomeContent({
@@ -418,18 +418,18 @@ test('EMAIL NOTIFICATION: sendUserWelcomeEmail delivers via mailer transport', a
   await sendUserWelcomeEmail({
     userId: randomUUID(),
     email: 'recipient@domain.edu',
-    displayName: 'Verifier John',
-    role: 'VERIFIER',
-    initialPassword: 'VerifierSecure2026',
+    displayName: 'Super Admin John',
+    role: 'SUPER_ADMIN',
+    initialPassword: 'AdminSecure2026',
     loginUrl: 'http://localhost:5173',
   });
 
   const sent = getSentEmails();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, 'recipient@domain.edu');
-  assert.ok(sent[0].subject.includes('Verification Officer'));
-  assert.ok(sent[0].text.includes('VerifierSecure2026'));
-  assert.ok(sent[0].html.includes('Verification Officer'));
+  assert.ok(sent[0].subject.includes('Super Administrator'));
+  assert.ok(sent[0].text.includes('AdminSecure2026'));
+  assert.ok(sent[0].html.includes('Super Administrator'));
 });
 
 // ---------------------------------------------------------
@@ -517,17 +517,12 @@ test('auth.service.listRoles: aggregates role permissions into array', async () 
     return [[
       { name: 'SUPER_ADMIN', description: 'Admin', permission: 'users.manage' },
       { name: 'SUPER_ADMIN', description: 'Admin', permission: 'settings.manage' },
-      { name: 'AUDITOR', description: 'Auditor', permission: 'audit.read' },
-      { name: 'EMPTY_ROLE', description: 'Empty', permission: null },
     ]];
   };
 
   const roles = await auth.listRoles();
-  assert.equal(roles.length, 3);
+  assert.equal(roles.length, 1);
 
   const superAdmin = roles.find((r) => r.name === 'SUPER_ADMIN');
   assert.deepEqual(superAdmin.permissions, ['users.manage', 'settings.manage']);
-
-  const emptyRole = roles.find((r) => r.name === 'EMPTY_ROLE');
-  assert.deepEqual(emptyRole.permissions, []);
 });

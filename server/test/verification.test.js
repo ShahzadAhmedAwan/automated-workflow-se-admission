@@ -8,7 +8,11 @@ import { DiscrepancyParserService } from '../src/modules/verification/services/d
 import { StorageService } from '../src/modules/verification/services/storage/storage.service.js';
 import { GeminiOcrService } from '../src/modules/verification/services/ocr/gemini-ocr.service.js';
 import { BoardRegistryService } from '../src/modules/verification/services/scrapers/board-registry.service.js';
-import { VerificationDecisionService } from '../src/modules/verification/services/verification-decision.service.js';
+import {
+  VerificationDecisionService,
+  resolveBestVerifiedNames,
+  formatProperName,
+} from '../src/modules/verification/services/verification-decision.service.js';
 import { AdmissionIntakeService } from '../src/modules/verification/services/admission-intake.service.js';
 import { BoardSourceService } from '../src/modules/verification/services/board-source.service.js';
 import { IdentityMatcherService } from '../src/modules/verification/services/identity-matcher.service.js';
@@ -1541,4 +1545,180 @@ test('AdmissionIntakeService.triggerAutoSeetLookup: dispatches CANDIDATE_VERIFIE
   assert.equal(outboxJobs[0].params[1], 'CANDIDATE_VERIFIED');
   const payload = JSON.parse(outboxJobs[0].params[2]);
   assert.equal(payload.studentId, 7080);
+});
+
+test('resolveBestVerifiedNames: selects proper legal names and father names with CNIC priority and title casing', () => {
+  const verifiedDocs = [
+    {
+      doc_type: 'DOMICILE',
+      extracted_data: JSON.stringify({ candidateName: 'Usman', fatherName: 'Tariq' }),
+    },
+    {
+      doc_type: 'MATRIC_MARKSHEET',
+      extracted_data: JSON.stringify({ candidateName: 'Muhammad Usman', fatherName: 'Muhammad Tariq' }),
+    },
+    {
+      doc_type: 'CNIC_FRONT',
+      extracted_data: JSON.stringify({
+        candidateName: 'MUHAMMAD USMAN TARIQ',
+        fatherName: 'MUHAMMAD TARIQ KHAN',
+      }),
+    },
+  ];
+
+  const result = resolveBestVerifiedNames({ verifiedDocs });
+  assert.equal(result.fullName, 'Muhammad Usman Tariq', 'Must extract full legal name in proper title case');
+  assert.equal(result.fatherName, 'Muhammad Tariq Khan', 'Must extract father full legal name in proper title case');
+});
+
+test('VerificationDecisionService.syncVerifiedStudentNames: updates student and lead full_name and father_name to full legal names', async () => {
+  const executedUpdates = [];
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_student_documents')) {
+        return [[
+          {
+            doc_type: 'CNIC_FRONT',
+            extracted_data: JSON.stringify({
+              candidateName: 'HAMZA TARIQ KHAN',
+              fatherName: 'TARIQ MAHMOOD KHAN',
+            }),
+            portal_verification_data: null,
+          },
+          {
+            doc_type: 'FSC_MARKSHEET',
+            extracted_data: JSON.stringify({
+              candidateName: 'Hamza Tariq',
+              fatherName: 'Tariq Mahmood',
+            }),
+            portal_verification_data: null,
+          },
+        ]];
+      }
+      if (query.includes('UPDATE adm_students')) {
+        executedUpdates.push({ query, params });
+        return [{ affectedRows: 1 }];
+      }
+      if (query.includes('UPDATE mkt_leads')) {
+        executedUpdates.push({ query, params });
+        return [{ affectedRows: 1 }];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const result = await VerificationDecisionService.syncVerifiedStudentNames({
+    studentId: 99,
+    connection: mockDb,
+  });
+
+  assert.equal(result.fullName, 'Hamza Tariq Khan');
+  assert.equal(result.fatherName, 'Tariq Mahmood Khan');
+
+  const studentUpdate = executedUpdates.find((u) => u.query.includes('UPDATE adm_students'));
+  assert.ok(studentUpdate, 'Should execute UPDATE on adm_students');
+  assert.equal(studentUpdate.params[0], 'Hamza Tariq Khan');
+  assert.equal(studentUpdate.params[1], 'Tariq Mahmood Khan');
+  assert.equal(studentUpdate.params[2], 99);
+
+  const leadUpdate = executedUpdates.find((u) => u.query.includes('UPDATE mkt_leads'));
+  assert.ok(leadUpdate, 'Should execute UPDATE on mkt_leads');
+  assert.equal(leadUpdate.params[0], 'Hamza Tariq Khan');
+  assert.equal(leadUpdate.params[1], 'Tariq Mahmood Khan');
+  assert.equal(leadUpdate.params[2], 99);
+});
+
+test('VerificationDecisionService: evaluateDocumentVerification on verified CNIC updates student name and father name', async () => {
+  const executedUpdates = [];
+  const mockDb = {
+    async execute(query, params) {
+      if (query.includes('FROM adm_students s')) {
+        return [[{
+          id: 77,
+          cnic: '82203-0585551-5',
+          lead_cnic: '82203-0585551-5',
+          full_name: 'haseeb',
+          lead_name: 'haseeb',
+          overall_status: 'UNDER_REVIEW',
+          attempt_count: 1,
+        }]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE student_id = ? AND doc_type IN')) {
+        return [[]];
+      }
+      if (query.includes('verification_status NOT IN')) {
+        return [[]]; // All documents verified
+      }
+      if (query.includes('verification_status IN')) {
+        return [[
+          {
+            doc_type: 'CNIC_FRONT',
+            extracted_data: JSON.stringify({
+              candidateName: 'Sheikh Haseeb Ur Rehman',
+              fatherName: 'Sheikh Abdul Hafeez',
+            }),
+          },
+          { doc_type: 'FSC_MARKSHEET' },
+          { doc_type: 'MATRIC_MARKSHEET' },
+          { doc_type: 'DOMICILE' },
+        ]];
+      }
+      if (query.includes('FROM adm_student_documents WHERE id = ?')) {
+        return [[{ storage_key: 'uploads/cnic.jpg', original_filename: 'cnic.jpg', file_mime: 'image/jpeg' }]];
+      }
+      if (query.includes('UPDATE adm_students') || query.includes('UPDATE mkt_leads')) {
+        executedUpdates.push({ query, params });
+        return [{ affectedRows: 1 }];
+      }
+      return [[], undefined];
+    },
+  };
+
+  const decision = await VerificationDecisionService.evaluateDocumentVerification({
+    documentId: 101,
+    studentId: 77,
+    docType: DOCUMENT_TYPES.CNIC_FRONT,
+    extractedOcr: {
+      candidateName: 'SHEIKH HASEEB UR REHMAN',
+      fatherName: 'SHEIKH ABDUL HAFEEZ',
+      cnic: '8220305855515',
+    },
+    connection: mockDb,
+  });
+
+  assert.equal(decision.status, DOCUMENT_VERIFICATION_STATUS.MATCHED);
+  assert.equal(decision.overallStatus, STUDENT_OVERALL_STATUS.VERIFIED);
+
+  const nameSync = executedUpdates.find((u) => u.query.includes('full_name = COALESCE(?, full_name)'));
+  assert.ok(nameSync, 'Should update student full_name and father_name on verification');
+  assert.equal(nameSync.params[0], 'Sheikh Haseeb Ur Rehman', 'Updated full_name must be official full name from document');
+  assert.equal(nameSync.params[1], 'Sheikh Abdul Hafeez', 'Updated father_name must be official full name from document');
+});
+
+test('AdmissionIntakeService.syncExtractedDataToStudent: upgrades father_name to longer legal father name', async () => {
+  const executedUpdates = [];
+  const mockDb = {
+    async execute(query, params) {
+      executedUpdates.push({ query, params });
+      return [{ affectedRows: 1 }];
+    },
+  };
+
+  await AdmissionIntakeService.syncExtractedDataToStudent({
+    studentId: 55,
+    docType: DOCUMENT_TYPES.CNIC_FRONT,
+    extracted: {
+      candidateName: 'Muhammad Hamza Tariq',
+      fatherName: 'Tariq Mahmood Khan',
+      cnic: '3740512345671',
+    },
+    connection: mockDb,
+  });
+
+  const studentUpdate = executedUpdates.find((u) => u.query.includes('UPDATE adm_students'));
+  assert.ok(studentUpdate, 'Should update adm_students');
+  assert.ok(studentUpdate.query.includes('father_name = CASE'), 'Should conditionally upgrade father_name');
+  assert.equal(studentUpdate.params[4], 'Tariq Mahmood Khan');
+  assert.equal(studentUpdate.params[5], 'Tariq Mahmood Khan');
+  assert.equal(studentUpdate.params[6], 'Tariq Mahmood Khan');
 });

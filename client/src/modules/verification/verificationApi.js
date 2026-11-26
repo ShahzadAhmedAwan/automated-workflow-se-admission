@@ -116,7 +116,17 @@ export const verificationApi = {
     return res.data;
   },
 
+  async activateBoardSource(sourceId) {
+    const res = await apiRequest(`/verification/board-sources/${sourceId}/activate`, { method: 'POST' }, true);
+    return res.data;
+  },
+
   async deactivateBoardSource(sourceId) {
+    const res = await apiRequest(`/verification/board-sources/${sourceId}/deactivate`, { method: 'POST' }, true);
+    return res.data;
+  },
+
+  async deleteBoardSource(sourceId) {
     const res = await apiRequest(`/verification/board-sources/${sourceId}`, { method: 'DELETE' }, true);
     return res.data;
   },

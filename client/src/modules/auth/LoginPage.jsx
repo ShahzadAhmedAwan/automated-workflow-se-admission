@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from './AuthProvider.jsx';
 import { Button } from '../../core/ui/primitives.jsx';
 import { IconEye, IconEyeOff, IconShield } from '../../core/icons/Icons.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 
 export function LoginPage({ sessionExpired = false }) {
   const { signIn } = useAuth();
@@ -16,7 +17,7 @@ export function LoginPage({ sessionExpired = false }) {
     setError('');
     setBusy(true);
     try { await signIn(email, password); }
-    catch (cause) { setError(cause.message); }
+    catch (cause) { setError(formatUserError(cause, 'Unable to sign in. Please verify your email and password.')); }
     finally { setBusy(false); }
   }
 

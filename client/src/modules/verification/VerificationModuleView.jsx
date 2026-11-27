@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { StudentDossierView } from './StudentDossierView.jsx';
 import { Button, StatusBadge, MetricStrip, SectionTabs, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 import {
   IconDocumentCheck,
   IconSearch,
@@ -119,7 +120,7 @@ export function VerificationModuleView() {
         setNotice({
           type: 'error',
           message: 'Could not load candidate verification queue.',
-          detail: err.message,
+          detail: formatUserError(err, 'Please check your connection and reload the queue.'),
         });
       }
     } finally {
@@ -216,7 +217,7 @@ export function VerificationModuleView() {
           });
           loadQueue();
         } catch (err) {
-          setNotice({ type: 'error', message: 'Failed to update phone number.', detail: err.message });
+          setNotice({ type: 'error', message: 'Failed to update phone number.', detail: formatUserError(err, 'Please check the phone number format.') });
         }
       },
     });
@@ -242,7 +243,7 @@ export function VerificationModuleView() {
       });
       loadQueue();
     } catch (err) {
-      setNotice({ type: 'error', message: 'Failed to generate token.', detail: err.message });
+      setNotice({ type: 'error', message: 'Failed to generate token.', detail: formatUserError(err, 'Unable to generate document upload link.') });
     }
   }
 
@@ -265,7 +266,7 @@ export function VerificationModuleView() {
           });
           loadQueue();
         } catch (err) {
-          setNotice({ type: 'error', message: 'Batch request dispatch failed.', detail: err.message });
+          setNotice({ type: 'error', message: 'Batch request dispatch failed.', detail: formatUserError(err, 'Could not dispatch batch upload requests.') });
         } finally {
           setAutoDispatching(false);
         }
@@ -290,7 +291,7 @@ export function VerificationModuleView() {
       });
       loadQueue();
     } catch (err) {
-      setNotice({ type: 'error', message: 'Discrepancy import failed.', detail: err.message });
+      setNotice({ type: 'error', message: 'Discrepancy import failed.', detail: formatUserError(err, 'Could not import discrepancy CSV file. Please check file columns and format.') });
     } finally {
       setImporting(false);
     }
@@ -316,7 +317,7 @@ export function VerificationModuleView() {
       });
       loadQueue();
     } catch (err) {
-      setNotice({ type: 'error', message: 'Token reissue failed.', detail: err.message });
+      setNotice({ type: 'error', message: 'Token reissue failed.', detail: formatUserError(err, 'Could not reissue upload link for candidate.') });
     } finally {
       setReissuing(false);
     }

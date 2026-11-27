@@ -10,6 +10,7 @@ import {
   ConfirmDialog,
   ToastBanner,
 } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 import {
   IconAcademicCap,
   IconAlertTriangle,
@@ -145,7 +146,7 @@ export function MeritModuleView() {
         runDryRunCalculation();
       }
     } catch (err) {
-      setError(err.message || 'Failed to load initial merit data.');
+      setError(formatUserError(err, 'Failed to load initial merit data.'));
     } finally {
       setLoading(false);
     }
@@ -160,7 +161,7 @@ export function MeritModuleView() {
       setCurrentSnapshotId(data.snapshot.id);
       setIsLocked(data.snapshot.isLocked);
     } catch (err) {
-      setError(err.message || 'Failed to load snapshot details.');
+      setError(formatUserError(err, 'Failed to load snapshot details.'));
     } finally {
       setLoading(false);
     }
@@ -185,7 +186,7 @@ export function MeritModuleView() {
       setIsLocked(false);
       setSuccess('Calculated live preview based on verified candidates.');
     } catch (err) {
-      setError(err.message || 'Dry-run calculation failed.');
+      setError(formatUserError(err, 'Dry-run calculation failed.'));
     } finally {
       setCalculating(false);
     }
@@ -208,7 +209,7 @@ export function MeritModuleView() {
         await loadSnapshotDetails(res.id);
       }
     } catch (err) {
-      setError(err.message || 'Failed to generate official snapshot.');
+      setError(formatUserError(err, 'Failed to generate official snapshot.'));
     } finally {
       setCalculating(false);
     }
@@ -234,7 +235,7 @@ export function MeritModuleView() {
           const snaps = await meritApi.listSnapshots();
           setSnapshots(snaps || []);
         } catch (err) {
-          setError(err.message || 'Failed to lock snapshot.');
+          setError(formatUserError(err, 'Failed to lock snapshot.'));
         } finally {
           setLoading(false);
         }
@@ -264,7 +265,7 @@ export function MeritModuleView() {
       URL.revokeObjectURL(url);
       setSuccess('Merit list exported to CSV successfully.');
     } catch (err) {
-      setError(err.message || 'Failed to export CSV.');
+      setError(formatUserError(err, 'Failed to export CSV.'));
     } finally {
       setExporting(false);
     }
@@ -289,7 +290,7 @@ export function MeritModuleView() {
       setSelectedStudentForNotice(null);
       await loadSnapshotDetails(currentSnapshotId);
     } catch (err) {
-      setError(err.message || 'Failed to dispatch WhatsApp notices.');
+      setError(formatUserError(err, 'Failed to dispatch WhatsApp notices.'));
     } finally {
       setNotifying(false);
     }
@@ -324,7 +325,7 @@ export function MeritModuleView() {
         }));
       }
     } catch (err) {
-      setError(err.message || 'Error querying SEET portal. Candidate remains SEET Pending.');
+      setError(formatUserError(err, 'Error querying SEET portal. Candidate remains SEET Pending.'));
       setManualForm((prev) => ({
         ...prev,
         cnic: seetCnic.trim(),
@@ -344,7 +345,7 @@ export function MeritModuleView() {
         setSuccess(`Discovered ${data.phases.length} active exam phases from official portal: ${data.summary}`);
       }
     } catch (err) {
-      setError(err.message || 'Could not refresh phases from portal.');
+      setError(formatUserError(err, 'Could not refresh test phases from portal.'));
     } finally {
       setRefreshingPhases(false);
     }
@@ -390,7 +391,7 @@ export function MeritModuleView() {
       setSeetMode('lookup');
       await runDryRunCalculation();
     } catch (err) {
-      setError(err.message || 'Failed to save manual test result.');
+      setError(formatUserError(err, 'Failed to save manual test result.'));
     } finally {
       setSavingManual(false);
     }
@@ -406,7 +407,7 @@ export function MeritModuleView() {
       setSeetResult(null);
       setSeetCnic('');
     } catch (err) {
-      setError(err.message || 'Failed to save SEET score.');
+      setError(formatUserError(err, 'Failed to save SEET score.'));
     } finally {
       setSavingSeet(false);
     }
@@ -429,7 +430,7 @@ export function MeritModuleView() {
           setSyncSummary(res);
           setSuccess(`SEET batch sync finished: ${res.matched} matched, ${res.unmatched} unmatched.`);
         } catch (err) {
-          setError(err.message || 'Failed to batch sync SEET results.');
+          setError(formatUserError(err, 'Failed to batch sync SEET results.'));
         } finally {
           setSyncingAll(false);
         }
@@ -452,7 +453,7 @@ export function MeritModuleView() {
       setSuccess(`Parsed ${res.totalExtracted} SEET results. Successfully linked scores for ${res.matchedStudents} pending candidates (${res.remainingPending ?? 0} candidates still pending).`);
       setGazetteFile(null);
     } catch (err) {
-      setError(err.message || 'Failed to process official SEET gazette PDF.');
+      setError(formatUserError(err, 'Failed to process official SEET gazette PDF.'));
     } finally {
       setUploadingGazette(false);
     }
@@ -476,7 +477,7 @@ export function MeritModuleView() {
       }
       setEditingPolicy(false);
     } catch (err) {
-      setError(err.message || 'Failed to save admission policy.');
+      setError(formatUserError(err, 'Failed to save admission policy.'));
     } finally {
       setLoading(false);
     }

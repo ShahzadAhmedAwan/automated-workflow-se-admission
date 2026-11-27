@@ -18,6 +18,7 @@ import {
   IconDocumentCheck,
 } from '../../core/icons/Icons.jsx';
 import { MetricStrip, SectionTabs, StatusBadge, WorkspacePanel, ConfirmDialog, ToastBanner } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 
 const simulatorStatusLabels = {
   AWAITING_INTEREST: 'Waiting for reply',
@@ -161,8 +162,11 @@ export function MarketingModuleView() {
       if (data?.length && !selectedTargetCampaign) {
         setSelectedTargetCampaign(data[0].id);
       }
+      if (data?.length && !singleCampaignId) {
+        setSingleCampaignId(data[0].id);
+      }
     } catch (err) {
-      setError(err.message || 'Failed to load campaigns');
+      setError(formatUserError(err, 'Could not load marketing campaigns.'));
     } finally {
       setLoading(false);
     }
@@ -184,7 +188,7 @@ export function MarketingModuleView() {
       setLeadsTotal(data.total || 0);
       setLeadsSummary(data.summary || { total: 0, qualified: 0, pending: 0, ineligible: 0 });
     } catch (err) {
-      setError(err.message || 'Failed to load student leads');
+      setError(formatUserError(err, 'Could not load student leads.'));
     } finally {
       setLeadsLoading(false);
     }
@@ -243,7 +247,7 @@ export function MarketingModuleView() {
       await loadLeads();
       loadCampaigns();
     } catch (err) {
-      setError(err.message || 'Failed to update student profile.');
+      setError(formatUserError(err, 'Could not update student profile.'));
     } finally {
       setUpdatingLead(false);
     }
@@ -264,7 +268,7 @@ export function MarketingModuleView() {
           loadLeads();
           loadCampaigns();
         } catch (err) {
-          setError(err.message || 'Failed to remove lead.');
+          setError(formatUserError(err, 'Could not remove student lead.'));
         }
       },
     });
@@ -285,7 +289,7 @@ export function MarketingModuleView() {
           loadCampaigns();
           loadLeads();
         } catch (err) {
-          setError(err.message || 'Failed to delete campaign.');
+          setError(formatUserError(err, 'Could not delete campaign.'));
         }
       },
     });
@@ -323,7 +327,7 @@ export function MarketingModuleView() {
       setShowCreateCampaign(false);
       await loadCampaigns();
     } catch (err) {
-      setError(err.message || 'Could not create campaign.');
+      setError(formatUserError(err, 'Could not create campaign.'));
     } finally {
       setCreating(false);
     }
@@ -339,7 +343,7 @@ export function MarketingModuleView() {
       const result = await marketingApi.previewCsv(file);
       setPreview(result);
     } catch (err) {
-      setError(err.message || 'Error processing CSV file.');
+      setError(formatUserError(err, 'Could not read CSV file. Please make sure it is a valid CSV.'));
     } finally {
       setParsing(false);
     }
@@ -364,7 +368,7 @@ export function MarketingModuleView() {
           );
           setActiveTab('campaigns');
         } catch (outreachErr) {
-          setSuccess(`Imported ${importedCount} applicants, but outreach initiation reported: ${outreachErr.message}`);
+          setSuccess(`Imported ${importedCount} applicants, but outreach reported: ${formatUserError(outreachErr)}`);
         }
       } else {
         setSuccess(`Added ${importedCount} applicants to the campaign. Click 'Start Outreach' to begin messaging.`);
@@ -372,7 +376,7 @@ export function MarketingModuleView() {
 
       if (activeTab === 'leads') loadLeads();
     } catch (err) {
-      setError(err.message || 'Failed to commit leads.');
+      setError(formatUserError(err, 'Could not import student leads.'));
     } finally {
       setCommitting(false);
     }
@@ -397,7 +401,7 @@ export function MarketingModuleView() {
           loadCampaigns();
           if (activeTab === 'leads') loadLeads();
         } catch (err) {
-          setError(err.message || 'Failed to trigger outreach.');
+          setError(formatUserError(err, 'Could not start campaign outreach.'));
         }
       },
     });
@@ -406,13 +410,17 @@ export function MarketingModuleView() {
   async function handleSingleLeadSubmit(e) {
     e.preventDefault();
     if (!singleName.trim() || !singlePhone.trim()) return;
+    if (!singleCampaignId) {
+      setError('Please select a campaign for outreach. Outreach cannot be performed without a campaign.');
+      return;
+    }
     setSingleSending(true);
     setError('');
     try {
       const res = await marketingApi.sendSingleLead({
+        campaignId: Number(singleCampaignId),
         fullName: singleName.trim(),
         phone: singlePhone.trim(),
-        campaignId: singleCampaignId ? Number(singleCampaignId) : undefined,
         city: singleCity.trim() || undefined,
         priorDegree: singleDegree.trim() || undefined,
         customGreeting: singleCustomGreeting.trim() || undefined,
@@ -425,7 +433,7 @@ export function MarketingModuleView() {
       setSingleCustomGreeting('');
       await loadCampaigns();
     } catch (err) {
-      setError(err.message || 'Failed to dispatch single message.');
+      setError(formatUserError(err, 'Could not send WhatsApp message to student.'));
     } finally {
       setSingleSending(false);
     }
@@ -483,7 +491,7 @@ export function MarketingModuleView() {
       setKnowledgeMeta(res);
       setSuccess('Admissions knowledge document updated successfully. Automated bot guidelines are now synchronized.');
     } catch (err) {
-      setError(err.message || 'Failed to update knowledge base.');
+      setError(formatUserError(err, 'Could not save knowledge document.'));
     } finally {
       setSavingKnowledge(false);
     }
@@ -504,7 +512,7 @@ export function MarketingModuleView() {
           setKnowledgeMeta(res);
           setSuccess(`Document "${selectedFile.name}" loaded and deployed to live admissions bot.`);
         } catch (err) {
-          setError(err.message || 'Failed to upload document file.');
+          setError(formatUserError(err, 'Could not upload knowledge document.'));
         } finally {
           setSavingKnowledge(false);
         }
@@ -523,7 +531,7 @@ export function MarketingModuleView() {
       setSuccess(`Active department WhatsApp line updated to ${res.number || customWhatsAppInput}.`);
       setCustomWhatsAppInput('');
     } catch (err) {
-      setError(err.message || 'Failed to update WhatsApp number.');
+      setError(formatUserError(err, 'Could not update department WhatsApp phone line.'));
     } finally {
       setSavingWhatsAppNumber(false);
     }
@@ -1081,14 +1089,15 @@ export function MarketingModuleView() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  Assign to Campaign
+                  Assign to Campaign <span className="text-rose-600 font-bold">*</span>
                 </label>
                 <select
+                  required
                   value={singleCampaignId}
                   onChange={(e) => setSingleCampaignId(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-900 focus:border-blue-700 focus:outline-none bg-white"
                 >
-                  <option value="">Default (Direct Outreach)</option>
+                  <option value="" disabled>-- Select a Campaign (Required) --</option>
                   {campaigns.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

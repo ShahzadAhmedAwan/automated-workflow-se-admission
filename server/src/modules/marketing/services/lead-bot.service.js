@@ -78,7 +78,16 @@ export class LeadBotService {
     if (clean.length < 2 || clean.length > 80) return false;
     if (clean.includes('?') || clean.includes('؟')) return false;
     if (AIKnowledgeService.isQuestion(clean)) return false;
+    if (AIKnowledgeService.isCheckIn(clean)) return false;
+    if (LeadBotService.isGreeting(clean)) return false;
+    if (LeadBotService.isAffirmative(clean)) return false;
+    if (LeadBotService.isNegative(clean)) return false;
     if (/^\d+$/.test(clean)) return false;
+
+    // Reject common honorifics, pings, titles when standalone or addressing the bot
+    if (/^(sir|madam|bhai|bro|brother|sister|admin|bot|assistant|teacher|doctor|dr|mr|mrs|miss|online|offline|reply|response)$/i.test(clean)) {
+      return false;
+    }
 
     // Reject correction intent: if it's a correction request, it is NOT a name!
     if (LeadBotService.isCorrectionIntent(clean)) return false;
@@ -96,7 +105,7 @@ export class LeadBotService {
     if (fieldWordsPattern.test(clean)) return false;
 
     // Reject non-name admissions or interrogative words
-    const nonNamePattern = /\b(name|naam|full name|fee|fees|hostel|hostels|admission|admissions|apply|criteria|eligibility|eligible|test|entry|entrance|percentage|merit|campus|chehla|uajk|university|program|programs|degree|engineering|technology|pre[- ]?med|pre[- ]?eng|ics|dae|challan|scholarship|scholarships|document|documents|deadline|schedule|class|classes|syllabus|contact|helpline|coordinator|math|mathematics|maths|kya|kab|kahan|kidhar|kitna|kitni|kitne|kaise|kaisay|konsa|konsi|kon|koun|kyu|kion)\b/i;
+    const nonNamePattern = /\b(name|naam|full name|fee|fees|hostel|hostels|admission|admissions|apply|criteria|eligibility|eligible|test|entry|entrance|percentage|merit|campus|chehla|uajk|university|program|programs|degree|engineering|technology|pre[- ]?med|pre[- ]?eng|ics|dae|challan|scholarship|scholarships|document|documents|deadline|schedule|class|classes|syllabus|contact|helpline|coordinator|math|mathematics|maths|kya|kab|kahan|kidhar|kitna|kitni|kitne|kaise|kaisay|konsa|konsi|kon|koun|kyu|kion|sir|madam|bhai|bro|brother)\b/i;
     if (nonNamePattern.test(clean)) return false;
 
     // Maximum word count for a personal name: 1 to 5 words
@@ -667,8 +676,9 @@ export class LeadBotService {
    * Deterministic, graceful multi-case qualification engine
    */
   static async processIncomingMessage({ fromPhone, messageBody, rawTimestamp = new Date(), queueReply = true }, db = pool) {
-    const connection = await db.getConnection();
+    let connection = null;
     try {
+      connection = await db.getConnection();
       await connection.beginTransaction();
 
       // Find lead by normalized phone
@@ -684,6 +694,18 @@ export class LeadBotService {
         [fromPhone]
       );
 
+      if (leads.length && !leads[0].campaign_id) {
+        try {
+          const [cRows] = await connection.query(
+            `SELECT id FROM mkt_campaigns WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1`
+          );
+          if (cRows && cRows.length) {
+            await connection.execute(`UPDATE mkt_leads SET campaign_id = ? WHERE id = ?`, [cRows[0].id, leads[0].id]);
+            leads[0].campaign_id = cRows[0].id;
+          }
+        } catch {}
+      }
+
       const standardGreeting =
         "*DEPARTMENT OF SOFTWARE ENGINEERING*\n" +
         "University of Azad Jammu & Kashmir (UAJK)\n\n" +
@@ -698,12 +720,46 @@ export class LeadBotService {
 
       // If new unsolicited lead
       if (!leads.length) {
+        // Students cannot exist without a campaign; link to an active campaign
+        let activeCampaignId = null;
+        try {
+          const [campaigns] = await connection.query(
+            `SELECT id FROM mkt_campaigns WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1`
+          );
+          if (campaigns && campaigns.length) {
+            activeCampaignId = campaigns[0].id;
+          } else {
+            const [anyCampaign] = await connection.query(
+              `SELECT id FROM mkt_campaigns ORDER BY id DESC LIMIT 1`
+            );
+            if (anyCampaign && anyCampaign.length) {
+              activeCampaignId = anyCampaign[0].id;
+            } else {
+              const [newC] = await connection.execute(
+                `INSERT INTO mkt_campaigns (name, description, status)
+                 VALUES ('Inbound Inquiries', 'General inbound student inquiries via WhatsApp', 'ACTIVE')`
+              );
+              activeCampaignId = newC.insertId;
+            }
+          }
+        } catch {
+          // Non-blocking in mock environments
+        }
+
         const [insertRes] = await connection.execute(
-          `INSERT INTO mkt_leads (full_name, phone_raw, phone_normalized, conversation_state)
-           VALUES ('Prospective Applicant', ?, ?, 'AWAITING_INTEREST')`,
-          [fromPhone, fromPhone]
+          `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, conversation_state)
+           VALUES (?, 'Prospective Applicant', ?, ?, 'AWAITING_INTEREST')`,
+          [activeCampaignId, fromPhone, fromPhone]
         );
         const newLeadId = insertRes.insertId;
+        if (activeCampaignId) {
+          try {
+            await connection.execute(
+              `UPDATE mkt_campaigns SET total_leads = total_leads + 1 WHERE id = ?`,
+              [activeCampaignId]
+            );
+          } catch {}
+        }
 
         // If the very first message is expressing intent to ask a question (Requirement 6)
         if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
@@ -984,8 +1040,8 @@ export class LeadBotService {
               `Are you interested in knowing more? (Reply *Yes* to check your eligibility, or feel free to ask any other questions)`;
             nextState = CONVERSATION_STATE.AWAITING_INTEREST;
           }
-          // Student sends a greeting
-          else if (LeadBotService.isGreeting(messageBody)) {
+          // Student sends a greeting or check-in
+          else if (LeadBotService.isGreeting(messageBody) || AIKnowledgeService.isCheckIn(messageBody)) {
             replyText = standardGreeting;
             nextState = CONVERSATION_STATE.AWAITING_INTEREST;
           }
@@ -1016,6 +1072,15 @@ export class LeadBotService {
 
           if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_NAME;
+            break;
+          }
+
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you and ready to help.\n\n" +
+              `*To continue your admission registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_NAME, lead)}\n\n` +
+              "(Or feel free to ask any question about SE, SET, CET programs, fees, or eligibility!)";
             nextState = CONVERSATION_STATE.AWAITING_NAME;
             break;
           }
@@ -1132,6 +1197,15 @@ export class LeadBotService {
             break;
           }
 
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              `Assalam-o-Alaikum! I am right here with you, *${fullName || 'Candidate'}*.\n\n` +
+              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_FATHER_NAME, lead)}\n\n` +
+              "(Or feel free to ask any question!)";
+            nextState = CONVERSATION_STATE.AWAITING_FATHER_NAME;
+            break;
+          }
+
           // Check if candidate is asking to change or correct another field (e.g. name, marks)
           const correctionInFather = await LeadBotService.resolveCorrectionIntent(messageBody);
           if (correctionInFather && correctionInFather.field && correctionInFather.field !== 'FATHER_NAME') {
@@ -1236,6 +1310,15 @@ export class LeadBotService {
 
           if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+            break;
+          }
+
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you.\n\n" +
+              `*To check your program eligibility:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}\n\n` +
+              "If you have any questions about eligibility, fees, or programs, feel free to ask!";
             nextState = CONVERSATION_STATE.AWAITING_MARKS;
             break;
           }
@@ -1394,13 +1477,22 @@ export class LeadBotService {
             replyText =
               `${aiAnswer}\n\n` +
               `*To check your program eligibility:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
+            nextState = CONVERSATION_STATE.AWAITING_MARKS;
+          } else if (!parsed) {
+            const clean = messageBody.trim();
+            if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To check your program eligibility:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MARKS, lead)}`;
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            } else if (!parsed) {
+            } else {
               replyText =
                 "We couldn't quite read your marks. Please provide your obtained and total marks (for example: *890/1100* or *420/550*).\n\n" +
                 "If you have a question about eligibility or fees, feel free to ask!";
               nextState = CONVERSATION_STATE.AWAITING_MARKS;
-            } else {
+            }
+          } else {
             // Full ratio parsed (e.g. 890/1100 or a different total)
             marksObtained = parsed.obtained;
 
@@ -1501,6 +1593,15 @@ export class LeadBotService {
           // Student explicitly indicates they want to ask a question (Requirement 6)
           if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_MATHS;
+            break;
+          }
+
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you.\n\n" +
+              `*To continue:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_MATHS, lead)}\n\n` +
+              "If you have any questions, feel free to ask!";
             nextState = CONVERSATION_STATE.AWAITING_MATHS;
             break;
           }
@@ -1675,6 +1776,15 @@ export class LeadBotService {
             break;
           }
 
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you.\n\n" +
+              `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead)}\n\n` +
+              "If you have any questions (for example about Form-B or requirements), feel free to ask!";
+            nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            break;
+          }
+
           const parsedCnic = LeadBotService.parseCnic(messageBody);
 
           if (!parsedCnic) {
@@ -1743,10 +1853,20 @@ export class LeadBotService {
                 LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead);
             }
           } else {
-            replyText =
-              "Please provide a valid 13-digit Pakistani CNIC or Form-B number (for example: *12345-1234567-1*).\n\n" +
-              "If you have a question, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            const clean = messageBody.trim();
+            const words = clean.split(/\s+/).filter(Boolean);
+            if (words.length >= 2 && /[a-zA-Z]/.test(clean) && !/^\d+$/.test(clean.replace(/\D/g, ''))) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To continue your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_CNIC, lead)}`;
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            } else {
+              replyText =
+                "Please provide a valid 13-digit Pakistani CNIC or Form-B number (for example: *12345-1234567-1*).\n\n" +
+                "If you have a question, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_CNIC;
+            }
           }
           break;
         }
@@ -1768,6 +1888,15 @@ export class LeadBotService {
 
           if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            break;
+          }
+
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you.\n\n" +
+              `*To complete your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead)}\n\n` +
+              "If you have any questions, feel free to ask!";
             nextState = CONVERSATION_STATE.AWAITING_EMAIL;
             break;
           }
@@ -1839,10 +1968,20 @@ export class LeadBotService {
               isUpdated: Boolean(lead.email && lead.conversation_state === CONVERSATION_STATE.AWAITING_EMAIL && history.length > 8),
             });
           } else {
-            replyText =
-              "Please provide a valid email address (for example: *applicant@example.com*).\n\n" +
-              "If you have a question, feel free to ask!";
-            nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            const clean = messageBody.trim();
+            const words = clean.split(/\s+/).filter(Boolean);
+            if (words.length >= 2 && /[a-zA-Z]/.test(clean) && !clean.includes('@') && !clean.includes('.')) {
+              const aiAnswer = await AIKnowledgeService.answerQuestion(clean, history);
+              replyText =
+                `${aiAnswer}\n\n` +
+                `*To complete your registration:* ${LeadBotService.getPromptForState(CONVERSATION_STATE.AWAITING_EMAIL, lead)}`;
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            } else {
+              replyText =
+                "Please provide a valid email address (for example: *applicant@example.com*).\n\n" +
+                "If you have a question, feel free to ask!";
+              nextState = CONVERSATION_STATE.AWAITING_EMAIL;
+            }
           }
           break;
         }
@@ -1866,6 +2005,14 @@ export class LeadBotService {
           // Student explicitly indicates they want to ask a question (Requirement 6)
           if (AIKnowledgeService.isAskingToAskQuestion(messageBody)) {
             replyText = "Yes, please ask your question! What would you like to know?";
+            nextState = CONVERSATION_STATE.QUALIFIED;
+            break;
+          }
+
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here with you. Your admission registration is confirmed!\n\n" +
+              "If you have any questions regarding fees, hostels, or entry test, feel free to ask anytime. If you would like to correct any information, reply with *Correction*.";
             nextState = CONVERSATION_STATE.QUALIFIED;
             break;
           }
@@ -2090,10 +2237,15 @@ export class LeadBotService {
           if (AIKnowledgeService.isQuestion(messageBody)) {
             replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
           } else {
-            // Polite acknowledgment of pre-registration status
-            replyText =
-              "Your admission interest is confirmed! If you would like to correct any information, reply with *Correction* or tell us what you'd like to update.\n\n" +
-              "If you have any questions regarding fees, hostels, or entry test, feel free to ask anytime!";
+            const clean = messageBody.trim();
+            if (clean.length >= 3 && /[a-zA-Z]/.test(clean)) {
+              replyText = await AIKnowledgeService.answerQuestion(clean, history);
+            } else {
+              // Polite acknowledgment of pre-registration status
+              replyText =
+                "Your admission interest is confirmed! If you would like to correct any information, reply with *Correction* or tell us what you'd like to update.\n\n" +
+                "If you have any questions regarding fees, hostels, or entry test, feel free to ask anytime!";
+            }
           }
           break;
         }
@@ -2168,6 +2320,10 @@ export class LeadBotService {
               nextState = CONVERSATION_STATE.AWAITING_NAME;
               replyText = "Welcome back! Let's get your admission inquiry registered. What is your *Full Name*?";
             }
+          } else if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here. Feel free to ask any questions about university programs, eligibility criteria, or fees, or reply *Yes* if you'd like to explore applying!";
+            nextState = CONVERSATION_STATE.NOT_INTERESTED;
           } else if (AIKnowledgeService.isQuestion(messageBody)) {
             replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
           } else {
@@ -2177,8 +2333,9 @@ export class LeadBotService {
         }
 
         case CONVERSATION_STATE.GENERAL_INQUIRY: {
-          if (AIKnowledgeService.isQuestion(messageBody)) {
-            replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
+          if (AIKnowledgeService.isCheckIn(messageBody)) {
+            replyText =
+              "Assalam-o-Alaikum! I am right here. How can I assist you with Department of Software Engineering admissions at UAJK?";
           } else {
             replyText = await AIKnowledgeService.answerQuestion(messageBody, history);
           }
@@ -2192,6 +2349,10 @@ export class LeadBotService {
       }
 
       replyText = stripEmojis(replyText);
+      if (!replyText || !replyText.trim()) {
+        replyText =
+          "Assalam-o-Alaikum! The Department of Software Engineering at UAJK (Chehla Campus, Muzaffarabad) is here to help you. How may I assist you with your admissions inquiry today?";
+      }
 
       // Save updated state and enqueue outbound reply
       await LeadBotService.saveTurnAndQueueReply(
@@ -2237,6 +2398,7 @@ export class LeadBotService {
             fscMarks: marksObtained || 0,
             hasMaths: hasMaths !== null ? hasMaths : true,
             eligibleFor: eligibleFor || PROGRAM_ELIGIBILITY.SE_SET_CET,
+            campaignId: lead.campaign_id || null,
           },
           availableAt: new Date(Date.now() + 60 * 1000), // Delay document upload link by 1 minute so student can review and correct
           connection,
@@ -2260,10 +2422,20 @@ export class LeadBotService {
         eligibleFor,
       };
     } catch (err) {
-      await connection.rollback();
-      throw err;
+      if (connection) {
+        await connection.rollback().catch(() => {});
+      }
+      console.error('[LeadBot processIncomingMessage error]:', err.message);
+      return {
+        leadId: null,
+        reply:
+          "Assalam-o-Alaikum! Thank you for reaching out to the Department of Software Engineering at UAJK. I am right here to help you. Could you please repeat your question or let me know what program or information you are inquiring about? You can also reach our department helpline at +92-5822-960510.",
+        state: CONVERSATION_STATE.AWAITING_INTEREST,
+      };
     } finally {
-      connection.release();
+      if (connection) {
+        connection.release();
+      }
     }
   }
 

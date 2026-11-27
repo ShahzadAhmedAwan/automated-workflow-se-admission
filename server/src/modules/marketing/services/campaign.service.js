@@ -152,16 +152,29 @@ export class CampaignService {
           const isEligible = lead.fscMarks && (Number(lead.fscMarks) >= 550 || Number(lead.fscMarks) >= 50) && lead.hasMaths !== false;
           if (isEligible && lead.phoneNormalized) {
             try {
+              let linkedLeadId = null;
+              try {
+                const [leadRows] = await connection.query(
+                  `SELECT id FROM mkt_leads WHERE phone_normalized = ? AND campaign_id = ? ORDER BY id DESC LIMIT 1`,
+                  [lead.phoneNormalized, campaignId]
+                );
+                if (leadRows && leadRows.length) {
+                  linkedLeadId = leadRows[0].id;
+                }
+              } catch {}
+
               await connection.query(
                 `INSERT INTO adm_students
-                   (full_name, father_name, phone_normalized, cnic, email, city, prior_degree, eligible_for, fsc_obtained_marks, overall_status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DOCS_REQUESTED')
+                   (lead_id, full_name, father_name, phone_normalized, cnic, email, city, prior_degree, eligible_for, fsc_obtained_marks, overall_status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DOCS_REQUESTED')
                  ON DUPLICATE KEY UPDATE
+                   lead_id = COALESCE(VALUES(lead_id), lead_id),
                    full_name = VALUES(full_name),
                    father_name = COALESCE(VALUES(father_name), father_name),
                    cnic = COALESCE(VALUES(cnic), cnic),
                    fsc_obtained_marks = COALESCE(VALUES(fsc_obtained_marks), fsc_obtained_marks)`,
                 [
+                  linkedLeadId,
                   lead.fullName,
                   lead.fatherName || null,
                   lead.phoneNormalized,
@@ -892,6 +905,31 @@ export class CampaignService {
         `- Reply *Yes* to know more and check your eligibility\n` +
         `- Or feel free to ask any question you have regarding programs, eligibility, fee structure, or hostel facilities!`;
 
+      let targetCampaignId = campaignId;
+      if (!targetCampaignId) {
+        try {
+          const [cRows] = await connection.query(
+            `SELECT id FROM mkt_campaigns WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1`
+          );
+          if (cRows && cRows.length) {
+            targetCampaignId = cRows[0].id;
+          } else {
+            const [anyC] = await connection.query(`SELECT id FROM mkt_campaigns ORDER BY id DESC LIMIT 1`);
+            if (anyC && anyC.length) {
+              targetCampaignId = anyC[0].id;
+            } else {
+              const [newC] = await connection.execute(
+                `INSERT INTO mkt_campaigns (name, description, status)
+                 VALUES ('Broadcast Outreach', 'Broadcast outreach campaign', 'ACTIVE')`
+              );
+              targetCampaignId = newC.insertId;
+            }
+          }
+        } catch {
+          // Non-blocking in mock environments
+        }
+      }
+
       let currentScheduleTime = new Date(now);
       currentScheduleTime = CampaignService.adjustToDaylight(currentScheduleTime, allowedStartHour, allowedEndHour);
 
@@ -932,9 +970,17 @@ export class CampaignService {
           const [ins] = await connection.execute(
             `INSERT INTO mkt_leads (campaign_id, full_name, phone_raw, phone_normalized, city, conversation_state)
              VALUES (?, ?, ?, ?, ?, 'IDLE')`,
-            [campaignId, entry.fullName, entry.phoneRaw, entry.phoneNormalized, entry.city]
+            [targetCampaignId, entry.fullName, entry.phoneRaw, entry.phoneNormalized, entry.city]
           );
           leadId = ins.insertId;
+          if (targetCampaignId) {
+            try {
+              await connection.execute(
+                `UPDATE mkt_campaigns SET total_leads = total_leads + 1 WHERE id = ?`,
+                [targetCampaignId]
+              );
+            } catch {}
+          }
         }
 
         // Random anti-ban jitter applied between subsequent messages
@@ -1009,7 +1055,7 @@ export class CampaignService {
    */
   static async sendSingleLeadOutreach(
     {
-      campaignId = null,
+      campaignId,
       fullName,
       phone,
       city = '',
@@ -1018,6 +1064,10 @@ export class CampaignService {
     },
     db = pool
   ) {
+    if (!campaignId) {
+      throw new AppError(400, 'CAMPAIGN_REQUIRED', 'Selecting a campaign is required for student outreach.');
+    }
+
     const phoneNormalized = normalizePhoneNumber(phone);
     if (!phoneNormalized) {
       throw new AppError(400, 'INVALID_PHONE_NUMBER', 'Please provide a valid mobile or WhatsApp phone number.');
@@ -1031,21 +1081,15 @@ export class CampaignService {
         await connection.beginTransaction();
       }
 
-      let targetCampaignId = campaignId;
-      if (!targetCampaignId) {
-        const [cRows] = await connection.query(
-          `SELECT id FROM mkt_campaigns ORDER BY id DESC LIMIT 1`
-        );
-        if (cRows && cRows.length) {
-          targetCampaignId = cRows[0].id;
-        } else {
-          const [newC] = await connection.execute(
-            `INSERT INTO mkt_campaigns (name, description, status)
-             VALUES ('Direct Outreach', 'Individual student direct outreach', 'ACTIVE')`
-          );
-          targetCampaignId = newC.insertId;
-        }
+      // Verify that the selected campaign exists
+      const [cRows] = await connection.query(
+        `SELECT id, name FROM mkt_campaigns WHERE id = ? LIMIT 1`,
+        [Number(campaignId)]
+      );
+      if (!cRows || !cRows.length) {
+        throw new AppError(404, 'CAMPAIGN_NOT_FOUND', `Selected campaign with ID #${campaignId} was not found.`);
       }
+      const targetCampaignId = Number(campaignId);
 
       // Check if lead already exists
       const [existingLeads] = await connection.query(
@@ -1058,14 +1102,15 @@ export class CampaignService {
         leadId = existingLeads[0].id;
         await connection.execute(
           `UPDATE mkt_leads
-           SET full_name = ?,
+           SET campaign_id = ?,
+               full_name = ?,
                phone_raw = ?,
                city = COALESCE(NULLIF(?, ''), city),
                prior_degree = COALESCE(NULLIF(?, ''), prior_degree),
                conversation_state = 'GREETING_SENT',
                last_interaction_at = CURRENT_TIMESTAMP(3)
            WHERE id = ?`,
-          [fullName, phone, city, priorDegree, leadId]
+          [targetCampaignId, fullName, phone, city, priorDegree, leadId]
         );
       } else {
         const [insertResult] = await connection.execute(

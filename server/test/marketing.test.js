@@ -32,6 +32,7 @@ const { CampaignService } = await import('../src/modules/marketing/services/camp
 const { CampaignController } = await import('../src/modules/marketing/controllers/campaign.controller.js');
 const { LeadBotService } = await import('../src/modules/marketing/services/lead-bot.service.js');
 const { AIKnowledgeService } = await import('../src/modules/marketing/services/ai-knowledge.service.js');
+const { singleLeadOutreachSchema } = await import('../src/modules/marketing/marketing.schemas.js');
 const {
   CONVERSATION_STATE,
   ELIGIBILITY_STATUS,
@@ -1003,8 +1004,8 @@ test('CampaignService.sendSingleLeadOutreach: normalizes phone, queues immediate
 
   const mockDbConnection = {
     async query(sql) {
-      if (sql.includes('SELECT id FROM mkt_campaigns')) {
-        return [[{ id: 42 }]];
+      if (sql.includes('SELECT id, name FROM mkt_campaigns') || sql.includes('SELECT id FROM mkt_campaigns')) {
+        return [[{ id: 42, name: 'Direct Outreach' }]];
       }
       if (sql.includes('SELECT id, conversation_state FROM mkt_leads')) {
         return [[]]; // New lead
@@ -1041,18 +1042,82 @@ test('CampaignService.sendSingleLeadOutreach: normalizes phone, queues immediate
   };
 
   const result = await CampaignService.sendSingleLeadOutreach({
+    campaignId: 42,
     fullName: 'Test Applicant',
     phone: '03001234567',
     city: 'Muzaffarabad',
   }, mockDb);
 
   assert.equal(result.leadId, 101);
+  assert.equal(result.campaignId, 42);
   assert.equal(result.phoneNormalized, '923001234567');
   assert.equal(result.status, 'GREETING_QUEUED');
   assert.equal(dispatchedJobs.length, 1);
   assert.equal(dispatchedJobs[0].payload.recipientPhone, '923001234567');
   assert.ok(dispatchedJobs[0].payload.messageText.includes('Test Applicant'));
   assert.equal(leadUpdated, true);
+});
+
+test('singleLeadOutreachSchema enforces mandatory campaignId', () => {
+  const invalid = singleLeadOutreachSchema.safeParse({
+    fullName: 'Test Applicant',
+    phone: '03001234567',
+  });
+  assert.equal(invalid.success, false);
+  assert.ok(invalid.error.issues.some((i) => i.path.includes('campaignId')));
+
+  const valid = singleLeadOutreachSchema.safeParse({
+    campaignId: 10,
+    fullName: 'Test Applicant',
+    phone: '03001234567',
+  });
+  assert.equal(valid.success, true);
+  assert.equal(valid.data.campaignId, 10);
+});
+
+test('CampaignService.sendSingleLeadOutreach rejects outreach without campaignId or non-existent campaign', async () => {
+  const mockDb = {
+    async getConnection() {
+      return {
+        async query(sql) {
+          if (sql.includes('SELECT id, name FROM mkt_campaigns WHERE id = ?')) {
+            return [[]]; // Campaign not found
+          }
+          return [[]];
+        },
+        async beginTransaction() {},
+        async rollback() {},
+        release() {},
+      };
+    },
+  };
+
+  // Missing campaignId throws 400 CAMPAIGN_REQUIRED
+  await assert.rejects(
+    () => CampaignService.sendSingleLeadOutreach({
+      fullName: 'Test Applicant',
+      phone: '03001234567',
+    }, mockDb),
+    (err) => {
+      assert.equal(err.status, 400);
+      assert.equal(err.code, 'CAMPAIGN_REQUIRED');
+      return true;
+    }
+  );
+
+  // Non-existent campaignId throws 404 CAMPAIGN_NOT_FOUND
+  await assert.rejects(
+    () => CampaignService.sendSingleLeadOutreach({
+      campaignId: 99999,
+      fullName: 'Test Applicant',
+      phone: '03001234567',
+    }, mockDb),
+    (err) => {
+      assert.equal(err.status, 404);
+      assert.equal(err.code, 'CAMPAIGN_NOT_FOUND');
+      return true;
+    }
+  );
 });
 
 test('LeadBotService: Post-Confirmation Mistake Correction Flow ("I did a mistake" / "ghalti ho gaii")', async () => {
@@ -1971,4 +2036,183 @@ test('LeadBotService: Robust Father Name Correction & Typo Tolerance (fther / ch
   assert.equal(mockLead.full_name, 'Shahzad');
   assert.equal(mockLead.father_name, 'Muhammad Aslam');
   assert.equal(studentRecord.father_name, 'Muhammad Aslam');
+});
+
+test('LeadBotService & AIKnowledgeService: Check-in handling and conversational grace across all states', async () => {
+  const currentLead = {
+    id: 991,
+    campaign_id: 1,
+    full_name: 'Usman Tariq',
+    father_name: 'Tariq Mehmood',
+    phone_normalized: '923005551122',
+    cnic: '82203-1234567-1',
+    email: null,
+    city: 'Muzaffarabad',
+    prior_degree: 'ICS',
+    fsc_marks: 850,
+    has_maths: 1,
+    eligible_for: PROGRAM_ELIGIBILITY.SE_SET_CET,
+    eligibility_status: ELIGIBILITY_STATUS.ELIGIBLE,
+    conversation_state: CONVERSATION_STATE.AWAITING_EMAIL,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query() {
+      return [[{ ...currentLead }]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) currentLead.conversation_state = params[0];
+      return [{ affectedRows: 1, insertId: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Turn 1: Student sends check-in "are you there?" while in AWAITING_EMAIL
+  const turn1 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005551122',
+    messageBody: 'are you there?',
+  }, mockDb);
+
+  assert.equal(turn1.state, CONVERSATION_STATE.AWAITING_EMAIL);
+  assert.ok(turn1.reply.includes('right here with you'));
+  assert.ok(turn1.reply.includes('Email Address'));
+
+  // Turn 2: Student sends "??"
+  const turn2 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005551122',
+    messageBody: '??',
+  }, mockDb);
+
+  assert.equal(turn2.state, CONVERSATION_STATE.AWAITING_EMAIL);
+  assert.ok(turn2.reply.includes('right here with you'));
+
+  // Turn 3: Student asks about transport facility without question mark
+  const turn3 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005551122',
+    messageBody: 'bus service hai university ki',
+  }, mockDb);
+
+  assert.equal(turn3.state, CONVERSATION_STATE.AWAITING_EMAIL);
+  assert.ok(turn3.reply.includes('Transport Facilities') || turn3.reply.includes('bus'));
+  assert.ok(turn3.reply.includes('Email Address'));
+
+  // Turn 4: Check-in in AWAITING_MARKS
+  currentLead.conversation_state = CONVERSATION_STATE.AWAITING_MARKS;
+  currentLead.fsc_marks = null;
+  const turn4 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005551122',
+    messageBody: 'batao na',
+  }, mockDb);
+
+  assert.equal(turn4.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn4.reply.includes('right here with you'));
+  assert.ok(turn4.reply.includes('score in FSc') || turn4.reply.includes('program eligibility'));
+
+  // Turn 5: Student asks about gap year during AWAITING_MARKS
+  const turn5 = await LeadBotService.processIncomingMessage({
+    fromPhone: '923005551122',
+    messageBody: 'mera gap year hai koi issue to nahi',
+  }, mockDb);
+
+  assert.equal(turn5.state, CONVERSATION_STATE.AWAITING_MARKS);
+  assert.ok(turn5.reply.includes('Gap Year Policy') || turn5.reply.includes('gap'));
+  assert.ok(turn5.reply.includes('score in FSc') || turn5.reply.includes('program eligibility'));
+});
+
+test('LeadBotService & AIKnowledgeService: Honorifics and titles (sir, bhai, hello) are never mistaken for student or father names', async () => {
+  assert.equal(LeadBotService.isValidName('sir'), false);
+  assert.equal(LeadBotService.isValidName('Sir'), false);
+  assert.equal(LeadBotService.isValidName('bhai'), false);
+  assert.equal(LeadBotService.isValidName('brother'), false);
+  assert.equal(LeadBotService.isValidName('hello'), false);
+  assert.equal(LeadBotService.isValidName('admin'), false);
+  assert.equal(LeadBotService.isValidName('bot'), false);
+  assert.equal(LeadBotService.isValidName('batao'), false);
+  assert.equal(LeadBotService.isValidName('online'), false);
+  assert.equal(LeadBotService.isValidName('??'), false);
+
+  // But legitimate Pakistani names MUST be valid
+  assert.equal(LeadBotService.isValidName('Muhammad Ali'), true);
+  assert.equal(LeadBotService.isValidName('Tariq Mehmood'), true);
+  assert.equal(LeadBotService.isValidName('Syed Hamza Shah'), true);
+});
+
+test('LeadBotService: Graceful handling of unlisted/missing information without going offline', async () => {
+  const currentLead = {
+    id: 992,
+    campaign_id: 1,
+    full_name: 'Ahmed Raza',
+    father_name: 'Muhammad Raza',
+    phone_normalized: '923001112233',
+    cnic: null,
+    email: null,
+    city: 'Muzaffarabad',
+    prior_degree: 'FSc Pre-Engineering',
+    fsc_marks: 800,
+    has_maths: 1,
+    eligible_for: PROGRAM_ELIGIBILITY.SE_SET_CET,
+    eligibility_status: ELIGIBILITY_STATUS.ELIGIBLE,
+    conversation_state: CONVERSATION_STATE.AWAITING_CNIC,
+    chat_history: JSON.stringify([]),
+  };
+
+  const mockDbConnection = {
+    async query() {
+      return [[{ ...currentLead }]];
+    },
+    async execute(sql, params) {
+      if (sql.includes('UPDATE mkt_leads')) currentLead.conversation_state = params[0];
+      return [{ affectedRows: 1, insertId: 1 }];
+    },
+    async beginTransaction() {},
+    async commit() {},
+    async rollback() {},
+    release() {},
+  };
+
+  const mockDb = {
+    async getConnection() {
+      return mockDbConnection;
+    },
+  };
+
+  // Student asks about an obscure query or missing item
+  const turn = await LeadBotService.processIncomingMessage({
+    fromPhone: '923001112233',
+    messageBody: 'is there a swimming pool and squash court at university campus?',
+  }, mockDb);
+
+  assert.equal(turn.state, CONVERSATION_STATE.AWAITING_CNIC);
+  assert.ok(turn.reply.length > 20);
+  assert.ok(turn.reply.includes('+92-5822-960510') || turn.reply.includes('se@uajk.edu.pk') || turn.reply.includes('Software Engineering'));
+  assert.ok(turn.reply.includes('CNIC') || turn.reply.includes('registration'));
+});
+
+test('LeadBotService: Recovers gracefully with polite fallback on unexpected database/runtime errors', async () => {
+  // DB that throws an unexpected connection failure
+  const failingDb = {
+    async getConnection() {
+      throw new Error('Simulated transient DB deadlock or network drop');
+    },
+  };
+
+  const turn = await LeadBotService.processIncomingMessage({
+    fromPhone: '923009990011',
+    messageBody: 'what is the fee structure?',
+  }, failingDb);
+
+  // Must not throw uncaught error; must return polite fallback response
+  assert.ok(turn);
+  assert.ok(turn.reply.includes('Assalam-o-Alaikum'));
+  assert.ok(turn.reply.includes('+92-5822-960510') || turn.reply.includes('helpline'));
 });

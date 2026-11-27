@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 import {
   IconDocumentCheck,
   IconShield,
@@ -63,7 +64,7 @@ export function PublicUploadPortal({ token }) {
         const data = await verificationApi.validateToken(token);
         setTokenData(data);
       } catch (err) {
-        setError(err.message || 'Invalid or expired upload link.');
+        setError(formatUserError(err, 'This document upload link is invalid or has expired.'));
       } finally {
         setLoading(false);
       }
@@ -161,7 +162,7 @@ export function PublicUploadPortal({ token }) {
       } catch (_) {}
       setSuccess(true);
     } catch (err) {
-      setFormError(err.message || 'Upload failed. Please try again.');
+      setFormError(formatUserError(err, 'Failed to upload documents. Please check file sizes and try again.'));
     } finally {
       setSubmitting(false);
     }

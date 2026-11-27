@@ -211,7 +211,9 @@ export function ToastBanner({ notice, onDismiss }) {
         )}
         <div className="space-y-0.5">
           <div className="font-semibold">{notice.message}</div>
-          {notice.detail && <div className="text-[11px] opacity-90">{notice.detail}</div>}
+          {notice.detail && notice.detail !== notice.message && (
+            <div className="text-[11px] opacity-90 leading-relaxed">{notice.detail}</div>
+          )}
         </div>
       </div>
       {onDismiss && (

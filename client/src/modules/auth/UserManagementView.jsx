@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { userManagementApi } from './userManagementApi.js';
 import { IconPlus, IconRefresh, IconCheck } from '../../core/icons/Icons.jsx';
 import { Button } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 
 // Super Admin role configuration
 const SYSTEM_ROLES = [
@@ -48,7 +49,7 @@ export function UserManagementView() {
         setRoles(merged);
       }
     } catch (err) {
-      setError(err.message || 'Could not load staff users.');
+      setError(formatUserError(err, 'Could not load staff users.'));
     } finally {
       setLoading(false);
     }
@@ -74,7 +75,7 @@ export function UserManagementView() {
       setPassword('');
       await loadData();
     } catch (err) {
-      setError(err.message || 'Could not create staff account.');
+      setError(formatUserError(err, 'Could not create staff account. Please verify input fields.'));
     } finally {
       setSubmitting(false);
     }
@@ -87,7 +88,7 @@ export function UserManagementView() {
       });
       loadData();
     } catch (err) {
-      setError(err.message || 'Could not update user status.');
+      setError(formatUserError(err, 'Could not update user status.'));
     }
   }
 

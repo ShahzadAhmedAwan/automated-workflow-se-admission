@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { verificationApi } from './verificationApi.js';
 import { Button, ToastBanner, ConfirmDialog, PromptDialog } from '../../core/ui/primitives.jsx';
+import { formatUserError } from '../../core/utils/friendlyErrors.js';
 import {
   IconDocumentCheck,
   IconShield,
@@ -85,7 +86,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
       }
     } catch (err) {
       if (!silent) {
-        setNotice({ type: 'error', message: 'Could not load student verification dossier.', detail: err.message });
+        setNotice({ type: 'error', message: 'Could not load student verification dossier.', detail: formatUserError(err, 'Unable to load candidate dossier.') });
       }
     } finally {
       if (!silent) setLoading(false);
@@ -119,7 +120,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
       }
       await loadDossier(true);
     } catch (err) {
-      setNotice({ type: 'error', message: 'Gazette search failed.', detail: err.message });
+      setNotice({ type: 'error', message: 'Gazette search failed.', detail: formatUserError(err, 'Could not complete gazette lookup.') });
     } finally {
       setSearchingGazetteDocId(null);
     }
@@ -211,7 +212,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
           onActionComplete?.(result);
           handleBack(isVerified ? 'VERIFIED' : undefined);
         } catch (err) {
-          setNotice({ type: 'error', message: 'Failed to approve candidate.', detail: err.message });
+          setNotice({ type: 'error', message: 'Failed to approve candidate.', detail: formatUserError(err, 'Could not approve candidate.') });
         } finally {
           setActionLoading(false);
         }
@@ -242,7 +243,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
       onActionComplete?.(result);
       handleBack(isVerified ? 'VERIFIED' : undefined);
     } catch (err) {
-      setNotice({ type: 'error', message: 'Failed to override marks.', detail: err.message });
+      setNotice({ type: 'error', message: 'Failed to override marks.', detail: formatUserError(err, 'Could not override candidate marks.') });
     } finally {
       setActionLoading(false);
     }
@@ -328,7 +329,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
           onActionComplete?.();
           onBack?.();
         } catch (err) {
-          setNotice({ type: 'error', message: 'Failed to reissue token.', detail: err.message });
+          setNotice({ type: 'error', message: 'Failed to reissue token.', detail: formatUserError(err, 'Could not reissue upload link.') });
         } finally {
           setActionLoading(false);
         }
@@ -368,7 +369,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
           onActionComplete?.();
           onBack?.();
         } catch (err) {
-          setNotice({ type: 'error', message: 'Failed to record discrepancy.', detail: err.message });
+          setNotice({ type: 'error', message: 'Failed to record discrepancy.', detail: formatUserError(err, 'Could not record discrepancy.') });
         } finally {
           setActionLoading(false);
         }
@@ -392,7 +393,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       tab?.close();
-      setNotice({ type: 'error', message: 'Could not open board gazette.', detail: error.message });
+      setNotice({ type: 'error', message: 'Could not open board gazette.', detail: formatUserError(error, 'Could not retrieve gazette document.') });
     }
   }
 
@@ -407,7 +408,7 @@ export function StudentDossierView({ studentId, onBack, onActionComplete }) {
       window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
     } catch (error) {
       tab?.close();
-      setNotice({ type: 'error', message: 'Could not open candidate document.', detail: error.message });
+      setNotice({ type: 'error', message: 'Could not open candidate document.', detail: formatUserError(error, 'Could not retrieve candidate document.') });
     }
   }
 

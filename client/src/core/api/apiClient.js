@@ -26,11 +26,11 @@ async function decodeResponse(response) {
   if (response.status === 204) return null;
   const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
   if (!contentType.includes('application/json')) {
-    const message = import.meta.env.DEV
-      ? `The API returned an unexpected response (HTTP ${response.status}). Make sure npm run dev:server is running.`
-      : 'The sign-in service returned an invalid response. Try again later.';
     return {
-      error: { code: 'INVALID_API_RESPONSE', message },
+      error: {
+        code: 'INVALID_API_RESPONSE',
+        message: `The server responded unexpectedly (HTTP ${response.status}). Please try again in a moment.`,
+      },
       requestId: response.headers.get('x-request-id'),
     };
   }
@@ -38,15 +38,19 @@ async function decodeResponse(response) {
     return await response.json();
   } catch {
     return {
-      error: { code: 'INVALID_API_RESPONSE', message: 'The API returned invalid JSON. Check the server terminal.' },
+      error: {
+        code: 'INVALID_API_RESPONSE',
+        message: 'The server response could not be read. Please try again in a moment.',
+      },
       requestId: response.headers.get('x-request-id'),
     };
   }
 }
 
 function apiUnavailableError() {
-  const hint = import.meta.env.DEV ? ' Start the API with npm run dev:server, then try again.' : ' Try again later.';
-  return new ApiError(`The sign-in service cannot be reached.${hint}`, { code: 'API_UNAVAILABLE' });
+  return new ApiError('Unable to connect to the admissions server. Please check your internet connection or try again in a few moments.', {
+    code: 'API_UNAVAILABLE',
+  });
 }
 
 export async function refreshSession() {
@@ -70,7 +74,7 @@ export async function refreshSession() {
         accessToken = null;
         return null;
       }
-      throw new ApiError(body?.error?.message ?? 'The sign-in service is temporarily unavailable.', {
+      throw new ApiError(body?.error?.message ?? 'Your session could not be refreshed. Please sign in again.', {
         code: body?.error?.code ?? 'AUTH_REFRESH_FAILED',
         status: response.status,
         requestId: body?.requestId ?? response.headers.get('x-request-id'),
@@ -122,7 +126,7 @@ export async function apiRequest(path, options = {}, authenticated = false) {
   }
   const body = await decodeResponse(response);
   if (!response.ok) {
-    throw new ApiError(body?.error?.message ?? `The request failed (HTTP ${response.status}).`, {
+    throw new ApiError(body?.error?.message ?? `The request could not be completed (status ${response.status}). Please try again.`, {
       code: body?.error?.code ?? 'REQUEST_FAILED',
       status: response.status,
       requestId: body?.requestId ?? response.headers.get('x-request-id'),
@@ -153,7 +157,7 @@ export async function apiRequestFile(path) {
   }
   if (!response.ok) {
     const body = await decodeResponse(response);
-    throw new ApiError(body?.error?.message ?? `The request failed (HTTP ${response.status}).`, {
+    throw new ApiError(body?.error?.message ?? `The requested file could not be downloaded (status ${response.status}). Please try again.`, {
       code: body?.error?.code ?? 'REQUEST_FAILED', status: response.status,
       requestId: body?.requestId ?? response.headers.get('x-request-id'),
     });

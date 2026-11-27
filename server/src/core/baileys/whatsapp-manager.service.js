@@ -227,17 +227,55 @@ class WhatsAppManagerService {
             // Enqueue sequentially for this specific student, but concurrently across other students
             return this.enqueueForStudent(senderPhone, async () => {
               try {
-                await this.sock.sendPresenceUpdate('composing', jid);
+                await this.sock.sendPresenceUpdate('composing', jid).catch(() => {});
                 const turnResult = await LeadBotService.processIncomingMessage({
                   fromPhone: senderPhone,
                   messageBody: rawText,
                   queueReply: false,
                 }, db);
 
-                await this.sock.sendMessage(jid, { text: turnResult.reply });
-                await this.sock.sendPresenceUpdate('paused', jid);
+                const replyText =
+                  turnResult?.reply?.trim() ||
+                  "Assalam-o-Alaikum! Thank you for reaching out to the Department of Software Engineering at UAJK. How may I assist you with your admissions inquiry today?";
+
+                // Attempt primary delivery
+                try {
+                  await this.sock.sendMessage(jid, { text: replyText });
+                } catch (sendErr) {
+                  // Fallback delivery if JID format was @lid or differed from canonical phone
+                  let fallbackSent = false;
+                  if (jid.endsWith('@lid') && senderPhone) {
+                    try {
+                      await this.sock.sendMessage(`${senderPhone}@s.whatsapp.net`, { text: replyText });
+                      fallbackSent = true;
+                    } catch {}
+                  } else if (!jid.endsWith('@lid') && senderPhone && senderPhone.length >= 14) {
+                    try {
+                      await this.sock.sendMessage(`${senderPhone}@lid`, { text: replyText });
+                      fallbackSent = true;
+                    } catch {}
+                  }
+                  if (!fallbackSent) {
+                    throw sendErr;
+                  }
+                }
               } catch (err) {
                 console.error(`[LeadBot Error for ${senderPhone}]:`, err.message);
+                // Graceful fallback response: ensure student is never left in the dark or feeling ignored
+                try {
+                  const fallbackNotice =
+                    "Assalam-o-Alaikum! Thank you for your message. I am right here with you. Feel free to ask any question regarding our programs (SE, SET, CET), eligibility criteria, fee structure, or hostel facilities. You can also reach our department helpline at +92-5822-960510.";
+                  await this.sock.sendMessage(jid, { text: fallbackNotice }).catch(async () => {
+                    if (senderPhone) {
+                      await this.sock.sendMessage(`${senderPhone}@s.whatsapp.net`, { text: fallbackNotice }).catch(() => {});
+                    }
+                  });
+                } catch {}
+              } finally {
+                // Guaranteed presence cleanup: clear typing indicator under all circumstances
+                try {
+                  await this.sock.sendPresenceUpdate('paused', jid).catch(() => {});
+                } catch {}
               }
             });
           })

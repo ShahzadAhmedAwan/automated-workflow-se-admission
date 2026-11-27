@@ -124,6 +124,41 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
   }
 
   /**
+   * Helper to detect student check-in, presence ping, or follow-up messages
+   * (e.g. "hello?", "are you there?", "batao", "koi hai?", "sun rahe ho?", "??", "offline?", "sir?")
+   */
+  static isCheckIn(text) {
+    if (!text || typeof text !== 'string') return false;
+    const clean = text.trim().toLowerCase();
+
+    // Symbols / punctuation only like "?", "??", "???", "..."
+    if (/^[?؟.\s!]+$/.test(clean)) return true;
+
+    // Single words commonly sent as check-ins or pings
+    const singleWords = [
+      'hello', 'hi', 'hey', 'salam', 'aoa', 'assalam', 'sir', 'bhai', 'bro',
+      'brother', 'batao', 'batayein', 'bta', 'btao', 'online', 'offline',
+      'reply', 'respond', 'listening', 'sunen', 'suno'
+    ];
+    if (singleWords.includes(clean.replace(/[?؟!. ]/g, ''))) return true;
+
+    // Direct check-in phrases
+    const patterns = [
+      /\b(are you (there|here|online)|you there|r u there|u there)\b/i,
+      /\b(koi hai|koi hy|sun rahe ho|sun rahay ho|sun rhy ho|sun rhe ho)\b/i,
+      /\b(batao na|bta na|bta do|bata do|bta dein|bata dein|btaen|batayein)\b/i,
+      /\b(kya hua|kia hua|kya hogya|kia hogya)\b/i,
+      /\b(reply (do|karo|karein|please|plz)|jawab do|jawab dein|respond please)\b/i,
+      /\b(offline (ho|chale|gaye|gye|chaly)|online (ho|hai|hein))\b/i,
+      /\b(still waiting|waiting for (reply|response)|answer me|kuch bolo)\b/i,
+      /^(hello\s+(sir|bhai|brother|admin|bot)|aoa\s+(sir|bhai)|salam\s+(sir|bhai))\b/i,
+      /\b(why did you stop|why stopped|stop ho gye|stop kion)\b/i,
+    ];
+
+    return patterns.some((p) => p.test(clean));
+  }
+
+  /**
    * Helper to detect if a message is an inquiry/question rather than a direct answer
    * Intelligently detects questions even when punctuation/question marks are omitted
    */
@@ -210,6 +245,16 @@ CONTACT: Helpline: +92-5822-960510 | se@uajk.edu.pk | Coordinator: Engr. Dr. Muh
       /\b(helpline|contact number|coordinator|phone number|official email|campus address|campus location)\b/i,
       /\b(programs offered|courses offered|degree programs|degrees offered|disciplines)\b/i,
       /\b(scholarship|scholarships|financial aid|need based|ehsaas)\b/i,
+      /\b(transport|bus|buses|point|van|pick and drop|pick & drop)\b/i,
+      /\b(class timing|timing|timings|shift|shifts|morning|evening|weekend|classes kab)\b/i,
+      /\b(result awaiting|awaiting result|hope certificate|part[- ]?1|part[- ]?2 result|appearing)\b/i,
+      /\b(gap year|gap years|saal zaya|old student|previous year)\b/i,
+      /\b(form[- ]?b|b[- ]?form|bay form|cnic nahi|without cnic)\b/i,
+      /\b(email nahi|without email|email zaroori|email lazmi)\b/i,
+      /\b(seats|seat matrix|district quota|ajk quota)\b/i,
+      /\b(pec|ntc|hec|accreditation|accredited|recognized|approval)\b/i,
+      /\b(migration|transfer|credit transfer)\b/i,
+      /\b(improve|improvement|marks improve|repeat)\b/i,
       /\b(who (are you|is this|are u|r u)|who speaks|aap kon|kon ho|koun ho)\b/i,
       /\b(why (are you|did you) (texting|messaging|calling|msg)|why msg me|kion msg|kion message|get my number|got my number)\b/i,
       /\b(what is this|what's this|whats this|ye kya hai|yeh kya hai|what is it about)\b/i,
@@ -318,7 +363,12 @@ ${knowledge}
             signal: controller.signal,
           });
 
-          if (!res.ok) continue;
+          if (!res.ok) {
+            if (res.status === 400 || res.status === 401 || res.status === 403) {
+              break;
+            }
+            continue;
+          }
 
           const data = await res.json();
           const text =
@@ -382,7 +432,12 @@ Respond ONLY with valid JSON:
             body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
             signal: controller.signal,
           });
-          if (!res.ok) continue;
+          if (!res.ok) {
+            if (res.status === 400 || res.status === 401 || res.status === 403) {
+              break;
+            }
+            continue;
+          }
           const data = await res.json();
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
           if (text) {
@@ -409,6 +464,13 @@ Respond ONLY with valid JSON:
    */
   static matchLocalKnowledge(query, _knowledge = '') {
     const q = (query || '').toLowerCase();
+
+    // 000. Inquiries about presence, check-in, or "are you there / offline / sun rahe ho / batao"
+    if (AIKnowledgeService.isCheckIn(q)) {
+      return (
+        "Assalam-o-Alaikum! Yes, I am right here with you and glad to help! Please feel free to ask any question regarding our programs (SE, SET, CET), eligibility criteria, fee structure, hostel facilities, or admissions process."
+      );
+    }
 
     // 00a. Inquiries about making corrections / editing details
     if (
@@ -645,9 +707,7 @@ Respond ONLY with valid JSON:
       q.includes('courses') ||
       q.includes('degree') ||
       q.includes('fields') ||
-      q.includes('se') ||
-      q.includes('set') ||
-      q.includes('cet')
+      /\b(se|set|cet)\b/i.test(q)
     ) {
       return (
         "*Programs Offered (Department of Software Engineering, UAJK):*\n" +
@@ -709,10 +769,117 @@ Respond ONLY with valid JSON:
       );
     }
 
-    // Default general response
+    // 11. Transport / Bus / Point facilities
+    if (
+      q.includes('transport') ||
+      q.includes('bus') ||
+      q.includes('point') ||
+      q.includes('van') ||
+      q.includes('pick and drop')
+    ) {
+      return (
+        "*Transport Facilities (UAJK Chehla Campus):*\n" +
+        "- The University provides student bus / point transportation routes covering key areas in Muzaffarabad city and adjoining localities to Chehla Campus.\n" +
+        "- Subsidized semester transport passes are issued by the university transport office upon enrollment."
+      );
+    }
+
+    // 12. Class timings & shifts
+    if (
+      q.includes('timing') ||
+      q.includes('timings') ||
+      q.includes('shift') ||
+      q.includes('morning') ||
+      q.includes('evening') ||
+      q.includes('weekend')
+    ) {
+      return (
+        "*Class Timings & Shift Information:*\n" +
+        "- All undergraduate programs (B.Sc. SE, SET, and CET) are conducted during regular morning hours (typically starting from 8:30 AM onwards).\n" +
+        "- The programs are full-time regular weekday degree programs."
+      );
+    }
+
+    // 13. Result awaiting & Hope Certificate policy
+    if (
+      q.includes('awaiting') ||
+      q.includes('hope certificate') ||
+      q.includes('result ka intezar') ||
+      q.includes('part-ii result') ||
+      q.includes('appearing')
+    ) {
+      return (
+        "*Result Awaiting & Hope Certificate Policy:*\n" +
+        "- Candidates awaiting their F.Sc. Part-II results are eligible to apply on the basis of their Part-I marks and a Hope Certificate issued by their college.\n" +
+        "- You can take the University Entrance Test and be considered for provisional admission processing."
+      );
+    }
+
+    // 14. Gap year policy
+    if (
+      q.includes('gap year') ||
+      q.includes('gap') ||
+      q.includes('saal zaya') ||
+      q.includes('previous year')
+    ) {
+      return (
+        "*Gap Year Policy at UAJK:*\n" +
+        "- Candidates with a gap year after F.Sc. are fully eligible to apply.\n" +
+        "- There is no penalty or mark deduction for gap years, provided you meet the minimum eligibility marks (60% for SE, 50% for SET/CET)."
+      );
+    }
+
+    // 15. Form-B vs CNIC policy
+    if (
+      q.includes('form-b') ||
+      q.includes('b-form') ||
+      q.includes('bay form') ||
+      q.includes('form b') ||
+      q.includes('cnic nahi') ||
+      q.includes('without cnic')
+    ) {
+      return (
+        "*CNIC / Form-B Guidance:*\n" +
+        "- If you have not yet received your CNIC from NADRA, your 13-digit Form-B (B-Form) number is fully valid for application registration and the Entry Test.\n" +
+        "- Please bring your original Form-B or CNIC on test day for physical identity verification."
+      );
+    }
+
+    // 16. Email requirement guidance
+    if (
+      q.includes('email nahi') ||
+      q.includes('email zaruri') ||
+      q.includes('without email') ||
+      q.includes('email kion')
+    ) {
+      return (
+        "*Email Requirement Guidance:*\n" +
+        "- An active email address is needed to deliver your candidate admission notices, document links, and portal access credentials.\n" +
+        "- If you don't have a personal email account, you can provide an active email belonging to your parent, guardian, or sibling."
+      );
+    }
+
+    // 17. Accreditation & Recognition (PEC / NTC / HEC)
+    if (
+      q.includes('pec') ||
+      q.includes('ntc') ||
+      q.includes('accreditation') ||
+      q.includes('accredited') ||
+      q.includes('recognition')
+    ) {
+      return (
+        "*Accreditation & Recognition:*\n" +
+        "- *B.Sc. Software Engineering (SE):* Accredited by the Pakistan Engineering Council (PEC).\n" +
+        "- *B.Sc. SET & CET:* Accredited by the National Technology Council (NTC).\n" +
+        "- All programs are recognized by the Higher Education Commission (HEC) of Pakistan."
+      );
+    }
+
+    // Default graceful response
     return (
-      "Assalam-o-Alaikum! The Department of Software Engineering at UAJK (Chehla Campus, Muzaffarabad) offers PEC-accredited B.Sc. Software Engineering (60% min) and NTC-accredited SET & CET (50% min, Pre-Medical eligible).\n" +
-      "For specific inquiries, call our helpline at *+92-5822-960510* or email *se@uajk.edu.pk*."
+      "Assalam-o-Alaikum! The Department of Software Engineering at UAJK (Chehla Campus, Muzaffarabad) is here to guide you with all admissions inquiries.\n\n" +
+      "We offer PEC-accredited B.Sc. Software Engineering (60% min) and NTC-accredited SET & CET (50% min, Pre-Medical eligible).\n\n" +
+      "For specific inquiries or details not fully covered here, our admissions desk is glad to assist you directly! Please feel free to ask another question or contact our Department Helpline at *+92-5822-960510* or email *se@uajk.edu.pk*."
     );
   }
 }

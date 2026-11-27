@@ -81,7 +81,7 @@ export const incomingMessageWebhookSchema = z.object({
 }).strict();
 
 export const singleLeadOutreachSchema = z.object({
-  campaignId: z.coerce.number().int().positive().optional(),
+  campaignId: z.coerce.number().int().positive({ message: 'Campaign selection is required.' }),
   fullName: z.string().trim().min(2).max(150),
   phone: z.string().trim().min(7).max(30),
   city: z.string().trim().max(120).optional().default(''),
